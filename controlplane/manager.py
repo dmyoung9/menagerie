@@ -12,7 +12,7 @@ import socket
 import time
 import httpx
 import psutil
-from . import adapters, telemetry
+from . import adapters, telemetry, deployment_sets
 from .schema import Settings
 from .store import encode, identity, uid
 
@@ -51,6 +51,57 @@ class Manager:
         self.loop_task = None
         self.was_pressure = False
         self.verified_artifacts = {}
+        self.request_changed = asyncio.Event()
+
+    def unit(self, ident):
+        unit = deployment_sets.unit_for(self.store, ident)
+        if unit is None:
+            raise KeyError(f"Unknown deployment: {ident}")
+        return unit
+
+    def unit_busy(self, unit):
+        return any(self.inflight.get(i, 0) for i in unit["member_ids"])
+
+    async def wait_for_requests(self):
+        # Call only after releasing the admission lock: an in-flight model may
+        # need to call another member before its own request can finish.
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(self.request_changed.wait(), 1)
+
+    def automatic_stops(self, ids):
+        selected = deployment_sets.expand(self.store, ids)
+        priority = min(self.unit(i)["priority"] for i in selected)
+        deficits = {}
+        for gpu in self.host.get("gpus", []):
+            needed = sum(self.estimate(d)["reservation_mib"] for d in (self.store.get("deployment", i) for i in selected) if d["gpu"] == gpu["index"] and d["state"] not in ACTIVE)
+            deficits[gpu["index"]] = max(0, needed - max(0, gpu["free_mib"] - self.settings()["gpu_headroom_mib"]))
+        candidates = [u for u in deployment_sets.units(self.store) if not set(u["member_ids"]) & set(selected) and u["residency"] != "pinned" and u["allow_eviction"] and u["priority"] <= priority and any(d["state"] in ACTIVE for d in u["members"])]
+        candidates.sort(key=lambda u: (self.unit_busy(u), u["priority"], self.unit_last_use(u)))
+        stops = []
+        for unit in candidates:
+            freed = {}
+            for d in unit["members"]:
+                if d["state"] in ACTIVE:
+                    measured = self.host.get("deployments", {}).get(d["id"], {}).get("gpu_mib")
+                    freed[d["gpu"]] = freed.get(d["gpu"], 0) + (measured if measured is not None else d.get("reservation_active") or self.estimate(d)["reservation_mib"])
+            if any(deficits.get(gpu, 0) > 0 and amount > 0 for gpu, amount in freed.items()):
+                stops.extend(unit["member_ids"])
+                for gpu, amount in freed.items():
+                    deficits[gpu] = max(0, deficits.get(gpu, 0) - amount)
+        return stops
+
+    def plan(self, ids):
+        return self.validate(ids, self.automatic_stops(ids))
+
+    def unit_last_use(self, unit):
+        return max(self.last_use.setdefault(i, time.monotonic()) for i in unit["member_ids"])
+
+    async def _stop_unit_locked(self, ident, reason):
+        unit = self.unit(ident)
+        if self.unit_busy(unit):
+            raise Conflict("Deployment has active requests; let them finish before unloading")
+        for i in reversed(unit["member_ids"]):
+            await self._stop(i, reason)
 
     def settings(self):
         try:
@@ -92,7 +143,8 @@ class Manager:
         for d in self.store.list("deployment"):
             if d["state"] in ACTIVE | {"VALIDATING"}:
                 if self.owned(d) and d["state"] in {"READY", "DEGRADED"}:
-                    self.transition(d["id"], "DEGRADED", "Reconciled owned process; checking readiness")
+                    ready = await self.ready(d)
+                    self.transition(d["id"], "READY" if ready else "DEGRADED", None if ready else "Reconciled process is not ready")
                 else:
                     runtime = self.store.get("runtime", d["profile_snapshot"]["runtime_id"])
                     if self.owned(d) or runtime["execution_kind"] != "native":
@@ -101,7 +153,7 @@ class Manager:
                     self.finish_session(d, "interrupted")
         self.store.event("daemon", {"state": "ready"})
         self.loop_task = asyncio.create_task(self.monitor())
-        resume = [d["id"] for d in self.store.list("deployment") if d.get("resume_on_boot") and d["residency"] == "pinned" and d["state"] not in ACTIVE]
+        resume = [i for unit in deployment_sets.units(self.store) if unit["residency"] == "pinned" and any(d.get("resume_on_boot") for d in unit["members"]) and any(d["state"] not in ACTIVE for d in unit["members"]) for i in unit["member_ids"]]
         if resume:
             async def restore_pinned():
                 try:
@@ -154,18 +206,20 @@ class Manager:
         return {"idle_mib": round(idle), "peak_mib": round(peak), "confidence": "medium" if measured else "low", "provenance": "previous process measurements + 15% + 256 MiB; workload-dependent" if measured else "GGUF file + generic KV + runtime overhead; hybrid architectures/offload uncertain", "reservation_mib": d["reservation_mib"] or round(peak), "physical_limit": False}
 
     def validate(self, ids, authorized_stops=None):
-        authorized_stops = authorized_stops or []
+        duplicates = len(set(ids)) != len(ids)
+        ids = deployment_sets.expand(self.store, ids)
+        authorized_stops = deployment_sets.expand(self.store, authorized_stops or [])
         errors, warnings, estimates = [], [], {}
         all_d = self.store.list("deployment")
         selected = [self.store.get("deployment", i) for i in ids]
-        if len(set(ids)) != len(ids):
-            errors.append("Duplicate deployments in group")
+        if duplicates:
+            errors.append("Duplicate models in deployment")
         if set(ids) & set(authorized_stops):
             errors.append("A deployment cannot be started and stopped in the same plan")
         for i in authorized_stops:
             self.store.get("deployment", i)
             if self.inflight.get(i, 0):
-                errors.append(f"{i} has active requests")
+                warnings.append(f"{self.store.get('deployment', i)['name']}: waiting for active requests to finish")
         aliases = [d["alias"] for d in all_d]
         ports = [d["port"] for d in all_d]
         for d in selected:
@@ -216,60 +270,82 @@ class Manager:
             errors.append("Selected NVIDIA GPU has no telemetry")
         if self.host.get("ram_available_mib", 0) < settings["ram_headroom_mib"]:
             errors.append("Host below RAM headroom gate")
-        plan = {"deployments": [{"id": d["id"], "profile": identity(d["profile_snapshot"]), "revision": d["revision"]} for d in selected], "authorized_stops": authorized_stops}
+        plan = {"deployments": [{"id": d["id"], "profile": identity(d["profile_snapshot"]), "revision": d["revision"]} for d in selected], "authorized_stops": [{"id": i, "revision": self.store.get("deployment", i)["revision"]} for i in authorized_stops], "units": [{"id": u["id"], "revision": u["revision"]} for u in deployment_sets.units(self.store) if set(u["member_ids"]) & set(ids + authorized_stops)]}
         return {"errors": errors, "warnings": warnings, "estimates": estimates, "stops": authorized_stops, "plan_token": identity(plan), "impact": "Stops lose KV caches. Failed replacement launches attempt to restore stopped deployments."}
 
-    async def activate(self, ids, override=False, authorized_stops=None, token=None, group_id=None):
-        async with self.lock:
-            if self.stopping:
-                raise Conflict("Daemon is shutting down")
-            check = self.validate(ids, authorized_stops)
-            if token and token != check["plan_token"]:
-                raise Conflict("Launch plan changed; validate again")
-            if check["errors"]:
-                raise Conflict("; ".join(check["errors"]))
-            if check["warnings"] and not override and not all(self.store.get("deployment", i)["allow_uncertain"] for i in ids):
-                raise Conflict("Uncertain memory estimates require explicit override")
-            stopped, started = [], []
-            activation = self.store.put("activation", {"id": uid(), "group_id": group_id, "started_at": time.time(), "deployments": [self.store.get("deployment", i) for i in ids], "authorized_stops": authorized_stops or [], "plan": check, "state": "STARTING"})
-            try:
-                for i in authorized_stops or []:
-                    d = self.store.get("deployment", i)
+    async def activate(self, ids, override=False, authorized_stops=None, token=None):
+        if not ids or len(set(ids)) != len(ids):
+            raise Conflict("Select distinct models or deployments to load")
+        timeout = max(self.unit(i)["queue_timeout"] for i in ids)
+        try:
+            async with asyncio.timeout(timeout):
+                while True:
+                    async with self.lock:
+                        expanded = deployment_sets.expand(self.store, ids)
+                        stops = self.automatic_stops(expanded) if authorized_stops is None else deployment_sets.expand(self.store, authorized_stops)
+                        if not any(self.inflight.get(i, 0) for i in stops):
+                            return await self._activate_locked(expanded, override, stops, token)
+                        self.request_changed.clear()
+                    await self.wait_for_requests()
+        except TimeoutError as exc:
+            raise Conflict("Timed out waiting for deployment capacity or active requests") from exc
+
+    async def _activate_locked(self, ids, override=False, authorized_stops=None, token=None):
+        # Every caller owns self.lock, including request admission. No request
+        # can slip between selecting victims and reserving its member slot.
+        if self.stopping:
+            raise Conflict("Daemon is shutting down")
+        check = self.validate(ids, authorized_stops)
+        if token and token != check["plan_token"]:
+            raise Conflict("Launch plan changed; validate again")
+        if check["errors"]:
+            raise Conflict("; ".join(check["errors"]))
+        if any(self.inflight.get(i, 0) for i in authorized_stops or []):
+            raise Conflict("Deployment has active requests")
+        if check["warnings"] and not override and not all(self.store.get("deployment", i)["allow_uncertain"] for i in ids):
+            raise Conflict("Uncertain memory estimates require explicit override")
+        stopped, started = [], []
+        unit = self.unit(ids[0])
+        activation = self.store.put("activation", {"id": uid(), "deployment_id": unit["id"], "deployment_name": unit["name"], "deployment_policy": {k: unit[k] for k in deployment_sets.POLICY_KEYS}, "started_at": time.time(), "deployments": [self.store.get("deployment", i) for i in ids], "authorized_stops": authorized_stops or [], "plan": check, "state": "STARTING"})
+        try:
+            for i in authorized_stops or []:
+                d = self.store.get("deployment", i)
+                if d["state"] in ACTIVE:
+                    stopped.append(i)
+                    await self._stop(i, "Authorized deployment switch")
+            # All reservations are committed before any launch side effect.
+            with self.store.transaction() as c:
+                for i in ids:
+                    d = self.store.get("deployment", i, c)
+                    if d["state"] == "READY":
+                        continue
                     if d["state"] in ACTIVE:
-                        await self._stop(i, "Authorized group transition")
-                        stopped.append(i)
-                # All reservations are committed before any launch side effect.
-                with self.store.transaction() as c:
-                    for i in ids:
-                        d = self.store.get("deployment", i, c)
-                        if d["state"] == "READY":
-                            continue
-                        if d["state"] in ACTIVE:
-                            raise Conflict(f"{d['alias']} is already transitioning")
-                        self.store.event("state", {"from": d["state"], "to": "VALIDATING"}, i, c)
-                        d.update(state="QUEUED", reservation_active=check["estimates"][i]["reservation_mib"], failure_reason=None)
-                        self.store.put("deployment", d, historical=False, c=c)
-                        self.store.event("state", {"from": "VALIDATING", "to": "QUEUED", "reservation_mib": d["reservation_active"]}, i, c)
-                        started.append(i)
-                for i in started:
-                    await self._start(i, activation["id"])
-            except BaseException as exc:
-                self.store.put("activation", activation | {"state": "FAILED", "error": redact(str(exc)), "ended_at": time.time()}, historical=False)
-                for i in reversed(started):
-                    await self._stop(i, "Launch rollback", force=True)
+                        raise Conflict(f"{d['alias']} is already transitioning")
+                    self.store.event("state", {"from": d["state"], "to": "VALIDATING"}, i, c)
+                    d.update(state="QUEUED", reservation_active=check["estimates"][i]["reservation_mib"], failure_reason=None)
+                    self.store.put("deployment", d, historical=False, c=c)
+                    self.store.event("state", {"from": "VALIDATING", "to": "QUEUED", "reservation_mib": d["reservation_active"]}, i, c)
+                    started.append(i)
+            for i in started:
+                await self._start(i, activation["id"])
+        except BaseException as exc:
+            self.store.put("activation", activation | {"state": "FAILED", "error": redact(str(exc)), "ended_at": time.time()}, historical=False)
+            for i in reversed(started):
+                await self._stop(i, "Launch rollback", force=True)
+                self.transition(i, "VALIDATING")
+                self.transition(i, "FAILED", redact(str(exc)))
+            for i in stopped:
+                try:
+                    await self._stop(i, "Restoration cleanup", force=True)
                     self.transition(i, "VALIDATING")
-                    self.transition(i, "FAILED", redact(str(exc)))
-                for i in stopped:
-                    try:
-                        self.transition(i, "VALIDATING")
-                        self.transition(i, "QUEUED", reservation_active=self.estimate(self.store.get("deployment", i))["reservation_mib"])
-                        await self._start(i)
-                    except Exception as restore_error:
-                        await self._stop(i, "Restoration failed", force=True)
-                        self.store.event("recovery_required", {"error": redact(str(restore_error))}, i)
-                raise
-            self.store.put("activation", activation | {"state": "SUCCEEDED", "ended_at": time.time()}, historical=False)
-            return {"started": started, "stopped": stopped}
+                    self.transition(i, "QUEUED", reservation_active=self.estimate(self.store.get("deployment", i))["reservation_mib"])
+                    await self._start(i)
+                except Exception as restore_error:
+                    await self._stop(i, "Restoration failed", force=True)
+                    self.store.event("recovery_required", {"error": redact(str(restore_error))}, i)
+            raise
+        self.store.put("activation", activation | {"state": "SUCCEEDED", "ended_at": time.time()}, historical=False)
+        return {"started": started, "stopped": stopped}
 
     async def _start(self, ident, activation_id=None):
         d = self.store.get("deployment", ident)
@@ -397,8 +473,16 @@ class Manager:
             self.store.put("session", session, historical=False)
 
     async def stop(self, ident):
-        async with self.lock:
-            await self._stop(ident, "Manual stop")
+        try:
+            async with asyncio.timeout(self.unit(ident)["queue_timeout"]):
+                while True:
+                    async with self.lock:
+                        if not self.unit_busy(self.unit(ident)):
+                            return await self._stop_unit_locked(ident, "Manual stop")
+                        self.request_changed.clear()
+                    await self.wait_for_requests()
+        except TimeoutError as exc:
+            raise Conflict("Timed out waiting for active requests to finish") from exc
 
     async def acquire(self, alias):
         if self.waiting >= self.settings()["max_queue"]:
@@ -409,27 +493,41 @@ class Manager:
         self.waiting += 1
         try:
             async with asyncio.timeout(d["queue_timeout"]):
-                if d["state"] != "READY":
-                    if d["residency"] != "on-demand":
-                        raise Conflict("Deployment is not ready")
-                    # Only explicitly evictable, idle, lower-priority deployments qualify.
-                    victims = []
-                    if self.estimate(d)["reservation_mib"] > sum(g["free_mib"] for g in self.host.get("gpus", [])) - self.settings()["gpu_headroom_mib"]:
-                        victims = [v["id"] for v in sorted(self.store.list("deployment"), key=lambda x: (x["priority"], self.last_use.get(x["id"], 0))) if v["id"] != d["id"] and v["gpu"] == d["gpu"] and v["state"] == "READY" and v["residency"] != "pinned" and v["allow_eviction"] and v["priority"] <= d["priority"] and not self.inflight.get(v["id"], 0)]
-                    await self.activate([d["id"]], authorized_stops=victims)
-                async with self.lock:
-                    d = self.store.get("deployment", d["id"])
-                    if d["state"] != "READY":
-                        raise Conflict("Deployment lost readiness")
-                    self.inflight[d["id"]] = self.inflight.get(d["id"], 0) + 1
-                    self.last_use[d["id"]] = time.monotonic()
-                    return d
+                while True:
+                    async with self.lock:
+                        unit = self.unit(d["id"])
+                        d = self.store.get("deployment", d["id"])
+                        if not unit["enabled"] or not d["enabled"]:
+                            raise KeyError("Unknown or disabled model alias")
+                        if not all(m["state"] == "READY" for m in unit["members"]):
+                            if unit["residency"] != "on-demand":
+                                raise Conflict("Deployment is not ready")
+                            victims = self.automatic_stops(unit["member_ids"])
+                            if any(self.inflight.get(i, 0) for i in victims):
+                                self.request_changed.clear()
+                            else:
+                                await self._activate_locked(unit["member_ids"], authorized_stops=victims)
+                                unit = self.unit(d["id"])
+                        if all(m["state"] == "READY" for m in unit["members"]):
+                            d = self.store.get("deployment", d["id"])
+                            self.inflight[d["id"]] = self.inflight.get(d["id"], 0) + 1
+                            self.last_use[d["id"]] = time.monotonic()
+                            return d
+                    await self.wait_for_requests()
         finally:
             self.waiting -= 1
 
     def release(self, d):
         self.inflight[d["id"]] = max(0, self.inflight.get(d["id"], 1) - 1)
         self.last_use[d["id"]] = time.monotonic()
+        self.request_changed.set()
+
+    async def unload_idle(self):
+        # Caller owns the admission lock. One timer and one busy check per unit.
+        now = time.monotonic()
+        for unit in deployment_sets.units(self.store):
+            if unit["residency"] == "on-demand" and unit["idle_timeout"] and now - self.unit_last_use(unit) > unit["idle_timeout"] and not self.unit_busy(unit) and any(d["state"] in {"READY", "DEGRADED"} for d in unit["members"]):
+                await self._stop_unit_locked(unit["id"], "Idle unload")
 
     async def monitor(self):
         last_cleanup = 0
@@ -451,6 +549,9 @@ class Manager:
                             self.store.put("session", session, historical=False)
                     if d["state"] in {"READY", "DEGRADED"} and not self.lock.locked():
                         async with self.lock:
+                            d = self.store.get("deployment", d["id"])
+                            if d["state"] not in {"READY", "DEGRADED"}:
+                                continue
                             if not self.owned(d):
                                 self.transition(d["id"], "FAILED", "Runtime process exited", reservation_active=0, pid=None)
                                 self.finish_session(d, "failed", "Runtime exited")
@@ -458,9 +559,6 @@ class Manager:
                             ready = await self.ready(d)
                             if ready != (d["state"] == "READY"):
                                 self.transition(d["id"], "READY" if ready else "DEGRADED", None if ready else "Readiness check failed")
-                            idle = time.monotonic() - self.last_use.setdefault(d["id"], time.monotonic())
-                            if d["residency"] == "on-demand" and d["idle_timeout"] and idle > d["idle_timeout"] and not self.inflight.get(d["id"], 0):
-                                await self._stop(d["id"], "Idle unload")
                     if d["state"] == "READY":
                         try:
                             response = await self.client.get(f"http://127.0.0.1:{d['port']}/metrics", timeout=2)
@@ -477,6 +575,9 @@ class Manager:
                                 self.host.setdefault("runtime_metrics", {})[d["id"]] = values
                         except httpx.HTTPError:
                             pass
+                if not self.lock.locked():
+                    async with self.lock:
+                        await self.unload_idle()
                 # Admission is not physical isolation: alert on pressure, never silently evict pinned models.
                 settings = self.settings()
                 pressure = any(g["free_mib"] < settings["gpu_headroom_mib"] or (g["temperature"] or 0) > settings["temperature_limit"] for g in self.host["gpus"]) or self.host["ram_available_mib"] < settings["ram_headroom_mib"]
@@ -486,10 +587,10 @@ class Manager:
                     self.was_pressure = pressure
                 if pressure and not self.lock.locked():
                     async with self.lock:
-                        candidates = [d for d in self.store.list("deployment") if d["state"] in {"READY", "DEGRADED"} and d["residency"] == "evictable" and d["allow_eviction"] and not self.inflight.get(d["id"], 0)]
+                        candidates = [u for u in deployment_sets.units(self.store) if any(d["state"] in {"READY", "DEGRADED"} for d in u["members"]) and u["residency"] == "evictable" and u["allow_eviction"] and not self.unit_busy(u)]
                         if candidates:
-                            victim = min(candidates, key=lambda d: (d["priority"], self.last_use.get(d["id"], 0)))
-                            await self._stop(victim["id"], "Authorized pressure eviction")
+                            victim = min(candidates, key=lambda u: (u["priority"], self.unit_last_use(u)))
+                            await self._stop_unit_locked(victim["id"], "Authorized pressure eviction")
                 with self.store.connect() as c:
                     c.execute("INSERT INTO samples VALUES(?,?)", (self.host["ts"], encode(self.host)))
                     if time.time() - last_cleanup > 60:

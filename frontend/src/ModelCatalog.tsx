@@ -16,9 +16,7 @@ export function ModelCatalog({api,queued}:Props){
     catch(e){setError(String(e))}finally{setBusy(false)}
   }
   return <section className="panel model-catalog" aria-label="Model catalog">
-    <h2>Browse model catalogs</h2>
     <div className="toolbar"><button disabled={busy} className={source==='hf'?'primary':''} onClick={()=>switchSource('hf')}>Hugging Face</button><button disabled={busy} className={source==='ollama'?'primary':''} onClick={()=>switchSource('ollama')}>Ollama library</button><button disabled={busy} onClick={async()=>{setBusy(true);setError('');try{setLocal(await api('/api/catalog/ollama'))}catch(e){setError(String(e))}finally{setBusy(false)}}}>Locally installed Ollama models</button></div>
-    <p>Find a model, choose its variant, and download. Browsing does not load or deploy models.</p>
     <form className="toolbar" onSubmit={e=>{e.preventDefault();void search()}}><input aria-label="Catalog search" value={query} onChange={e=>setQuery(e.target.value)} placeholder={source==='hf'?'Model name or organization':'e.g. qwen, llama3.2'}/><button className="primary" disabled={busy} type="submit">{busy?'Searching…':'Search catalog'}</button></form>
     {error&&<p role="alert" className="error-text">{error}</p>}
     {searched&&!rows.length&&<p>No matching models found.</p>}

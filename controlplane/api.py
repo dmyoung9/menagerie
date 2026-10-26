@@ -5,25 +5,25 @@ import os
 from pathlib import Path
 import secrets
 import time
-import sqlite3
 from urllib.parse import urlsplit
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from . import adapters, importer, lifecycle
+from . import adapters, lifecycle, deployment_sets
 from .jobs import Jobs
 from .manager import Manager, Conflict, ACTIVE, redact
-from .schema import Artifact, Runtime, Profile, Deployment, Group, Settings
+from .schema import Artifact, Runtime, Profile, Deployment, DeploymentSet, Settings
 from .store import Store, encode, identity, uid
 from .catalog import normalize, export_config
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def create_app(state=None, dashboard_address=None):
+def create_app(state=None, dashboard_address=None, gateway_port=8001):
     store = Store(state or os.environ.get("MENAGERIE_STATE", str(Path.home() / ".local/state/menagerie")))
     manager = Manager(store)
+    gateway_url = f"http://127.0.0.1:{gateway_port}/v1"
     jobs = Jobs(manager)
     csrf = secrets.token_urlsafe(32)
     @asynccontextmanager
@@ -39,8 +39,38 @@ def create_app(state=None, dashboard_address=None):
     app.state.manager, app.state.store = manager, store
 
     def deployment_rows():
-        settings, groups = manager.settings(), store.list("group")
-        return [d | {"lifecycle": lifecycle.describe(d, groups, settings)} for d in store.list("deployment")]
+        settings = manager.settings()
+        result = []
+        for unit in deployment_sets.units(store):
+            for d in unit["members"]:
+                published = lifecycle.visible(d | {"state": deployment_sets.state(unit)}, settings)
+                result.append(d | {"unit_id": unit["id"], "unit_name": unit["name"], "lifecycle": lifecycle.describe(d, settings) | {"serving": published}})
+        return result
+
+    def serving_rows():
+        return [deployment_sets.describe(u, manager.settings(), manager.inflight) for u in deployment_sets.units(store)]
+
+    def save_set(data, expected=None, c=None):
+        # Caller owns the admission lock and the registry transaction.
+        previous = next((u for u in store.list("deployment_set", c) if u["id"] == data.get("id")), None)
+        if previous:
+            data = previous | data
+        ident = data.setdefault("id", uid())
+        if any(d["id"] == ident for d in store.list("deployment", c)):
+            raise Conflict("Deployment ID is already used by a model member")
+        affected = set(data["member_ids"]) | set(previous["member_ids"] if previous else [])
+        members = [store.get("deployment", i, c) for i in affected]
+        if any(d["state"] in ACTIVE or manager.inflight.get(d["id"], 0) for d in members):
+            raise Conflict("Unload all affected models before changing deployment membership or policy")
+        for other in store.list("deployment_set", c):
+            if other["id"] != ident and set(other["member_ids"]) & set(data["member_ids"]):
+                raise Conflict("A model can belong to only one deployment")
+        saved = store.put("deployment_set", data, expected, c=c)
+        for i in data["member_ids"]:
+            d = store.get("deployment", i, c)
+            store.put("deployment", d | {k: saved[k] for k in deployment_sets.POLICY_KEYS}, c=c)
+        store.event("deployment_configuration", {"name": saved["name"], "members": saved["member_ids"]}, ident, c)
+        return saved
 
     @app.exception_handler(KeyError)
     async def missing(request, exc):
@@ -90,19 +120,21 @@ def create_app(state=None, dashboard_address=None):
     async def status():
         return {"version": "2.0.0", "csrf_token": csrf, "host": manager.host,
                 "deployments": [d | {"inflight": manager.inflight.get(d["id"], 0)} for d in deployment_rows()],
-                "queue": manager.waiting, "settings": manager.settings(), "gateway": "/v1", "state_path": str(store.root)}
+                "serving_deployments": serving_rows(), "queue": manager.waiting, "settings": manager.settings(), "gateway": "/v1", "gateway_url": gateway_url, "state_path": str(store.root)}
 
     @app.get("/health")
     async def health():
         return {"ok": True, "service": "menagerie", "active": [d["id"] for d in store.list("deployment") if d["state"] == "READY"], "inflight": manager.inflight}
 
-    kinds = {"models": "artifact", "runtimes": "runtime", "profiles": "profile", "deployments": "deployment", "groups": "group", "jobs": "job"}
+    kinds = {"models": "artifact", "runtimes": "runtime", "profiles": "profile", "deployments": "deployment", "jobs": "job", "deployment_sets": "deployment_set"}
     @app.get("/api/registry/{kind}")
     async def registry(kind: str):
         if kind not in kinds:
             raise HTTPException(404)
         if kind == "deployments":
             return deployment_rows()
+        if kind == "runtimes":
+            return [r | {"capabilities": r.get("capabilities", {}) | {"schema": adapters.option_schema(r)}} for r in store.list("runtime")]
         return store.list(kinds[kind])
 
     @app.get("/api/models")
@@ -112,6 +144,87 @@ def create_app(state=None, dashboard_address=None):
     @app.get("/api/deployments")
     async def deployments():
         return deployment_rows()
+
+    @app.get("/api/serving-deployments")
+    async def serving_deployments():
+        return serving_rows()
+
+    @app.post("/api/deployment-sets")
+    async def save_deployment_set(body: DeploymentSet, expected: int | None = None):
+        async with manager.lock:
+            with store.transaction() as c:
+                data = body.model_dump(exclude_none=True)
+                drafts = data.pop("members", None)
+                if drafts is not None:
+                    if data["member_ids"] or not drafts:
+                        raise ValueError("Provide one or more model configurations, not member IDs")
+                    previous = store.get("deployment_set", data["id"], c) if data.get("id") else None
+                    owned = set(previous["member_ids"] if previous else [])
+                    ids = [m["id"] for m in drafts if m.get("id")]
+                    if len(ids) != len(set(ids)) or any(i not in owned for i in ids):
+                        raise Conflict("Existing members must belong to this deployment; copy their configuration to reuse a model")
+                    affected = [store.get("deployment", i, c) for i in owned]
+                    if any(d["state"] in ACTIVE or manager.inflight.get(d["id"], 0) for d in affected):
+                        raise Conflict("Unload the deployment before editing its models")
+                    data["member_ids"] = []
+                    for draft in drafts:
+                        draft.update({k: data[k] for k in deployment_sets.POLICY_KEYS})
+                        member = save_member(draft, c=c, owner_id=data.get("id"))
+                        data["member_ids"].append(member["id"])
+                    for removed in owned - set(data["member_ids"]):
+                        d = store.get("deployment", removed, c)
+                        store.put("deployment", d | {"enabled": False}, c=c)
+                if not data["member_ids"]:
+                    raise ValueError("A deployment requires at least one model")
+                return save_set(data, expected, c)
+
+    @app.post("/api/serving-deployments/{ident}/validate")
+    async def validate_serving(ident: str):
+        return manager.plan([ident])
+
+    @app.post("/api/serving-deployments/{ident}/start")
+    async def start_serving(ident: str, request: Request):
+        body = await request.json()
+        if not body.get("plan_token"):
+            raise Conflict("Review the launch plan first")
+        unit = manager.unit(ident)
+        return jobs.submit("Load " + unit["name"], lambda job: manager.activate([ident], body.get("override", False), token=body["plan_token"]))
+
+    @app.post("/api/serving-deployments/{ident}/stop")
+    async def stop_serving(ident: str):
+        unit = manager.unit(ident)
+        return jobs.submit("Unload " + unit["name"], lambda job: manager.stop(ident))
+
+    @app.post("/api/serving-deployments/{ident}/enabled")
+    async def enable_serving(ident: str, request: Request):
+        enabled = (await request.json()).get("enabled")
+        if not isinstance(enabled, bool):
+            raise ValueError("enabled must be true or false")
+        async with manager.lock:
+            unit = manager.unit(ident)
+            if any(d["state"] in ACTIVE for d in unit["members"]) or manager.unit_busy(unit):
+                raise Conflict("Unload the deployment before changing client availability")
+            with store.transaction() as c:
+                if unit["multi_model"]:
+                    stored = store.get("deployment_set", unit["id"], c)
+                    store.put("deployment_set", stored | {"enabled": enabled}, c=c)
+                for i in unit["member_ids"]:
+                    store.put("deployment", store.get("deployment", i, c) | {"enabled": enabled}, c=c)
+                store.event("deployment", {"enabled": enabled, "name": unit["name"]}, unit["id"], c)
+            return deployment_sets.describe(manager.unit(ident), manager.settings(), manager.inflight)
+
+    @app.post("/api/deployment-sets/{ident}/dissolve")
+    async def dissolve_set(ident: str, expected: int):
+        async with manager.lock:
+            unit = manager.unit(ident)
+            if not unit["multi_model"] or unit["id"] != ident or unit["revision"] != expected:
+                raise Conflict("Deployment changed; refresh before separating models")
+            if manager.unit_busy(unit) or any(d["state"] in ACTIVE for d in unit["members"]):
+                raise Conflict("Unload the deployment before separating models")
+            with store.transaction() as c:
+                c.execute("DELETE FROM objects WHERE kind='deployment_set' AND id=?", (ident,))
+                store.event("deployment_separated", {"name": unit["name"], "members": unit["member_ids"]}, ident, c)
+            return {"member_ids": unit["member_ids"]}
 
     @app.post("/api/models/import")
     async def import_model(request: Request):
@@ -170,31 +283,57 @@ def create_app(state=None, dashboard_address=None):
 
     @app.post("/api/deployments")
     async def deployment(body: Deployment, expected: int | None = None):
-        data = body.model_dump(exclude_none=True)
         async with manager.lock:
-            all_d = store.list("deployment")
-            previous = next((d for d in all_d if d["id"] == data.get("id")), None)
-            if previous and previous["state"] in ACTIVE:
-                raise Conflict("Stop this deployment before changing its configuration")
-            if data["port"] in {8001, 8017}:
-                raise ValueError("Ports 8001 and 8017 are reserved for Menagerie")
-            if any(d["id"] != data.get("id") and (d["alias"] == data["alias"] or d["port"] == data["port"]) for d in all_d):
-                raise Conflict("Alias and port must be unique")
-            data.update(state="STOPPED", profile_snapshot=store.get("profile", data["profile_id"]), reservation_active=0)
-            catalog_id = normalize(data["profile_snapshot"], data["alias"])["catalog_id"]
-            if any(d["id"] != data.get("id") and normalize(d["profile_snapshot"], d["alias"])["catalog_id"] == catalog_id for d in all_d):
-                raise Conflict("Client catalog ID must be unique; clone the profile with a distinct catalog_id")
-            return store.put("deployment", data, expected)
+            with store.transaction() as c:
+                saved = save_member(body.model_dump(exclude_none=True), expected, c)
+                owner = deployment_sets.unit_for(store, saved["id"])
+                if owner and owner["multi_model"]:
+                    store.put("deployment_set", store.get("deployment_set", owner["id"], c), c=c)
+                return saved
 
-    @app.post("/api/groups")
-    async def group(body: Group, expected: int | None = None):
-        for ident in body.deployment_ids + body.authorized_stops:
-            store.get("deployment", ident)
-        return store.put("group", body.model_dump(exclude_none=True), expected)
+    def save_member(data, expected=None, c=None, owner_id=None):
+        all_d = store.list("deployment", c)
+        previous = next((d for d in all_d if d["id"] == data.get("id")), None)
+        owner = deployment_sets.unit_for(store, data["id"]) if data.get("id") else None
+        if owner and owner["multi_model"]:
+            if any(m["state"] in ACTIVE for m in owner["members"]):
+                raise Conflict("Unload the whole deployment before editing a model")
+            if owner["id"] != owner_id and any(data[k] != owner[k] for k in deployment_sets.POLICY_KEYS):
+                raise Conflict("Edit the deployment's shared policy instead of an individual model")
+        if previous and (previous["state"] in ACTIVE or manager.inflight.get(previous["id"], 0)):
+            raise Conflict("Stop this deployment before changing its configuration")
+        if data["port"] in {8001, 8017}:
+            raise ValueError("Ports 8001 and 8017 are reserved for Menagerie")
+        if any(d["id"] != data.get("id") and (d["alias"] == data["alias"] or d["port"] == data["port"]) for d in all_d):
+            raise Conflict("Alias and port must be unique")
+        configuration = data.pop("configuration", None)
+        if configuration is not None:
+            configuration.pop("id", None)
+            artifact = store.get("artifact", configuration["artifact_id"], c)
+            runtime = store.get("runtime", configuration["runtime_id"], c)
+            errors = adapters.validate_profile(configuration, artifact, runtime)
+            if errors:
+                raise ValueError("; ".join(errors))
+            configuration["name"] = data["name"]
+            configuration["catalog"] = normalize(configuration, data["alias"])
+        elif not data.get("profile_id"):
+            raise ValueError("Deployment configuration is required")
+        if configuration is not None:
+            # Private revision backing; never mutate another deployment's recipe.
+            if previous:
+                configuration["id"] = previous["profile_id"]
+                if any(d["id"] != previous["id"] and d["profile_id"] == configuration["id"] for d in all_d):
+                    configuration.pop("id")
+            snapshot = store.put("profile", configuration, c=c)
+            data["profile_id"] = snapshot["id"]
+        else:
+            snapshot = store.get("profile", data["profile_id"], c)
+        data.update(state="STOPPED", profile_snapshot=snapshot, reservation_active=0)
+        return store.put("deployment", data, expected, c=c)
 
     @app.post("/api/deployments/{ident}/validate")
     async def validate(ident: str):
-        return manager.validate([ident])
+        return manager.plan([ident])
 
     @app.post("/api/deployments/{ident}/start")
     async def start(ident: str, request: Request):
@@ -213,37 +352,14 @@ def create_app(state=None, dashboard_address=None):
             raise ValueError("enabled must be true or false")
         async with manager.lock:
             d = store.get("deployment", ident)
+            if manager.unit(ident)["multi_model"]:
+                raise Conflict("Change client availability on the whole deployment")
             if d["state"] in ACTIVE:
                 raise Conflict("Stop this deployment before changing whether it is deployed")
             if d["enabled"] != enabled:
                 store.put("deployment", d | {"enabled": enabled}, historical=False)
                 store.event("deployment", {"alias": d["alias"], "enabled": enabled}, ident)
             return store.get("deployment", ident)
-
-    @app.post("/api/groups/{ident}/validate")
-    async def validate_group(ident: str):
-        group = store.get("group", ident)
-        return manager.validate(group["deployment_ids"], group["authorized_stops"])
-
-    @app.post("/api/groups/{ident}/activate")
-    async def activate_group(ident: str, request: Request):
-        group = store.get("group", ident)
-        body = await request.json()
-        if not body.get("plan_token"):
-            raise ValueError("Validate and approve the group plan first")
-        return jobs.submit("Activate group", lambda job: manager.activate(group["deployment_ids"], body.get("override", False), group["authorized_stops"], body["plan_token"], group_id=ident))
-
-    @app.post("/api/groups/{ident}/stop")
-    async def stop_group(ident: str):
-        group = store.get("group", ident)
-        async def action(job):
-            async with manager.lock:
-                if any(manager.inflight.get(i, 0) for i in group["deployment_ids"]):
-                    raise Conflict("Group has active requests")
-                for i in reversed(group["deployment_ids"]):
-                    await manager._stop(i, "Manual group stop")
-            return {"stopped": group["deployment_ids"]}
-        return jobs.submit("Stop group", action)
 
     @app.get("/api/deployments/{ident}/logs")
     async def logs(ident: str):
@@ -298,7 +414,14 @@ def create_app(state=None, dashboard_address=None):
                 elif (kind == "runtime" and current.get("capabilities", {}).get("sha256") != saved.get("capabilities", {}).get("sha256")) or (kind == "artifact" and current.get("sha256") != saved.get("sha256")):
                     current = store.put(kind, saved | {"id": uid()}, c=c)
                 p[key] = current["id"]
-            return store.put("profile", p, c=c)
+            p = store.put("profile", p, c=c)
+            saved = session["deployment_snapshot"]
+            restored = {key: saved[key] for key in Deployment.model_fields if key in saved and key not in {"id", "configuration"}}
+            restored.update(id=uid(), name=saved["name"] + " (restored)", profile_id=p["id"], profile_snapshot=p,
+                            alias=saved["alias"][:140] + "-" + uid()[:8], enabled=False, state="STOPPED", reservation_active=0)
+            used_ports = {d["port"] for d in store.list("deployment", c)} | {8001, 8017}
+            restored["port"] = next(port for port in range(8120, 65536) if port not in used_ports)
+            return store.put("deployment", restored, c=c)
 
     @app.get("/api/history/activations")
     async def activations():
@@ -324,7 +447,9 @@ def create_app(state=None, dashboard_address=None):
                     d["port"] = next(port for port in range(8110, 65536) if port not in ports)
                     ports.add(d["port"])
                     deployments.append(store.put("deployment", d, c=c)["id"])
-                return store.put("group", {"id": uid(), "name": "Restored " + (saved.get("group_id") or ident[:8]), "deployment_ids": deployments, "authorized_stops": []}, c=c)
+                policy = saved.get("deployment_policy", {"residency": "pinned", "priority": 50, "idle_timeout": 0, "allow_eviction": False, "allow_uncertain": False, "queue_timeout": 300})
+                value = DeploymentSet(name="Restored " + (saved.get("deployment_name") or ident[:8]), member_ids=deployments, **(policy | {"enabled": False})).model_dump(exclude_none=True)
+                return save_set(value | {"restored_from_activation": ident}, c=c)
 
     @app.get("/api/history/metrics")
     async def metric_history(hours: int = 24):
@@ -351,28 +476,18 @@ def create_app(state=None, dashboard_address=None):
         with store.connect() as c:
             return [dict(r) | {"data": json.loads(r["data"])} for r in c.execute("SELECT * FROM requests ORDER BY ts DESC LIMIT 300")]
 
-    @app.get("/api/history/legacy")
-    async def legacy_history():
-        path = store.root / "history.sqlite3"
-        if not path.exists():
-            return {"artifacts": [], "note": "No legacy observatory archive at this state path"}
-        c = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
-        try:
-            artifacts = [{"name": r[0], "modified": r[1], "kind": r[2], "payload": json.loads(r[3])} for r in c.execute("SELECT name,modified,kind,payload FROM artifacts ORDER BY modified DESC LIMIT 100")]
-            return {"artifacts": artifacts, "note": "Historical observations retain original provenance; they are not deployment sessions"}
-        finally:
-            c.close()
-
     @app.post("/api/registry/{kind}/{ident}/delete")
     async def delete_record(kind: str, ident: str):
-        if kind not in {"models", "runtimes", "profiles", "deployments", "groups"}:
+        if kind not in {"models", "runtimes", "profiles", "deployments"}:
             raise HTTPException(404)
         async with manager.lock:
             row = store.get(kinds[kind], ident)
             deployments = store.list("deployment")
             if kind == "deployments":
-                if row["state"] in ACTIVE or any(ident in g["deployment_ids"] + g["authorized_stops"] for g in store.list("group")):
-                    raise Conflict("Stop deployment and remove group references first")
+                if manager.unit(ident)["multi_model"]:
+                    raise Conflict("Separate this model from its deployment before removing it")
+                if row["state"] in ACTIVE:
+                    raise Conflict("Unload the deployment first")
             if kind in {"models", "runtimes", "profiles"}:
                 key = {"models": "artifact_id", "runtimes": "runtime_id", "profiles": "id"}[kind]
                 if any(d["profile_snapshot"].get(key) == ident for d in deployments):
@@ -391,20 +506,6 @@ def create_app(state=None, dashboard_address=None):
     @app.post("/api/backup")
     async def backup():
         return {"path": str(await asyncio.to_thread(store.backup))}
-
-    @app.post("/api/import/shelf/preview")
-    async def shelf_preview(request: Request):
-        body = await request.json()
-        data = await importer.preview(body.get("path", str(Path.home() / "ai/qwen38-trials/shelf")))
-        return data | {"token": identity(data)}
-
-    @app.post("/api/import/shelf")
-    async def shelf_import(request: Request):
-        body = await request.json()
-        data = await importer.preview(body.get("path", str(Path.home() / "ai/qwen38-trials/shelf")))
-        if body.get("token") != identity(data):
-            raise Conflict("Import changed; preview it again")
-        return jobs.submit("Import shelf", lambda job: importer.apply(store, data))
 
     @app.get("/api/catalog/hf")
     async def hf_search(q: str):
@@ -492,26 +593,30 @@ def create_app(state=None, dashboard_address=None):
         rows = []
         settings = manager.settings()
         for d in store.list("deployment"):
-            if not lifecycle.visible(d, settings):
+            unit = manager.unit(d["id"])
+            if not lifecycle.visible(d | {"state": deployment_sets.state(unit)}, settings):
                 continue
-            rows.append({"id": d["alias"], "object": "model", "created": 0, "owned_by": "menagerie", "shelf": normalize(d["profile_snapshot"], d["alias"]), "menagerie": {"deployment_id": d["id"], "state": d["state"], "residency": d["residency"]}})
+            catalog = normalize(d["profile_snapshot"], d["alias"])
+            catalog["catalog_id"] = d["alias"]
+            catalog["model"]["name"] = d["name"]
+            rows.append({"id": d["alias"], "object": "model", "created": 0, "owned_by": "menagerie", "shelf": catalog, "menagerie": {"deployment_id": d["id"], "state": d["state"], "residency": d["residency"]}})
         return rows
 
     @app.post("/api/integration/opencode/export")
     async def export_opencode():
-        path = export_config(store.root, catalog_rows())
-        return {"path": str(path), "note": "Managed fragment only; unrelated client settings are never overwritten. Existing shelf-discovery clients read /v1/models automatically."}
+        path = export_config(store.root, catalog_rows(), gateway_url)
+        return {"path": str(path), "note": "Managed fragment only; unrelated client settings are never overwritten. Dynamic-discovery clients read /v1/models automatically."}
 
     @app.get("/v1/models")
     @app.get("/models")
     async def served_models():
         rows = catalog_rows()
-        export_config(store.root, rows)
+        export_config(store.root, rows, gateway_url)
         return {"object": "list", "data": rows}
 
     @app.get("/api/integration/opencode")
     async def opencode():
-        return {"catalog": catalog_rows(), "endpoint": "http://127.0.0.1:8001/v1", "discovery": "Existing shelf discovery protocol v2 is preserved in /v1/models. Metadata refresh depends on the installed client plugin.", "reload_note": "Generated config may require client reload; dynamic shelf discovery refreshes separately."}
+        return {"catalog": catalog_rows(), "endpoint": gateway_url, "discovery": "Capability metadata is included in /v1/models. Refresh behavior depends on the client.", "reload_note": "Generated config may require client reload; dynamic discovery refreshes separately."}
 
     @app.get("/metrics")
     async def metrics():
@@ -630,5 +735,5 @@ def create_app(state=None, dashboard_address=None):
             return FileResponse(dist / "favicon.svg", media_type="image/svg+xml")
         @app.get("/")
         async def index():
-            return FileResponse(dist / "index.html")
+            return FileResponse(dist / "index.html", headers={"Cache-Control": "no-store"})
     return app

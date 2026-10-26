@@ -1,0 +1,101 @@
+// Isolated frontend at :8038; all API traffic is intercepted. No live mutations.
+async page => {
+  await page.unroute('**/api/**');
+  const assert = (value, text) => {if (!value) throw new Error(text);};
+  const errors = [], writes = [];
+  page.on('pageerror', e => errors.push(String(e)));
+  page.on('console', e => {if(e.type()==='error'&&!e.text().startsWith('Failed to load resource:'))errors.push(e.text());});
+  const policy = {residency:'on-demand',priority:50,idle_timeout:300,allow_eviction:true,allow_uncertain:true,enabled:true,queue_timeout:300};
+  const profile = {id:'profile',name:'Model settings',revision:1,config:{'ctx-size':32768,parallel:1},catalog:{model:{limit:{context:32768}}},artifact_id:'weights',runtime_id:'engine',raw_args:[]};
+  const member = (id,name,state) => ({...policy,id,name,state,alias:id,port:8120,profile_id:'profile',profile_snapshot:profile,revision:1,reservation_mib:0,gpu:0,lifecycle:{serving:true}});
+  let members=[member('large','Bonsai 27B','READY')];
+  let sets=[];
+  const host={ts:1700000000,gpus:[{index:0,total_mib:16384,free_mib:5000,used_mib:11384}],ram_total_mib:32000,ram_available_mib:24000,deployments:{large:{gpu_mib:11000},qwen:{gpu_mib:4000},gemma:{gpu_mib:2000}}};
+  const serving=()=>{
+    const owned=new Set(sets.flatMap(s=>s.member_ids));
+    return [...sets.map(s=>{const rows=members.filter(m=>s.member_ids.includes(m.id));const ready=rows.every(m=>m.state==='READY');const degraded=rows.some(m=>m.state==='FAILED')&&rows.some(m=>m.state==='READY');return {...s,members:rows,multi_model:true,inflight:0,state:ready?'READY':degraded?'DEGRADED':'STOPPED',lifecycle:{serving:true,failure:degraded?'Gemma E4B: Engine exited':null}};}),...members.filter(m=>!owned.has(m.id)).map(m=>({...m,members:[m],member_ids:[m.id],multi_model:false,inflight:0}))];
+  };
+  await page.route('**/api/**', async route=>{
+    const req=route.request(),path=req.url().replace(/^https?:\/\/[^/]+/,'').split('?')[0],body=req.method()==='POST'?req.postDataJSON():null;
+    if(body)writes.push({path,body,url:req.url()});
+    const send=(value,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(value)});
+    if(path==='/api/status')return send({csrf_token:'fixture',host,settings:{gpu_headroom_mib:2048},deployments:members,serving_deployments:serving()});
+    if(path==='/api/integration/opencode')return send({endpoint:'http://127.0.0.1:8001/v1'});
+    if(path==='/api/events/stream')return route.fulfill({contentType:'text/event-stream',body:': ready\n\n'});
+    if(path==='/api/registry/deployments')return send(members);
+    if(path==='/api/registry/profiles')return send([profile]);
+    if(path==='/api/registry/models')return send([{id:'qwen-weights',name:'Qwen 9B',format:'gguf'},{id:'gemma-weights',name:'Gemma E4B',format:'gguf'}]);
+    if(path==='/api/registry/runtimes')return send([{id:'engine',name:'llama.cpp',engine:'llama.cpp',capabilities:{formats:['gguf'],schema:{}}}]);
+    if(path.startsWith('/api/registry/')||path.startsWith('/api/history/'))return send([]);
+    if(path==='/api/deployment-sets'){
+      assert(body.members.map(m=>m.configuration.artifact_id).join(',')==='qwen-weights,gemma-weights','New deployment must configure the selected installed models');
+      const ids=['qwen','gemma'];
+      members=[members[0],...body.members.map((m,i)=>({...member(ids[i],m.name,'STOPPED'),...m,id:ids[i],profile_snapshot:{...profile,...m.configuration}}))];
+      sets=[{...body,id:'pair',member_ids:ids,revision:1}];
+      return send(sets[0]);
+    }
+    if(path==='/api/serving-deployments/pair/validate')return send({errors:[],warnings:['Low-confidence estimate'],stops:['large'],estimates:{qwen:{reservation_mib:4096,confidence:'low'},gemma:{reservation_mib:2048,confidence:'low'}},plan_token:'pair-token'});
+    if(path==='/api/serving-deployments/pair/start'){
+      assert(body.plan_token==='pair-token'&&body.override,'Launch must approve the whole reviewed plan');
+      members=members.map(m=>({...m,state:m.id==='large'?'STOPPED':'READY'}));
+      return send({state:'QUEUED'});
+    }
+    if(path.startsWith('/api/deployments/')&&path.endsWith('/logs'))return send({text:path.includes('/gemma/')?'Gemma log':'Qwen log'});
+    return send({error:'Unexpected route '+path},500);
+  });
+  await page.setViewportSize({width:1440,height:1000});
+  await page.goto('http://127.0.0.1:8038/#/deployments');
+  await page.reload();
+  await page.getByRole('link',{name:'Bonsai 27B',exact:true}).waitFor();
+  await page.getByRole('button',{name:'New deployment',exact:true}).click();
+  await page.getByRole('button',{name:'Multiple models',exact:true}).click();
+  const dialog=page.getByRole('dialog');
+  await dialog.getByRole('textbox',{name:'Name',exact:true}).fill('Qwen + Gemma');
+  await dialog.getByRole('combobox',{name:'Add installed model',exact:true}).selectOption('qwen-weights');
+  await dialog.getByRole('button',{name:'Add model',exact:true}).click();
+  await dialog.getByRole('combobox',{name:'Add installed model',exact:true}).selectOption('gemma-weights');
+  await dialog.getByRole('button',{name:'Add model',exact:true}).click();
+  await dialog.getByLabel('Can unload to make room for another deployment',{exact:true}).check();
+  await dialog.getByLabel('Allow on-demand loading with uncertain memory estimates',{exact:true}).check();
+  await dialog.getByRole('button',{name:'Save deployment',exact:true}).click();
+  await page.getByRole('heading',{name:'Qwen + Gemma',exact:true}).waitFor();
+  assert(writes.length===1,'Creation unexpectedly loaded or stopped a model');
+  await page.getByRole('button',{name:'Edit model',exact:true}).first().click();
+  assert(await dialog.getByLabel('Mode',{exact:true}).count()===0,'Member editor exposes shared residency');
+  await dialog.getByLabel('API model',{exact:true}).waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('navigation').getByRole('link',{name:'Deployments',exact:true}).click();
+  assert(await page.getByRole('button',{name:'Groups',exact:true}).count()===0,'Groups should not be a separate deployment type');
+  assert(await page.getByRole('link',{name:'Convert groups',exact:true}).count()===0,'Group conversion must not be exposed');
+  await page.getByRole('button',{name:'Enabled (2)',exact:true}).waitFor();
+  assert(await page.getByRole('link',{name:'Qwen 9B',exact:true}).count()===0,'Grouped models leaked into top-level deployments');
+  await page.getByRole('button',{name:'Expand Qwen + Gemma',exact:true}).click();
+  await page.getByRole('link',{name:'Qwen 9B',exact:true}).waitFor();
+  await page.getByRole('link',{name:'Gemma E4B',exact:true}).waitFor();
+  const row=page.getByRole('row').filter({has:page.getByRole('link',{name:'Qwen + Gemma',exact:true})});
+  await row.getByRole('button',{name:'Load',exact:true}).click();
+  await dialog.getByRole('cell',{name:'Total',exact:true}).waitFor();
+  await dialog.getByRole('cell',{name:'6',exact:true}).waitFor();
+  await dialog.getByText('Bonsai 27B',{exact:true}).waitFor();
+  await dialog.getByRole('checkbox').check();
+  await dialog.getByRole('button',{name:'Load',exact:true}).click();
+  await dialog.waitFor({state:'hidden'});
+  await row.getByText('Ready',{exact:true}).waitFor();
+  await row.getByRole('cell',{name:'5.9',exact:true}).waitFor();
+  await page.getByRole('link',{name:'Qwen + Gemma',exact:true}).click();
+  await page.getByRole('button',{name:'Logs',exact:true}).first().click();
+  await page.getByRole('combobox',{name:'Model',exact:true}).selectOption('gemma');
+  await page.getByText('Gemma log',{exact:true}).waitFor();
+  await page.getByRole('navigation').getByRole('link',{name:'Deployments',exact:true}).click();
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole('heading',{name:'Deployments',exact:true}).waitFor();
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Unified deployments overflow on mobile');
+  await page.screenshot({path:'/tmp/opencode/menagerie-multi-mobile.png',fullPage:true});
+  members=members.map(m=>m.id==='gemma'?{...m,state:'FAILED'}:m);
+  await page.reload();
+  await page.getByText('Degraded',{exact:true}).waitFor();
+  assert(!errors.length,errors.join('\n'));
+  assert(writes.filter(w=>!w.path.endsWith('/validate')).length===2,'Unexpected model-level mutation');
+  return {result:'passed',checks:['direct creation','shared policy','member-only configuration','unified list','expandable members','combined admission review','whole-unit launch','aggregate memory','member logs','mobile layout','degraded state'],writesIntercepted:writes.length};
+}

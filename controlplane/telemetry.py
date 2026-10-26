@@ -12,7 +12,7 @@ _cpu_previous = {}
 def sample():
     mem, swap = psutil.virtual_memory(), psutil.swap_memory()
     disk = psutil.disk_usage(Path.home())
-    result = {"ts": time.time(), "cpu_percent": psutil.cpu_percent(), "ram_total_mib": mem.total / 1048576,
+    result = {"ts": time.time(), "cpu_count": len(psutil.Process().cpu_affinity()) if hasattr(psutil.Process(), "cpu_affinity") else psutil.cpu_count(), "cpu_percent": psutil.cpu_percent(), "ram_total_mib": mem.total / 1048576,
               "ram_available_mib": mem.available / 1048576, "swap_used_mib": swap.used / 1048576,
               "load_average": list(os.getloadavg()), "disk_free_gib": disk.free / 1024**3, "disk_total_gib": disk.total / 1024**3,
               "gpus": [], "processes": [], "errors": []}

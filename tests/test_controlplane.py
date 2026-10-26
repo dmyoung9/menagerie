@@ -305,7 +305,7 @@ async def test_lifecycle_separates_deployed_serving_and_running(tmp_path):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
         client.headers["X-Menagerie-Token"] = (await client.get("/api/status")).json()["csrf_token"]
         rows = {d["id"]: d for d in (await client.get("/api/registry/deployments")).json()}
-        assert rows["a"]["lifecycle"] == {"deployed": True, "serving": False, "runtime": "held", "groups": ["pair"], "failure": None, "last_stop_reason": None}
+        assert rows["a"]["lifecycle"] == {"deployed": True, "serving": False, "runtime": "held", "failure": None, "last_stop_reason": None}
         assert rows["b"]["lifecycle"]["runtime"] == "idle" and rows["b"]["lifecycle"]["serving"]
         assert rows["c"]["lifecycle"]["runtime"] == "not-deployed" and not rows["c"]["lifecycle"]["serving"]
         assert [r["id"] for r in (await client.get("/v1/models")).json()["data"]] == ["b"]

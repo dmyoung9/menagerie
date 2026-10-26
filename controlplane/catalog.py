@@ -54,7 +54,7 @@ def normalize(profile, alias=None):
     return catalog
 
 
-def export_config(root, rows):
+def export_config(root, rows, gateway_url="http://127.0.0.1:8001/v1"):
     models = {}
     for row in rows:
         catalog = row["shelf"]
@@ -62,7 +62,7 @@ def export_config(root, rows):
         model["modelID"] = row["id"]
         model["disabled"] = not model.pop("enabled", True)
         models[catalog["catalog_id"]] = model
-    config = {"$schema": "https://opencode.ai/config.json", "providers": {"llama.cpp": {"name": "Menagerie", "package": "@opencode/ai/providers/openai-compatible", "settings": {"baseURL": "http://127.0.0.1:8001/v1"}, "models": models}}}
+    config = {"$schema": "https://opencode.ai/config.json", "providers": {"llama.cpp": {"name": "Menagerie", "package": "@opencode/ai/providers/openai-compatible", "settings": {"baseURL": gateway_url}, "models": models}}}
     path = root / "opencode-managed.json"
     text = json.dumps(config, indent=2) + "\n"
     if path.exists() and path.read_text() == text:

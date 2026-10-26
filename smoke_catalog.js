@@ -2,7 +2,8 @@ async (page) => {
   const errors=[];
   page.on('pageerror',e=>errors.push(String(e)));
   await page.goto('http://127.0.0.1:8017/');
-  await page.locator('nav').getByRole('button',{name:'Models',exact:true}).click();
+  await page.locator('nav').getByRole('link',{name:'Models',exact:true}).click();
+  await page.getByRole('button',{name:'Discover',exact:true}).click();
   const catalog=page.getByRole('region',{name:'Model catalog',exact:true});
   const dialog=page.getByRole('dialog');
 
@@ -74,7 +75,8 @@ async (page) => {
   // Mobile: the modal fits the viewport and does not create page overflow.
   await page.setViewportSize({width:390,height:844});
   await page.reload();
-  await page.locator('nav').getByRole('button',{name:'Models',exact:true}).click();
+  await page.locator('nav').getByRole('link',{name:'Models',exact:true}).click();
+  await page.getByRole('button',{name:'Discover',exact:true}).click();
   await catalog.getByLabel('Catalog search').fill('ggml-org/gemma-3-270m-qat-GGUF');
   await catalog.getByRole('button',{name:'Search catalog',exact:true}).click();
   await catalog.locator('.catalog-card').filter({hasText:'ggml-org/gemma-3-270m-qat-GGUF'}).getByRole('button',{name:'Choose variant'}).click();

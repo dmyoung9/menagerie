@@ -8,7 +8,7 @@ from .api import create_app
 
 async def serve(args):
     os.umask(0o077)
-    app = create_app(args.state, dashboard_address=args.dashboard_address)
+    app = create_app(args.state, dashboard_address=args.dashboard_address, gateway_port=args.gateway_port)
     sockets = []
     # Keep existing local listeners; optionally add a dashboard-only LAN socket.
     listeners = [("127.0.0.1", port) for port in dict.fromkeys((args.port, args.gateway_port))]

@@ -1,9 +1,8 @@
 """Derived deployment lifecycle shared by the registry, dashboard and catalog.
 
-The registry keeps three independent facts: whether a deployment is enabled
-(part of the serving set), which process state it is in, and which groups
-reference it. Clients should not have to reconstruct the combination, so this
-module derives the same answers everywhere.
+The registry keeps independent facts about client availability and process state.
+Clients should not have to reconstruct their combination, so this module derives
+the same answers everywhere.
 """
 
 ACTIVE = {"QUEUED", "STARTING", "LOADING", "READY", "DEGRADED", "STOPPING"}
@@ -38,7 +37,7 @@ def runtime(deployment):
     return "idle" if deployment.get("residency") == "on-demand" else "held"
 
 
-def describe(deployment, groups, settings):
+def describe(deployment, settings):
     state = deployment.get("state")
     failed = state in {"FAILED", "ERROR"}
     reason = deployment.get("failure_reason")
@@ -46,7 +45,6 @@ def describe(deployment, groups, settings):
         "deployed": bool(deployment.get("enabled")),
         "serving": visible(deployment, settings),
         "runtime": runtime(deployment),
-        "groups": [g["id"] for g in groups if deployment["id"] in g.get("deployment_ids", [])],
         "failure": reason if failed else None,
         "last_stop_reason": None if failed else reason,
     }

@@ -52,26 +52,37 @@ class Profile(Record):
     catalog: dict = Field(default_factory=dict)
 
 
-class Deployment(Record):
-    name: str
-    profile_id: str
-    alias: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,159}$")
-    port: int = Field(ge=1024, le=65535)
+class DeploymentPolicy(Record):
     residency: Literal["pinned", "on-demand", "evictable"] = "on-demand"
     priority: int = Field(default=50, ge=0, le=100)
     idle_timeout: int = Field(default=300, ge=0, le=86400)
-    reservation_mib: int = Field(default=0, ge=0)
     allow_eviction: bool = False
     allow_uncertain: bool = False
     enabled: bool = True
-    gpu: int = Field(default=0, ge=0, le=31)
     queue_timeout: int = Field(default=300, ge=1, le=1800)
 
 
-class Group(Record):
+class Deployment(DeploymentPolicy):
     name: str
-    deployment_ids: list[str]
-    authorized_stops: list[str] = Field(default_factory=list)
+    profile_id: str | None = None
+    configuration: Profile | None = None
+    alias: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,159}$")
+    port: int = Field(ge=1024, le=65535)
+    reservation_mib: int = Field(default=0, ge=0)
+    gpu: int = Field(default=0, ge=0, le=31)
+
+
+class DeploymentSet(DeploymentPolicy):
+    name: str
+    member_ids: list[str] = Field(default_factory=list)
+    members: list[Deployment] | None = None
+
+    @field_validator("member_ids")
+    @classmethod
+    def unique_members(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("A model can appear only once in a deployment")
+        return value
 
 
 class Settings(BaseModel):
