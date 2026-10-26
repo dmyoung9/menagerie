@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Menagerie · Local model observatory</title>
+  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/config.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#shelf"><span class="sigil">✳</span><span>menagerie<small>LOCAL MODEL OBSERVATORY</small></span></a>
+    <div class="nav-label">YOUR COLLECTION</div>
+    <nav aria-label="Main navigation">
+      <a href="#shelf" data-view="shelf"><span>◈</span> Model shelf</a>
+      <a href="#config" data-view="config"><span>⚙</span> Preset editor</a>
+      <a href="#gpu" data-view="gpu"><span>▥</span> GPU & history</a>
+      <a href="#estimator" data-view="estimator"><span>⌁</span> Configuration lab <em>ESTIMATE</em></a>
+      <a href="#results" data-view="results"><span>⊞</span> Evaluation archive</a>
+      <a href="#events" data-view="events"><span>≋</span> Event timeline</a>
+    </nav>
+    <div class="sidebar-bottom"><span class="dot"></span> Observe first. Change deliberately.<p>Viewing and drafting never load models.<br>Apply requires explicit confirmation.</p><code>127.0.0.1:8017</code></div>
+  </aside>
+  <main>
+    <header><div class="breadcrumb">WORKSPACE <span>/</span> LOCAL INFERENCE</div><div id="connection" role="status">Connecting…</div></header>
+    <div id="alert" class="alert" role="status" hidden></div>
+    <section id="shelf" class="view">
+      <div class="page-heading"><div><div class="eyebrow">THE COLLECTION</div><h1>Your models, in the wild.</h1><p>A quiet window into what’s running, what’s resting, and what it costs.</p></div><span class="badge">OBSERVATION</span></div>
+      <div id="overview" class="stats"></div>
+      <div class="section-heading"><h2>Model shelf <span id="model-count"></span></h2><span class="muted">Select a model to inspect its effective configuration</span></div>
+      <div id="models" class="model-grid"><p class="muted">Waiting for the first collection…</p></div>
+      <div class="section-heading"><h2>Headroom over time</h2><a href="#gpu">Explore history ↗</a></div>
+      <div class="panel"><div id="shelf-chart"></div><div class="chart-footer">Measured free VRAM · last 24 hours <span>Dashed line: 2,048 MiB guard floor</span></div></div>
+      <p class="footnote" id="build-note"></p>
+    </section>
+    <section id="config" class="view" hidden>
+      <div class="page-heading"><div><div class="eyebrow">DELIBERATE CHANGE</div><h1>Keep the keeper in control.</h1><p>Draft one model’s settings, review the exact diff, then choose whether to apply.</p></div><button id="reload-config" type="button">Reload from disk ↻</button></div>
+      <div id="config-error" class="alert" role="alert" hidden></div>
+      <div id="config-source-mode" class="callout" hidden></div>
+      <div class="two-col config-layout">
+        <form id="config-form" class="panel">
+          <h2>Preset editor <span class="unit">shelf.ini · per-model overrides</span></h2>
+          <label>Model section<select id="config-model" required></select></label>
+          <p id="config-revision" class="footnote"></p>
+          <p id="legacy-edit-hint" class="hint">Check only the settings you want to change. Unchecked fields, global defaults, comments and artifact paths are left alone.</p>
+          <div id="config-fields"></div>
+          <p id="editor-context-summary" class="hint"></p>
+          <button type="submit">Create review draft <span>↗</span></button>
+          <p class="hint">Drafting writes only Menagerie’s private history. It does not reload or wake the shelf.</p>
+        </form>
+        <div class="panel config-review" id="config-review"><div class="eyebrow">REVIEW BEFORE RESTART</div><h2>A diff, not a leap of faith.</h2><p class="muted">Your draft appears here. No live configuration has been changed.</p></div>
+      </div>
+      <div id="legacy-apply-note" class="callout"><strong>A small smoke test is not a context-window certification.</strong> Apply checks the effective preset and a short request, under the existing 2,048 MiB GPU / 4 GiB RAM / 85 °C safety limits. It does not validate near-limit retrieval or answer quality. The shelf must already be active with every model sleeping or unloaded. Pause all clients: Menagerie cannot prevent a new external request racing the maintenance window.</div>
+      <div class="section-heading"><h2>Configuration history</h2><span class="muted">Immutable snapshots · stale-file protection · recovery evidence</span></div>
+      <p id="legacy-client-note" class="footnote">OpenCode and other client catalogues are not edited. If you reduce the context pool or add slots, reconcile each client’s advertised per-slot context limit before resuming it.</p>
+      <div id="config-jobs"></div>
+    </section>
+    <section id="gpu" class="view" hidden>
+      <div class="page-heading"><div><div class="eyebrow">THE HABITAT</div><h1>Room to breathe.</h1><p>GPU pressure, desktop headroom, and the history behind it.</p></div><label>Window <select id="hours"><option value="1">1 hour</option><option value="24" selected>24 hours</option><option value="168">7 days</option><option value="720">30 days</option><option value="2160">90 days</option></select></label></div>
+      <div id="gpu-stats" class="stats"></div>
+      <div class="panel"><h2>Free VRAM <span class="unit">MiB · bucket minimum</span></h2><div id="gpu-chart"></div></div>
+      <div class="two-col"><div class="panel"><h2>Temperature <span class="unit">°C · bucket maximum</span></h2><div id="temperature-chart"></div></div><div class="panel"><h2>Power <span class="unit">watts · bucket average</span></h2><div id="power-chart"></div></div></div>
+      <div class="section-heading"><h2>GPU compute processes</h2><span class="muted">Graphics-only allocations may not appear</span></div>
+      <div class="panel table-wrap"><table><thead><tr><th>Process</th><th>PID</th><th>Attribution</th><th>VRAM</th></tr></thead><tbody id="processes"></tbody></table></div>
+      <p class="footnote" id="history-note"></p>
+    </section>
+    <section id="estimator" class="view" hidden>
+      <div class="page-heading"><div><div class="eyebrow">COUNTERFACTUALS, NOT COMMANDS</div><h1>What if?</h1><p>Explore context and KV-cache costs without touching the shelf.</p></div><span class="badge amber">MODELLED · NOT VALIDATED</span></div>
+      <div class="two-col lab"><form id="estimate-form" class="panel">
+        <h2>Configuration sketch</h2>
+        <label>Measured model / KV fit<select id="fit" required></select></label>
+        <label>Total context pool <span id="ctx-label"></span><input id="context" type="range" min="8192" max="262144" step="8192" value="65536"></label>
+        <label>Parallel slots <select id="parallel"><option>1</option><option>2</option><option>4</option><option>8</option></select></label>
+        <div class="hint">Fixed total context: adding slots divides this pool; it does not multiply it. Per-slot overhead is not captured by the fit.</div>
+        <label>Other GPU allocations (MiB)<input id="other" type="number" min="0" max="100000" value="1500" required></label>
+        <label>Total GPU memory (MiB)<input id="total" type="number" min="1" max="100000" value="16311" required></label>
+        <button type="submit">Estimate headroom <span>↗</span></button>
+      </form><div class="panel estimate-result" id="estimate-result"><div class="eyebrow">THE PROJECTION</div><h2>Measure first.<br>Extrapolate carefully.</h2><p class="muted">Choose a fit to see its projected allocation. No model will be loaded.</p></div></div>
+      <div class="callout"><strong>Estimates are not permission to load.</strong> These historical two-point fits omit some build, parallelism, and offload provenance. No throughput estimate is defensible from them. Changed CPU offload, speculative decoding, or batch settings require a new measurement.</div>
+    </section>
+    <section id="results" class="view" hidden>
+      <div class="page-heading"><div><div class="eyebrow">THE EVIDENCE</div><h1>Answers, under examination.</h1><p>Existing mechanical probe results, preserved with their limitations.</p></div></div>
+      <div class="toolbar"><label>Filter archive<input id="result-search" type="search" placeholder="Model, arm, or file name…"></label><label><input id="show-artifacts" type="checkbox"> Include known-invalid artifacts</label><span id="result-count" class="muted"></span></div>
+      <div id="result-list"></div>
+      <p class="footnote">Imported files are content-addressed. File modification time is not proof of run time. Missing build IDs or prompt hashes are never reconstructed from nearby files. This archive does not execute evaluations.</p>
+    </section>
+    <section id="events" class="view" hidden>
+      <div class="page-heading"><div><div class="eyebrow">FIELD NOTES</div><h1>The shelf remembers.</h1><p>Loads, sleep transitions, timings, errors, and guard evidence from the user journal.</p></div><label>Kind<select id="event-kind"><option value="">All events</option><option>guard</option><option>recovery</option><option>residency</option><option>sleep</option><option>timing</option><option>error</option></select></label></div>
+      <div id="event-list" class="panel"></div><p class="footnote">Most recent 250 matching collected events. Initial backfill is capped at 4,000 source lines from seven days; this is not the complete system journal.</p>
+    </section>
+    <footer>MENAGERIE <span>Small footprint. Clear provenance. Sleeping models stay asleep.</span></footer>
+  </main>
+  <dialog id="model-dialog"><div class="dialog-head"><span class="eyebrow">SPECIMEN RECORD</span><button id="close-dialog" aria-label="Close model details">×</button></div><div id="model-detail"></div></dialog>
+</body>
+</html>
