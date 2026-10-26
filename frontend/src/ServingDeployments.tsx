@@ -4,6 +4,7 @@ import {active, api, Dialog, Empty, Field, gib, Menu, message, mode, number, sta
 import {ActivityFeed, go} from './Views';
 import {ConfigurationFields, defaults, editable} from './Editors';
 import {Duration, Placement} from './FormControls';
+import {DraftResources, useResourcePreview} from './Resources';
 
 export function unitVram(d: Row, host: Row): number | undefined {
   const members = (d.members || [d]).filter(active);
@@ -31,6 +32,7 @@ export function DeploymentSetEditor({initial, modelId, data, close, saved}: {ini
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [separate, setSeparate] = useState(false);
   const [artifactId, setArtifactId] = useState(modelId || data.models?.[0]?.id || ''), [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState(0);
+  const preview = useResourcePreview(value.members, data.host?.[0]?.ts);
   const [original] = useState(() => JSON.stringify(value));
   const changed = JSON.stringify(value) !== original || Object.values(invalid).some(Boolean);
   const leave = () => {if (busy) return; if (!changed || window.confirm('Discard unsaved changes?')) close();};
@@ -38,7 +40,7 @@ export function DeploymentSetEditor({initial, modelId, data, close, saved}: {ini
   const aliasError = (m: Row) => value.members.some((other: Row) => other !== m && other.alias === m.alias) || (data.deployments || []).some(other => other.alias === m.alias && !value.members.some((member: Row) => member.id === other.id));
   const set = (key: string, v: any) => setValue(s => ({...s, [key]: v}));
   const updateMember = (index: number, change: Row) => setValue(v => ({...v, members: v.members.map((m: Row, i: number) => i === index ? {...m, ...change} : m)}));
-  function addModel() {
+  async function addModel() {
     const model = data.models?.find(m => m.id === artifactId);
     const runtime = data.runtimes?.find(r => r.capabilities?.formats?.includes(model?.format));
     if (!model || !runtime) {setError('Register a compatible engine for this model first.'); return;}
@@ -49,10 +51,20 @@ export function DeploymentSetEditor({initial, modelId, data, close, saved}: {ini
     while (used.some(m => m.alias === alias)) alias = base + '-' + suffix++;
     const port = Array.from({length: 50000}, (_, i) => 8120 + i).find(p => !used.some(m => m.port === p));
     const schema = runtime.capabilities?.schema || {};
-    const config = Object.fromEntries(Object.entries(schema).filter(([, f]: [string, any]) => f.default !== undefined).map(([k, f]: [string, any]) => [k, f.default]));
-    set('members', [...value.members, {...defaults.deployments, name: model.name, alias, port, configuration: {name: model.name, artifact_id: model.id, runtime_id: runtime.id, config, raw_args: [], catalog: {}}}]);
+    const config = Object.fromEntries(Object.entries(schema).filter(([, f]: [string, any]) => f.default !== undefined).map(([k, f]: [string, any]) => [k, ['threads', 'threads-batch'].includes(k) && data.host?.[0]?.cpu_count ? Math.min(f.default, data.host[0].cpu_count) : f.default]));
+    const gpus = data.host?.[0]?.gpus || [];
+    const gpu = [...gpus].sort((a: Row, b: Row) => (b.free_mib - (preview.data?.gpus?.find((g: Row) => g.index === b.index)?.draft_mib || 0)) - (a.free_mib - (preview.data?.gpus?.find((g: Row) => g.index === a.index)?.draft_mib || 0)))[0]?.index ?? 0;
+    const member = {...defaults.deployments, name: model.name, alias, port, gpu, configuration: {name: model.name, artifact_id: model.id, runtime_id: runtime.id, config, raw_args: [], catalog: {}}};
+    set('members', [...value.members, member]);
     setSelected(value.members.length);
     setError('');
+    setBusy(true);
+    try {
+      const budget = await api('/api/resources/preview', {members: [...value.members, member]});
+      const rec = budget.members.at(-1)?.recommendation;
+      if (rec?.context_default != null) setValue(v => ({...v, members: v.members.map((m: Row) => m.port === port && JSON.stringify(m.configuration.config) === JSON.stringify(config) ? {...m, configuration: {...m.configuration, config: {...config, [rec.context_key]: rec.context_default}}} : m)}));
+    } catch { /* Keep engine defaults when telemetry/preview is unavailable; the preview explains the gap. */ }
+    finally {setBusy(false);}
   }
   const submit = async () => {setBusy(true); setError(''); try {
     const single = !initial && value.members.length === 1;
@@ -62,7 +74,7 @@ export function DeploymentSetEditor({initial, modelId, data, close, saved}: {ini
   } catch (e) {setError(message(e));} finally {setBusy(false);}};
   return <Dialog title={initial ? initial.name : 'New deployment'} close={leave} busy={busy} wide editor guardChanges={false}>
     {error && <p className="alert error" role="alert">{error}</p>}
-    <form onInvalidCapture={e => {const target = e.target as HTMLElement; const section = target.closest<HTMLElement>('[data-model-index]'); if (section) setSelected(Number(section.dataset.modelIndex)); target.closest('details')?.setAttribute('open', '');}} onSubmit={e => {e.preventDefault(); void submit();}}><fieldset disabled={busy}>
+    <form className="resource-editor" onInvalidCapture={e => {const target = e.target as HTMLElement; const section = target.closest<HTMLElement>('[data-model-index]'); if (section) setSelected(Number(section.dataset.modelIndex)); target.closest('details')?.setAttribute('open', '');}} onSubmit={e => {e.preventDefault(); void submit();}}><fieldset disabled={busy}>
       <Field label="Name"><input required value={value.name} onChange={e => set('name', e.target.value)}/></Field>
       <fieldset className="model-composer"><legend>Models</legend>
         <Field label="Add installed model"><select value={artifactId} onChange={e => setArtifactId(e.target.value)}>{(data.models || []).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field><button type="button" disabled={!artifactId} onClick={addModel}>Add model</button>
@@ -70,7 +82,7 @@ export function DeploymentSetEditor({initial, modelId, data, close, saved}: {ini
         {value.members.map((m: Row, index: number) => <section hidden={selected !== index} data-model-index={index} className="model-edit-section" key={m.id || m.port}>
           <h3>{m.name}</h3><Field label="Model display name"><input required value={m.name} onChange={e => updateMember(index, {name: e.target.value})}/></Field>
           <Field label="API model ID"><input required aria-label="API model ID" aria-invalid={aliasError(m)} pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}" value={m.alias} onChange={e => updateMember(index, {alias: e.target.value})}/>{aliasError(m) && <small className="error-text" role="alert">This API model ID is already in use.</small>}</Field>
-          <ConfigurationFields value={m.configuration} data={data} set={configuration => updateMember(index, {configuration})} onValid={valid => setInvalid(v => ({...v, [m.id || m.port]: !valid}))}/>
+          <ConfigurationFields value={m.configuration} data={data} set={configuration => updateMember(index, {configuration})} onValid={valid => setInvalid(v => ({...v, [m.id || m.port]: !valid}))} recommendation={preview.data?.members?.[index]?.recommendation}/>
           <details><summary>Placement</summary><Placement value={m} change={v => updateMember(index, v)} host={data.host?.[0]}/></details>
           <button type="button" className="danger subtle" onClick={() => {if (m.id && !window.confirm('Remove this model from the deployment? It will be kept as an inactive standalone configuration.')) return; set('members', value.members.filter((_: Row, i: number) => i !== index)); setSelected(Math.max(0, selected - 1)); setInvalid(v => ({...v, [m.id || m.port]: false}));}}>Remove model</button>
         </section>)}
@@ -80,7 +92,7 @@ export function DeploymentSetEditor({initial, modelId, data, close, saved}: {ini
       {value.residency !== 'pinned' && <label className="check"><input type="checkbox" checked={value.allow_eviction} onChange={e => set('allow_eviction', e.target.checked)}/>Can unload to make room for another deployment</label>}
       {value.residency === 'on-demand' && <label className="check"><input type="checkbox" checked={value.allow_uncertain} onChange={e => set('allow_uncertain', e.target.checked)}/>Allow on-demand loading with uncertain memory estimates</label>}
       <details><summary>Advanced</summary><div className="form-grid"><Field label="Priority"><input required type="number" min={0} max={100} value={value.priority} onChange={e => set('priority', Number(e.target.value))}/></Field><Field label="Switch timeout (seconds)"><input required type="number" min={1} max={1800} value={value.queue_timeout} onChange={e => set('queue_timeout', Number(e.target.value))}/></Field></div><label className="check"><input type="checkbox" checked={value.enabled} onChange={e => set('enabled', e.target.checked)}/>Enabled for clients</label></details>
-    </fieldset><div className="dialog-actions">{initial && value.members.length > 1 && <button type="button" className="danger subtle" disabled={busy} onClick={() => setSeparate(true)}>Separate models…</button>}<button className="primary" disabled={busy || value.members.length < 1 || value.members.some(aliasError) || Object.values(invalid).some(Boolean)}>{busy ? 'Saving…' : 'Save deployment'}</button></div></form>
+    </fieldset>{value.members.length > 0 && <DraftResources preview={preview.data} error={preview.error}/>}<div className="dialog-actions">{initial && value.members.length > 1 && <button type="button" className="danger subtle" disabled={busy} onClick={() => setSeparate(true)}>Separate models…</button>}<button className="primary" disabled={busy || value.members.length < 1 || value.members.some(aliasError) || Object.values(invalid).some(Boolean)}>{busy ? 'Saving…' : 'Save deployment'}</button></div></form>
     {separate && <section className="warning"><p>Make each model a standalone deployment? Current shared policies will be kept.</p><button className="danger" disabled={busy} onClick={async () => {setBusy(true); try {await api(`/api/deployment-sets/${initial!.id}/dissolve?expected=${initial!.revision}`, {}); saved('');} catch (e) {setError(message(e));} finally {setBusy(false);}}}>Separate models</button></section>}
   </Dialog>;
 }

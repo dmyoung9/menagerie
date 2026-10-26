@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from . import adapters, lifecycle, deployment_sets
 from .jobs import Jobs
 from .manager import Manager, Conflict, ACTIVE, redact
-from .schema import Artifact, Runtime, Profile, Deployment, DeploymentSet, Settings
+from .schema import Artifact, Runtime, Profile, Deployment, DeploymentSet, Settings, ResourcePreview
 from .store import Store, encode, identity, uid
 from .catalog import normalize, export_config
 
@@ -115,6 +115,11 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    @app.post("/api/resources/preview")
+    async def resource_preview(body: ResourcePreview):
+        from .resources import preview
+        return preview(manager, [d.model_dump() for d in body.members])
 
     @app.get("/api/status")
     async def status():

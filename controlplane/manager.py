@@ -186,24 +186,11 @@ class Manager:
             self.file_lock.close()
 
     def estimate(self, d):
+        from .resources import estimate
         p = d["profile_snapshot"]
         a = self.store.get("artifact", p["artifact_id"])
-        config, meta = p["config"], a.get("metadata", {})
-        arch = a.get("architecture", "")
-        layers = meta.get(f"{arch}.block_count", 32)
-        heads = meta.get(f"{arch}.attention.head_count_kv", 8)
-        headsize = meta.get(f"{arch}.attention.key_length", 128)
-        # Generic upper-envelope only. Hybrid/recurrent architectures and offload differ.
-        cache = {"f16": 2, "q8_0": 1.0625, "q4_0": .5625}
-        ctx = config.get("ctx-size", config.get("max-model-len", 8192))
-        kv = ctx * layers * heads * headsize * (cache.get(config.get("cache-type-k"), 2) + cache.get(config.get("cache-type-v"), 2)) / 1048576
-        weights = a["size_bytes"] / 1048576
-        idle = weights + kv + 768
-        peak = idle + 512 * max(1, config.get("parallel", 1))
         measured = [s for s in self.store.list("session") if s.get("profile_hash") == identity(p) and s.get("peak_gpu_mib", 0) > 0 and s.get("outcome") == "stopped"]
-        if measured:
-            peak = max(s["peak_gpu_mib"] for s in measured) * 1.15 + 256
-        return {"idle_mib": round(idle), "peak_mib": round(peak), "confidence": "medium" if measured else "low", "provenance": "previous process measurements + 15% + 256 MiB; workload-dependent" if measured else "GGUF file + generic KV + runtime overhead; hybrid architectures/offload uncertain", "reservation_mib": d["reservation_mib"] or round(peak), "physical_limit": False}
+        return estimate(a, p["config"], d.get("reservation_mib", 0), [s["peak_gpu_mib"] for s in measured])
 
     def validate(self, ids, authorized_stops=None):
         duplicates = len(set(ids)) != len(ids)

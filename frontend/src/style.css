@@ -286,3 +286,38 @@ details[open] > summary {margin-bottom: 14px; color: #dce9df;}
   .model-edit-section > h3 {top: -18px;}
   .editor-page .model-edit-section > h3 {top: -24px;}
 }
+/* Shared observed / draft resource maps. Exact values remain available in the legend. */
+.resource-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:24px}
+.resource-card {min-width:0;margin:12px 0 20px}
+.resource-card h3 {font-size:14px;margin:0}
+.resource-card .section-heading {gap:12px;flex-wrap:wrap}
+.resource-card .section-heading>span,.resource-verdict {font-size:12px;color:var(--muted,#9ca9bc)}
+.resource-map {position:relative;height:240px;border-radius:10px;overflow:hidden;background:#172332;border:1px solid #455165}
+.resource-tile {position:absolute!important;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:4px;min-width:0;min-height:0;padding:10px;border:2px solid #121b29;border-radius:4px;color:#fff;overflow:hidden;text-align:left;transition:filter .15s}
+.resource-tile span {font-size:12px;line-height:1.35;overflow:hidden;max-height:3em;overflow-wrap:anywhere}
+.resource-tile strong {font-size:14px;white-space:nowrap}
+.resource-tile.free {background:#244237}
+.resource-tile.reserve {background:repeating-linear-gradient(135deg,#5a4c36,#5a4c36 7px,#463d30 7px,#463d30 14px)}
+.resource-tile.external {background:#424b5c}
+.resource-tile:hover,.resource-tile[aria-pressed=true] {filter:brightness(1.25);z-index:1}
+.resource-tile:focus-visible {outline:3px solid white;outline-offset:-4px;z-index:2}
+.resource-legend {display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:4px;margin-top:10px}
+.resource-legend button {display:flex;align-items:center;gap:6px;border-color:transparent;padding:4px 2px;text-align:left;font-size:11px;background:transparent;min-width:0}
+.resource-legend button[aria-pressed=true] {text-decoration:underline}
+.resource-legend i {width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.resource-legend b {margin-left:auto;white-space:nowrap}
+.resource-inspector {padding:10px;border:1px solid #455165;border-radius:8px;font-size:12px}
+.resource-tag {font-size:11px;padding:4px 8px;border:1px solid #455165;border-radius:20px;white-space:nowrap}
+.draft-resources {border:1px solid #455165;padding:16px;border-radius:12px;margin:18px 0;background:rgba(70,90,120,.06)}
+.draft-resources h2,.live-resources h2 {font-size:17px;margin:0}
+.draft-resources small,.runtime-settings .warning small,.runtime-settings .muted small {display:block;font-size:11px;margin-top:6px}
+@media (min-width:1100px) {
+  .editor-page:has(.resource-editor) .dialog-head {padding-inline:max(24px,calc((100vw - 1440px)/2))}
+  .editor-page:has(.resource-editor) .dialog-body {padding-inline:max(24px,calc((100vw - 1440px)/2))}
+  .resource-editor {display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,420px);gap:0 32px;align-items:start}
+  .resource-editor>.draft-resources {position:sticky;top:0;max-height:calc(100dvh - 180px);overflow:auto;margin-top:0}
+  .resource-editor>.dialog-actions {grid-column:1/-1}
+  .resource-editor .resource-map {height:270px}
+}
+@media (max-width:600px) {.resource-map {height:210px}.resource-tile {padding:5px}.resource-tile strong {font-size:11px}.resource-tile span {font-size:10px}.draft-resources {padding:10px}}
+@media (prefers-reduced-motion:reduce) {.resource-tile {transition:none}}

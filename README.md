@@ -15,6 +15,24 @@ The dashboard shows loaded models, available capacity, and recent activity.
 The primary views are **Overview**, **Models**, **Deployments**, **Activity**, and
 **Settings**. No browser component controls a process directly.
 
+Overview includes interactive GPU and RAM treemaps: deployment memory, unattributed
+usage, protected reserve, and available capacity. Select a block or its legend entry
+to inspect it. GPU process attribution is shown only on single-GPU hosts because
+the current process samples are aggregated across devices. Stale telemetry is labeled.
+
+The deployment composer previews the whole draft alongside existing GPU usage and
+desktop reserve. On wide screens the preview stays beside the controls. Context,
+concurrency, cache choices, and added models update the budget without saving or
+loading anything. New members get CPU-bounded thread defaults and an estimated
+context default based on their peers and the selected GPU. Context/concurrency
+recommendations are soft guidance; exact engine-supported overrides remain available.
+Model layer counts constrain GPU-layer inputs when metadata is available.
+Reservations are displayed separately, never added to predicted memory usage.
+The preview shares the launch estimator, but does not authorize loading or eviction;
+launch review rechecks capacity. Generic KV/overhead estimates remain low-confidence,
+especially for hybrid architectures, CPU offload, auxiliary models, and engines with
+their own memory pools. Predicted offload RAM is not yet available.
+
 1. In **Models**, import a local GGUF/safetensors directory or use **Discover** to browse the Hugging Face and public
    Ollama catalogs. Model cards show format, parameter and capability badges.
    **Choose variant** opens a modal with quantization and size/quality chips;

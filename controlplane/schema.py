@@ -96,3 +96,14 @@ class Settings(BaseModel):
     temperature_limit: int = Field(default=85, ge=60, le=85)
     max_queue: int = Field(default=32, ge=1, le=256)
     expose_on_demand: bool = True
+
+
+class ResourceDraft(BaseModel):
+    name: str = "Draft model"
+    gpu: int = Field(default=0, ge=0, le=31)
+    reservation_mib: int = Field(default=0, ge=0)
+    configuration: Profile
+
+
+class ResourcePreview(BaseModel):
+    members: list[ResourceDraft] = Field(max_length=64)

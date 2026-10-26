@@ -2,6 +2,7 @@ import {useCallback, useEffect, useState} from 'react';
 import {Activity, ArrowUpRight, Boxes, Check, Database, Layers, Plus, RefreshCw, Settings, X} from 'lucide-react';
 import {ModelCatalog} from './ModelCatalog';
 import {DeploymentWizard} from './DeploymentWizard';
+import {LiveResources} from './Resources';
 import {editable, Editor} from './Editors';
 import {Connect, LaunchReview, PolicyEditor, SourceBuild} from './Operations';
 import {DeploymentSetEditor, MultiDeploymentDetail, ServingTable} from './ServingDeployments';
@@ -97,6 +98,7 @@ export default function App() {
         {host.pressure && <div className="alert error" role="alert">Low memory headroom. Review running deployments.</div>}
         {page === 'overview' && <>
           <div className="stats">{(host.gpus || []).map((g: Row, index: number) => <div className="stat" key={g.index ?? index}><span>{host.gpus.length > 1 ? `GPU ${g.index ?? index} memory` : 'GPU memory'}</span><strong>{gib(g.used_mib)} <small>/ {gib(g.total_mib)} GiB</small></strong><meter aria-label={'GPU ' + (g.index ?? index) + ' memory used'} value={g.used_mib || 0} max={g.total_mib || 1}/></div>)}<div className="stat"><span>Available models</span><strong>{deployments.filter(d => d.lifecycle?.serving).length}</strong><small>{running.length} loaded</small></div><div className="stat"><span>System RAM</span><strong>{typeof host.ram_total_mib === 'number' && typeof host.ram_available_mib === 'number' ? gib(host.ram_total_mib - host.ram_available_mib) : '—'} <small>GiB</small></strong><small>{gib(host.ram_available_mib)} GiB available</small></div></div>
+          <LiveResources host={host} deployments={deployments} settings={status.settings || {}}/>
           <div className="section-heading"><h2>Deployments</h2><a href="#/deployments">View all <ArrowUpRight size={14}/></a></div><section className="panel">{enabled.length ? <ServingTable rows={enabled} host={host} actions={actions} compact/> : <Empty title={data.models?.length ? 'No enabled deployments' : 'Add your first model'}><button className="primary" onClick={() => data.models?.length ? newDeployment() : go('models/discover')}>{data.models?.length ? 'Create deployment' : 'Discover models'}</button>{!data.models?.length && <button onClick={() => open({type: 'import', path: ''})}>Import local files</button>}</Empty>}</section>
           <div className="section-heading"><h2>Activity</h2><a href="#/activity">View all <ArrowUpRight size={14}/></a></div><section className="panel"><ActivityFeed events={events.filter(e => !['QUEUED', 'VALIDATING', 'STARTING', 'LOADING', 'STOPPING'].includes(e.data?.to)).slice(0, 4)} deployments={deployments}/></section>
           <MemoryChart samples={samples}/>
