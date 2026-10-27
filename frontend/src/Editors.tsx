@@ -1,7 +1,8 @@
 import {useState} from 'react';
-import {Field, JsonEdit, type Row, type Registry} from './ui';
+import {Field, JsonEdit, Menu, type Row, type Registry} from './ui';
 import {Duration, Placement, RuntimeSettings} from './FormControls';
 import {DraftResources, useResourcePreview} from './Resources';
+import {Capabilities} from './Capabilities';
 
 export const defaults: Record<string, Row> = {
   profiles: {name: 'New profile', artifact_id: '', runtime_id: '', config: {'ctx-size': 8192, parallel: 1, 'gpu-layers': 'all', 'cache-type-k': 'q8_0', 'cache-type-v': 'q8_0', 'flash-attn': 'on'}, raw_args: [], catalog: {}},
@@ -21,7 +22,8 @@ export function ConfigurationFields({value, data, set, onValid, recommendation}:
     <Field label="Model"><select required value={value.artifact_id} onChange={e => {const next = data.models?.find(m => m.id === e.target.value); if (!runtime?.capabilities?.formats?.includes(next?.format)) {if (!window.confirm('This model needs a different engine. Reset engine settings?')) return; const engine = data.runtimes?.find(r => r.capabilities?.formats?.includes(next?.format)); set({...value, artifact_id:e.target.value, runtime_id:engine?.id || '', config:{}, raw_args:[]});} else set({...value, artifact_id:e.target.value});}}>{(data.models || []).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
     <Field label="Engine"><select required value={value.runtime_id} onChange={e => {if (!window.confirm('Change engine? Engine-specific settings and arguments will be reset.')) return; setValidity({}); onValid(true); set({...value, runtime_id: e.target.value, config: {}, raw_args: []});}}><option value="" disabled>Select compatible engine</option>{engines.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></Field>
     <RuntimeSettings schema={runtime?.capabilities?.schema || {}} value={value.config} change={config => set({...value, config})} host={data.host?.[0]} recommendation={recommendation}/>
-    <details><summary>Client capabilities</summary><label className="check"><input type="checkbox" checked={!!catalog.model?.capabilities?.tools} onChange={e => set({...value, catalog: {...value.catalog, model: {...value.catalog?.model, capabilities: {...value.catalog?.model?.capabilities, tools: e.target.checked}}}})}/>Tool support</label><label className="check"><input type="checkbox" checked={!!catalog.model?.capabilities?.input?.includes('image')} onChange={e => {const input = value.catalog?.model?.capabilities?.input || ['text']; set({...value, catalog: {...value.catalog, model: {...value.catalog?.model, capabilities: {...value.catalog?.model?.capabilities, input: e.target.checked ? [...new Set([...input, 'image'])] : input.filter((v: string) => v !== 'image')}}}});}}/>Image input</label><Field label="Output token limit"><input type="number" min={1} step={1} value={catalog.model?.limit?.output ?? ''} placeholder="Engine default" onChange={e => {const limit = {...value.catalog?.model?.limit}; if (e.target.value) limit.output = Number(e.target.value); else delete limit.output; set({...value, catalog:{...value.catalog, model:{...value.catalog?.model, limit}}});}}/></Field></details>
+    {artifact?.metadata?.projector && runtime?.capabilities?.schema?.mmproj && <button type="button" onClick={() => set({...value, config: {...value.config, mmproj: artifact.metadata.projector.path}})}>Use downloaded projector: {artifact.metadata.projector.name}</button>}
+    <Capabilities key={value.artifact_id + ':' + value.runtime_id} catalog={catalog} change={catalog => set({...value, catalog})} hints={artifact?.discovered_capabilities} runtime={runtime} valid={valid}/>
     <details key={value.runtime_id}><summary>Advanced model settings</summary><JsonEdit label="Runtime options (JSON)" value={value.config} onChange={config => set({...value, config})} onValid={ok => valid('config', ok)}/><JsonEdit label="Engine arguments" value={value.raw_args} onChange={raw_args => set({...value, raw_args})} onValid={ok => valid('args', ok)}/><JsonEdit label="Client capabilities (JSON)" value={catalog} onChange={catalog => set({...value, catalog})} onValid={ok => valid('catalog', ok)}/></details>
   </fieldset>;
 }
@@ -76,6 +78,6 @@ export function Editor({kind, initial, data, save, remove, busy, memberOnly = fa
       <details><summary>Advanced</summary>{input('commit', 'Source commit')}{input('fork_url', 'Source repository')}{json('env', 'Environment (JSON)')}{value.engine === 'custom' && json('command_template', 'Command template (JSON array)')}</details>
       <p className="warning">Registration runs the executable to check its version and supported options.</p>{check('trust', 'I trust this executable or image')}
     </>}
-    <div className="dialog-actions">{remove && <button type="button" className="danger subtle" disabled={busy} onClick={remove}>Remove</button>}<button className="primary" disabled={busy || Object.values(invalid).some(Boolean)}>{busy ? 'Saving…' : kind === 'profiles' ? 'Save revision' : 'Save'}</button></div>
+    <div className="dialog-actions">{remove && <Menu label="More deployment actions"><button type="button" className="danger subtle" disabled={busy} onClick={remove}>Remove</button></Menu>}<button className="primary" disabled={busy || Object.values(invalid).some(Boolean)}>{busy ? 'Saving…' : kind === 'profiles' ? 'Save revision' : 'Save'}</button></div>
   </form>;
 }

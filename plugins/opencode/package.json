@@ -1,0 +1,13 @@
+{
+  "name": "menagerie-opencode-plugin",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./index.ts",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "tsx --test discovery.test.ts"
+  },
+  "dependencies": {"@opencode/plugin": "2.1.3"},
+  "devDependencies": {"@types/node": "^22.0.0", "tsx": "^4.20.0", "typescript": "^5.9.0"}
+}

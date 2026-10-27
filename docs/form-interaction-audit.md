@@ -10,7 +10,7 @@
 - Duplicate API IDs are identified inline. Model removal consequences appear at removal rather than under every model.
 - Forms warn before discarding changes. Multi-model drafts survive switching selected members. Engine changes explicitly confirm resetting engine-specific settings.
 - Host policy separates capacity/request settings from telemetry/retention and displays memory in GiB without changing stored MiB.
-- Source builds offer only supported engines and use a URL input. Local import identifies paths as belonging to the Menagerie host.
+- Source builds offer only supported engines and use a URL input. **+ Add from File** identifies paths as belonging to the Menagerie host.
 - Client capabilities expose tool support, image input, and output limits without requiring JSON; expert JSON remains available.
 
 ## Reviewed, retained

@@ -1,5 +1,5 @@
 // Run with: playwright-cli -s=menagerie-polish run-code --filename=smoke_product.js
-// Uses an isolated frontend at :8038 and intercepts every API call. No live state changes.
+// Uses an isolated frontend at :8037 and intercepts every API call. No live state changes.
 async (page) => {
   await page.unroute('**/api/**');
   const assert = (condition, text) => {if (!condition) throw new Error(text);};
@@ -33,11 +33,11 @@ async (page) => {
     if(path.endsWith('/validate')) return send({errors:[],warnings:uncertain?['Low-confidence memory estimate.']:[],estimates:{idle:{reservation_mib:6800,confidence:'low'}},stops:[],plan_token:'review-token'});
     if(path.endsWith('/start')) return send({state:'QUEUED'});
     if(path.startsWith('/api/history/')) return send([]);
-    if(path==='/api/models/import') return send({state:'QUEUED'});
+    if(path==='/api/models/local') return send({state:'QUEUED'});
     return send({error:'Unmocked route: '+path},500);
   });
   await page.setViewportSize({width:1440,height:1000});
-  await page.goto('http://127.0.0.1:8038/');
+  await page.goto('http://127.0.0.1:8037/');
   await page.getByRole('heading',{name:'Overview',exact:true}).waitFor();
   await page.getByText('Example 9B unloaded · Idle unload',{exact:true}).waitFor();
   assert(await page.getByRole('cell',{name:'—',exact:true}).count()>0,'Missing table telemetry should remain unknown');
@@ -45,6 +45,8 @@ async (page) => {
   const dialog=page.getByRole('dialog');
   await dialog.getByText('http://127.0.0.1:9123/v1',{exact:true}).waitFor();
   assert(!(await dialog.locator('pre').innerText()).split('\n').some(line=>line.startsWith('+')),'Example request contains diff debris');
+  await dialog.getByRole('button',{name:'OpenCode',exact:true}).click();
+  await dialog.getByText('menagerie plugin install --gateway-port 9123',{exact:true}).waitFor();
   await page.keyboard.press('Escape');
   assert(await page.getByRole('button',{name:'Connect client'}).evaluate(el=>el===document.activeElement),'Dialog did not restore focus');
   await page.getByRole('navigation').getByRole('link',{name:'Deployments'}).click();
@@ -94,7 +96,6 @@ async (page) => {
   await page.getByRole('navigation').getByRole('link',{name:'Settings'}).click();
   await page.getByRole('heading',{name:'Settings',exact:true}).waitFor();
   assert(await page.getByRole('button',{name:'Migration',exact:true}).count()===0,'Settings should not expose a personal migration workflow');
-  assert(!/shelf|observatory archive/i.test(await page.locator('main').innerText()),'Personal setup leaked into product settings');
   await page.getByRole('button',{name:'Register engine',exact:true}).click();
   await dialog.getByLabel('Executable path',{exact:true}).fill('/runtime/server');
   await dialog.getByRole('checkbox').check();
@@ -136,13 +137,13 @@ async (page) => {
   registry={models:[],runtimes:[],profiles:[],deployments:[],groups:[],jobs:[]};
   await page.reload();
   await page.getByRole('heading',{name:'Add your first model'}).waitFor();
-  assert(!await page.getByText('Import your shelf',{exact:false}).count(),'First-run experience depends on shelf');
   await page.getByRole('navigation').getByRole('link',{name:'Models',exact:true}).click();
   await page.getByRole('heading',{name:'No models yet'}).waitFor();
-  await page.getByRole('button',{name:'Import local files',exact:true}).click();
+  await page.getByRole('button',{name:'Add from File',exact:true}).last().click();
   await dialog.getByRole('textbox').fill('/models/example.gguf');
-  page.once('dialog', d => d.accept());
-  await page.keyboard.press('Escape');
+  await dialog.getByRole('button',{name:'Add from File',exact:true}).click();
+  await dialog.waitFor({state:'hidden'});
+  assert(writes.some(w=>w.path==='/api/models/local'&&w.payload.path==='/models/example.gguf'),'Add from File did not submit the host-local path');
   failNetwork=true;
   await page.reload();
   await page.getByRole('alert').filter({hasText:'Connection lost'}).waitFor();

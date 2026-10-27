@@ -8,6 +8,7 @@ import re
 import struct
 
 FIELDS = {
+    "mmproj": {"type": "string", "label": "Multimodal projector path"},
     "ctx-size": {"type": "integer", "default": 8192, "min": 512, "max": 1048576, "units": "tokens", "label": "Context pool"},
     "parallel": {"type": "integer", "default": 1, "min": 1, "max": 128, "label": "Parallel slots"},
     "gpu-layers": {"type": "string", "default": "all", "label": "GPU layers"},
@@ -96,9 +97,16 @@ def inspect_artifact(path, checksum=False):
         if not files:
             raise ValueError("Directory must contain safetensors weights")
         config = json.loads((p / "config.json").read_text()) if (p / "config.json").exists() else {}
+        tokenizer = p / "tokenizer_config.json"
+        template = p / "chat_template.jinja"
+        hints = {}
+        if tokenizer.is_file() and tokenizer.stat().st_size <= 1024 * 1024:
+            hints["tokenizer_config"] = json.loads(tokenizer.read_text())
+        if template.is_file() and template.stat().st_size <= 1024 * 1024:
+            hints["chat_template"] = template.read_text()
         manifest = {str(f.relative_to(p)): file_hash(f) for f in sorted(p.rglob("*")) if f.is_file()} if checksum else {}
         digest = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest() if manifest else None
-        return {"local_path": str(p), "name": p.name, "format": "safetensors", "size_bytes": sum(f.stat().st_size for f in p.rglob("*") if f.is_file()), "architecture": config.get("model_type"), "metadata": {"config": config, "file_sha256": manifest}, "sha256": digest}
+        return {"local_path": str(p), "name": p.name, "format": "safetensors", "size_bytes": sum(f.stat().st_size for f in p.rglob("*") if f.is_file()), "architecture": config.get("model_type"), "metadata": {"config": config, "file_sha256": manifest, **hints}, "sha256": digest}
     metadata = gguf_metadata(p)
     return {"local_path": str(p), "name": Path(path).stem, "format": "gguf", "size_bytes": p.stat().st_size,
             "sha256": file_hash(p) if checksum else None, "architecture": metadata.get("general.architecture"),
@@ -110,7 +118,7 @@ def gguf_metadata(path):
     with open(path, "rb") as f:
         def read(n):
             if n > 64 * 1024 * 1024 or f.tell() + n > 128 * 1024 * 1024:
-                raise ValueError("GGUF metadata exceeds import limit")
+                raise ValueError("GGUF metadata exceeds inspection limit")
             value = f.read(n)
             if len(value) != n:
                 raise ValueError("Truncated GGUF")
@@ -145,7 +153,7 @@ def gguf_metadata(path):
         for _ in range(count):
             key = string()
             v = value(unpack("I"))
-            if not key.startswith("tokenizer."):
+            if not key.startswith("tokenizer.") or key == "tokenizer.chat_template":
                 result[key] = v
         return result
 

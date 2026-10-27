@@ -47,7 +47,7 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
             assert all(m["idle_timeout"] == 900 for m in a["members"])
             assert await unit(b["id"]) == b
             catalog = (await client.get("/v1/models")).json()["data"]
-            assert next(m for m in catalog if m["id"] == "a-gemma")["shelf"]["model"]["name"] == "Gemma renamed"
+            assert next(m for m in catalog if m["id"] == "a-gemma")["menagerie"]["catalog"]["model"]["name"] == "Gemma renamed"
 
             before = {k: store.list(k) for k in ("profile", "deployment", "deployment_set")}
             invalid = deepcopy(changed)

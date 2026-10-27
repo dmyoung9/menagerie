@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {ArrowUpRight,Boxes} from 'lucide-react';
+import {ModelCard} from './ModelCard';
 import {VariantDialog} from './VariantDialog';
 import {byteSize,parameterSize} from './variants';
 import './catalog.css';
@@ -9,6 +9,7 @@ type Props={api:(path:string,body?:unknown)=>Promise<any>;queued:()=>void};
 export function ModelCatalog({api,queued}:Props){
   const [source,setSource]=useState<'hf'|'ollama'>('hf'),[query,setQuery]=useState(''),[rows,setRows]=useState<Row[]>([]);
   const [model,setModel]=useState<string|null>(null),[local,setLocal]=useState<Row|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[searched,setSearched]=useState(false);
+  const [localInfo,setLocalInfo]=useState<Row|null>(null);
   function switchSource(value:'hf'|'ollama'){setSource(value);setRows([]);setModel(null);setLocal(null);setError('');setSearched(false)}
   async function search(){
     setError('');setBusy(true);setLocal(null);setSearched(false);setRows([]);
@@ -27,9 +28,9 @@ export function ModelCatalog({api,queued}:Props){
       const formats=['GGUF','Safetensors','MLX','AWQ','GPTQ','FP8'].filter(t=>tags.some(tag=>tag.toLowerCase()===t.toLowerCase())||new RegExp(`(?:^|[-_/])${t}(?:$|[-_/])`,'i').test(name));
       const params=parameterSize(name);
       const url=source==='hf'?`https://huggingface.co/${name}`:row.url;
-      return <article className="catalog-card" key={name}><div className="catalog-card-heading"><Boxes size={20}/><h3>{name}</h3><a className="button icon-button" href={url} target="_blank" rel="noreferrer" aria-label={`Open ${name} on ${source==='hf'?'Hugging Face':'Ollama'}`} title="Open supplier page"><ArrowUpRight size={17}/></a></div><div className="catalog-chips"><span className="catalog-chip">{source==='hf'?'Hugging Face':'Ollama'}</span>{formats.map(t=><span className="catalog-chip" key={t}>{t}</span>)}{params!=='Unspecified'&&<span className="catalog-chip">{params}</span>}{capabilities.map(t=><span className="catalog-chip" key={t}>{t}</span>)}{row.gated&&<span className="catalog-chip">Gated</span>}</div><div className="catalog-card-footer"><span>{source==='hf'?`${(row.downloads||0).toLocaleString()} downloads`:'Public model library'}</span><button onClick={()=>setModel(name)}>Choose variant</button></div></article>
+      return <ModelCard key={name} name={name} url={url} chips={[source==='hf'?'Hugging Face':'Ollama',...formats,...(params!=='Unspecified'?[params]:[]),...capabilities,...(row.gated?['Gated']:[])]} footer={source==='hf'?`${(row.downloads||0).toLocaleString()} downloads`:'Public model library'}><button onClick={()=>setModel(name)}>Choose variant</button></ModelCard>
     })}</div>
-    {local&&<section className="catalog-local"><h3>Locally installed Ollama models</h3><p>{local.note||`${local.models.length} models installed`}</p><div className="catalog-chips">{local.models.map((m:Row)=><span className="catalog-chip" key={m.name}>{m.name} · {byteSize(m.size)} {m.details?.quantization_level}</span>)}</div></section>}
+    {local&&<section className="catalog-local"><h3>Locally installed Ollama models</h3><p>{local.note||`${local.models.length} models installed`}</p><div className="catalog-grid">{local.models.map((m:Row)=><ModelCard key={m.name} name={m.name} chips={['Ollama',byteSize(m.size),m.details?.quantization_level].filter(Boolean)} footer="Managed by Ollama"><button disabled={busy} onClick={async()=>{setBusy(true);setError('');try{setLocalInfo(await api('/api/catalog/ollama/show?model='+encodeURIComponent(m.name)))}catch(e){setError(String(e))}finally{setBusy(false)}}}>Inspect capabilities</button></ModelCard>)}</div>{localInfo&&<div role="status"><h4>{localInfo.model}</h4><p>{[...localInfo.capabilities.input,...(localInfo.capabilities.tools?['tools']:[]),...(localInfo.capabilities.reasoning?['reasoning']:[])].join(' · ')}</p><p>{localInfo.capabilities.note}</p></div>}</section>}
     {model&&<VariantDialog key={source+':'+model} source={source} name={model} api={api} close={()=>setModel(null)} queued={queued} openModel={setModel}/>}
   </section>
 }

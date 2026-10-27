@@ -1,0 +1,36 @@
+name: Checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: uv sync --locked --no-install-project
+      - run: uv run --no-sync python -m pytest -q
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: plugins/opencode
+      - run: npm run check && npm test
+        working-directory: plugins/opencode
+      - run: uv build
+      - run: uv venv /tmp/menagerie-wheel-check
+      - run: uv pip install --python /tmp/menagerie-wheel-check/bin/python dist/*.whl
+      - run: /tmp/menagerie-wheel-check/bin/python scripts/check_wheel.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: menagerie-python-${{ matrix.python }}
+          path: dist/*

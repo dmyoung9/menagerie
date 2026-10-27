@@ -2,9 +2,4 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)
 cd "$ROOT"
-if [ "$#" -eq 0 ]; then set -- status; fi
-if [ "$1" = serve ]; then
-    shift
-    exec "$ROOT/.venv/bin/python" -m controlplane "$@"
-fi
 exec "$ROOT/.venv/bin/python" -m controlplane.cli "$@"

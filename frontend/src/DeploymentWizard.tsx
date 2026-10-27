@@ -3,6 +3,7 @@ import {api, Dialog, Field, JsonEdit, message, type Registry, type Row} from './
 import {defaults} from './Editors';
 import {RuntimeSettings} from './FormControls';
 import {DraftResources, useResourcePreview} from './Resources';
+import {Capabilities} from './Capabilities';
 
 export function DeploymentWizard({data, modelId, close, created, setupEngine}: {data: Registry; modelId?: string; close: () => void; created: (row: Row, load: boolean) => void; setupEngine: () => void}) {
   const [step, setStep] = useState(0), [artifactId, setArtifactId] = useState(modelId || data.models?.[0]?.id || '');
@@ -10,7 +11,7 @@ export function DeploymentWizard({data, modelId, close, created, setupEngine}: {
   const [name, setName] = useState(''), [alias, setAlias] = useState('');
   const [context, setContext] = useState(8192), [parallel, setParallel] = useState(1), [custom, setCustom] = useState(false);
   const [residency, setResidency] = useState('on-demand'), [idle, setIdle] = useState(300);
-  const [tools, setTools] = useState(false), [vision, setVision] = useState(false), [output, setOutput] = useState(1024);
+  const [catalog, setCatalog] = useState<Row>({model: {capabilities: {tools: false, input: ['text'], output: ['text']}, limit: {output: 1024}}});
   const [extra, setExtra] = useState<Row>({}), [args, setArgs] = useState<any>([]), [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const usedPorts = new Set((data.deployments || []).map(d => d.port));
   const [advanced, setAdvanced] = useState<Row>({...defaults.deployments, port: Array.from({length: 50000}, (_, i) => 8120 + i).find(p => !usedPorts.has(p))});
@@ -27,7 +28,6 @@ export function DeploymentWizard({data, modelId, close, created, setupEngine}: {
   const hasContext = Boolean(schema[contextKey]), hasParallel = Boolean(schema.parallel);
   const displayName = name || artifact?.name || 'New deployment';
   const apiAlias = alias || displayName.toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+/, '').slice(0, 140) || 'model';
-  const perRequest = hasContext ? context : Number(extra['ctx-size'] || extra['max-model-len'] || 4096) / Number(extra.parallel || 1);
   const draftConfig = {...extra, ...(hasContext ? {[contextKey]: context * (hasParallel ? parallel : 1)} : {}), ...(hasParallel ? {parallel} : {})};
   const preview = useResourcePreview(runtime ? [{...advanced, name: displayName, configuration: {name: displayName, artifact_id: artifactId, runtime_id: runtime.id, config: draftConfig, raw_args: args, catalog: {}}}] : [], data.host?.[0]?.ts);
   const recommendation = preview.data?.members?.[0]?.recommendation;
@@ -38,7 +38,7 @@ export function DeploymentWizard({data, modelId, close, created, setupEngine}: {
       const config: Row = {...extra};
       if (hasContext) config[contextKey] = context * (hasParallel ? parallel : 1);
       if (hasParallel) config.parallel = parallel;
-      const configuration = {name: displayName, artifact_id: artifactId, runtime_id: runtime.id, config, raw_args: args, catalog: {model: {capabilities: {tools, input: vision ? ['text', 'image'] : ['text'], output: ['text']}, limit: {output}}}};
+      const configuration = {name: displayName, artifact_id: artifactId, runtime_id: runtime.id, config, raw_args: args, catalog};
       const deployment = await api('/api/deployments', {...advanced, name: displayName, configuration, alias: apiAlias, residency, idle_timeout: idle, enabled: true});
       created(deployment, load);
     } catch (e) {setError(message(e));} finally {setBusy(false);}
@@ -69,10 +69,10 @@ export function DeploymentWizard({data, modelId, close, created, setupEngine}: {
           </>
           <Field label="Mode"><select value={residency} onChange={e => setResidency(e.target.value)}><option value="on-demand">On demand</option><option value="pinned">Pinned</option><option value="evictable">Evictable</option></select><small>{residency === 'on-demand' ? 'Loads when a client sends a request.' : residency === 'pinned' ? 'Never automatically unloaded to make room.' : 'Loads manually; can make room when idle and authorized.'}</small></Field>
           {residency === 'on-demand' && <Field label="Unload after idle"><select value={idle} onChange={e => setIdle(Number(e.target.value))}>{[60, 300, 900, 1800, 0].map(s => <option key={s} value={s}>{s ? s / 60 + ' minutes' : 'Never'}</option>)}</select></Field>}
+          <Capabilities key={artifactId + ':' + runtime?.id} catalog={catalog} change={setCatalog} hints={artifact?.discovered_capabilities} runtime={runtime} valid={(key, ok) => setInvalid(v => ({...v, [key]: !ok}))}/>
+          {artifact?.metadata?.projector && schema.mmproj && <button type="button" onClick={() => setExtra({...extra, mmproj: artifact.metadata.projector.path})}>Use downloaded projector: {artifact.metadata.projector.name}</button>}
           <details><summary>Advanced</summary>
             <><RuntimeSettings schema={Object.fromEntries(Object.entries(schema).filter(([key]) => !['ctx-size', 'max-model-len', 'parallel'].includes(key)))} value={extra} change={setExtra} host={data.host?.[0]} recommendation={recommendation}/>
-              <Field label="Client output limit"><input required type="number" min={1} max={perRequest} value={output} onChange={e => setOutput(Number(e.target.value))}/></Field>
-              <label className="check"><input type="checkbox" checked={tools} onChange={e => setTools(e.target.checked)}/>Advertise tool support</label><label className="check"><input type="checkbox" checked={vision} onChange={e => setVision(e.target.checked)}/>Advertise image input</label>
               {!hasContext && <JsonEdit label="Runtime options (JSON)" value={extra} onChange={setExtra} onValid={valid => setInvalid(v => ({...v, config: !valid}))}/>}
               <JsonEdit label="Additional engine arguments" value={args} onChange={setArgs} onValid={valid => setInvalid(v => ({...v, args: !valid}))}/>
             </>

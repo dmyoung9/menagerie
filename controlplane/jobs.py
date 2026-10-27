@@ -7,6 +7,9 @@ import re
 import shutil
 import time
 import io
+import json
+import httpx
+from urllib.parse import quote
 from tqdm.auto import tqdm
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from . import adapters
@@ -83,7 +86,34 @@ class Jobs:
             info = HfApi().model_info(repo, revision=revision, files_metadata=True)
             return {"repo": repo, "revision": info.sha, "files": [{"name": f.rfilename, "size": f.size, "sha256": f.lfs.sha256 if f.lfs else None} for f in info.siblings]}
         try:
-            return await asyncio.to_thread(inspect)
+            result = await asyncio.to_thread(inspect)
+            from .capabilities import inspect as inspect_capabilities
+            small = {}
+            warnings = []
+            for filename, key in (("config.json", "config"), ("tokenizer_config.json", "tokenizer_config"), ("chat_template.jinja", "chat_template")):
+                file = next((f for f in result["files"] if f["name"] == filename), None)
+                if not file or file.get("size") is None or file["size"] > 1024 * 1024:
+                    continue
+                try:
+                    url = f"https://huggingface.co/{quote(repo, safe='/')}/resolve/{result['revision']}/{filename}"
+                    async with self.manager.client.stream("GET", url, follow_redirects=True, timeout=10) as response:
+                        response.raise_for_status()
+                        raw = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            raw.extend(chunk)
+                            if len(raw) > 1024 * 1024:
+                                raise ValueError("Metadata exceeds inspection limit")
+                    value = raw.decode()
+                    small[key] = value if key == "chat_template" else json.loads(value)
+                    if key != "chat_template" and not isinstance(small[key], dict):
+                        small[key] = {}
+                except (ValueError, OSError, httpx.HTTPError):
+                    warnings.append(f"Could not inspect {filename}")
+            result["capabilities"] = inspect_capabilities(small)
+            result["capabilities"]["dependencies"] = [{"name": f["name"], "size": f["size"], "status": "candidate", "kind": "projector"}
+                for f in result["files"] if "mmproj" in f["name"].lower() and f["name"].lower().endswith(".gguf")]
+            result["capabilities"]["warnings"] = warnings
+            return result
         except Exception as exc:
             raise ValueError("Repository metadata unavailable: " + redact(str(exc))[:500]) from exc
 
@@ -106,7 +136,7 @@ class Jobs:
         except Exception as exc:
             raise ValueError("Quantization catalog unavailable: " + redact(str(exc))[:500]) from exc
 
-    async def download(self, ident, repo, revision, filename):
+    async def download(self, ident, repo, revision, filename, projector=None):
         owner = self
         class Progress(tqdm):
             def __init__(self, *args, **kwargs):
@@ -123,6 +153,20 @@ class Jobs:
         if not re.fullmatch(r"[a-f0-9]{40}", revision):
             raise ValueError("Select a resolved 40-character model revision")
         metadata = await self.hf_files(repo, revision)
+        companion = None
+        if projector:
+            companion = next((f for f in metadata["files"] if f["name"] == projector and "mmproj" in f["name"].lower() and f["name"].lower().endswith(".gguf")), None)
+            if not companion or not companion.get("size") or projector == filename or filename == "__safetensors__":
+                raise ValueError("Choose a distinct GGUF projector from the pinned repository")
+        async def attach_projector(artifact):
+            if companion:
+                self.progress(ident, f"Downloading selected projector: {projector}")
+                path = await asyncio.to_thread(hf_hub_download, repo_id=repo, filename=projector, revision=revision, cache_dir=str(destination / "hf"), tqdm_class=Progress)
+                digest = await asyncio.to_thread(adapters.file_hash, path)
+                if companion["sha256"] and digest != companion["sha256"]:
+                    raise ValueError("Projector checksum mismatch")
+                artifact["metadata"]["projector"] = {"name": projector, "path": str(path), "sha256": digest, "size": companion["size"]}
+            return self.store.put("artifact", artifact)
         if filename == "__safetensors__":
             allowed = (".safetensors", ".json", ".model", ".tiktoken", ".txt", ".jinja")
             files = [f for f in metadata["files"] if f["name"].endswith(allowed)]
@@ -141,6 +185,7 @@ class Jobs:
                 if file["sha256"] and artifact["metadata"]["file_sha256"].get(file["name"]) != file["sha256"]:
                     raise ValueError(f"Checksum mismatch: {file['name']}")
             artifact.update(id="artifact-" + artifact["sha256"][:20], name=repo, source="huggingface", repo=repo, source_revision=revision)
+            artifact["metadata"]["discovery"] = metadata.get("capabilities", {})
             return self.store.put("artifact", artifact)
         if not filename.lower().endswith(".gguf"):
             raise ValueError("Select a GGUF file or safetensors snapshot")
@@ -150,7 +195,7 @@ class Jobs:
         size = sum(f["size"] for f in shards)
         destination = self.store.root / "models"
         destination.mkdir(exist_ok=True)
-        if shutil.disk_usage(destination).free < size + 1024**3:
+        if shutil.disk_usage(destination).free < size + (companion["size"] if companion else 0) + 1024**3:
             raise ValueError("Insufficient disk capacity (1 GiB reserve required)")
         if len(shards) > 1:
             paths = []
@@ -169,7 +214,8 @@ class Jobs:
                             size_bytes=size, sha256=digests[0], source="huggingface", repo=repo, source_revision=revision)
             artifact["metadata"]["shards"] = [{"name": f["name"], "path": str(p), "size": f["size"], "sha256": d}
                                                for f, p, d in zip(shards, paths, digests)]
-            return self.store.put("artifact", artifact)
+            artifact["metadata"]["discovery"] = metadata.get("capabilities", {})
+            return await attach_projector(artifact)
         file = shards[0]
         self.progress(ident, f"Downloading {filename} · {file['size']:,} bytes · resumes from HF cache")
         path = await asyncio.to_thread(hf_hub_download, repo_id=repo, filename=filename, revision=revision, cache_dir=str(destination / "hf"), tqdm_class=Progress)
@@ -178,7 +224,8 @@ class Jobs:
         if file["sha256"] and artifact["sha256"] != file["sha256"]:
             raise ValueError("Downloaded checksum does not match repository metadata")
         artifact.update(id="artifact-" + artifact["sha256"][:20], source="huggingface", repo=repo, source_revision=revision)
-        return self.store.put("artifact", artifact)
+        artifact["metadata"]["discovery"] = metadata.get("capabilities", {})
+        return await attach_projector(artifact)
 
     def install_plan(self, source):
         engine = source.get("engine")

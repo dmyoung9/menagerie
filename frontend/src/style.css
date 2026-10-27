@@ -160,7 +160,7 @@ details[open] > summary {margin-bottom: 14px; color: #dce9df;}
 .dialog-head {display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; border-bottom: 1px solid var(--line); flex-shrink: 0;}
 .dialog-head h2 {font-size: 20px; margin: 0;}
 .dialog-head .icon-button {background: transparent; border: 0;}
-.dialog-body {padding: 24px; overflow-y: auto; overscroll-behavior: contain;}
+.dialog-body {padding: 24px; overflow-y: auto; overscroll-behavior: contain; min-height: 0;}
 .dialog-body > :last-child {margin-bottom: 0;}
 .dialog-actions {display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); flex-wrap: wrap;}
 .field {display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; font-size: 13px;}
@@ -261,6 +261,10 @@ details[open] > summary {margin-bottom: 14px; color: #dce9df;}
 .editor-page .dialog-body {padding: 24px max(20px, calc((100vw - 1000px) / 2)) 0;}
 .dialog:has(.configuration-fields) .dialog-actions, .editor-page .dialog-actions {position: sticky; bottom: 0; background: #151f19; padding: 16px 0 max(16px, env(safe-area-inset-bottom)); z-index: 2;}
 .dialog:has(.configuration-fields) .dialog-body {scroll-padding-bottom: 90px;}
+.dialog-actions > .action-menu {margin-right:auto;flex:0 0 auto;}
+.dialog-actions > .action-menu summary {min-width:44px;min-height:44px;}
+.dialog-actions > .primary {min-height:44px;}
+.dialog:has(.configuration-fields) .dialog-actions {box-shadow:0 -12px 20px #151f19;}
 .configuration-fields > legend, .model-composer > legend {font-size: 17px; font-weight: 600; margin-bottom: 16px;}
 .settings-section {border-top: 1px solid var(--line); padding-top: 16px;}
 .settings-section > summary {font-weight: 600;}

@@ -61,7 +61,7 @@ export function Dialog({title, close, children, busy = false, wide = false, edit
     window.addEventListener('beforeunload', warn);
     return () => {ref.current?.close(); previous?.focus(); window.removeEventListener('beforeunload', warn);};
   }, []);
-  return <dialog ref={ref} onChangeCapture={e => {if ((e.target as HTMLElement).closest('form')) dirty.current = true;}} className={'dialog ' + (wide ? 'wide ' : '') + (editor ? 'editor-page' : '')} aria-labelledby={id} onCancel={e => {e.preventDefault(); dismiss();}}>
+  return <dialog ref={ref} onChangeCapture={e => {if ((e.target as HTMLElement).closest('form')) dirty.current = true;}} onClickCapture={e => {if ((e.target as HTMLElement).closest('form button[aria-pressed]')) dirty.current = true;}} className={'dialog ' + (wide ? 'wide ' : '') + (editor ? 'editor-page' : '')} aria-labelledby={id} onCancel={e => {e.preventDefault(); dismiss();}}>
     <div className="dialog-head"><h2 id={id}>{title}</h2><button className="icon-button" aria-label="Close dialog" disabled={busy} onClick={dismiss}><X size={18}/></button></div>
     <div className="dialog-body">{children}</div>
   </dialog>;

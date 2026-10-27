@@ -1,12 +1,10 @@
 [Unit]
 Description=Menagerie local inference control plane
 After=network.target
-Conflicts=llama-shelf.service llama-router.service llama-gemma4.service
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Projects/menagerie
-ExecStart=%h/Projects/menagerie/.venv/bin/python -m controlplane
+ExecStart=%h/.local/bin/menagerie serve
 Environment=PYTHONDONTWRITEBYTECODE=1
 Restart=on-failure
 RestartSec=5

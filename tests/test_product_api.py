@@ -16,7 +16,7 @@ async def test_connection_details_and_exports_use_configured_gateway(tmp_path):
         export = await client.post("/api/integration/opencode/export", json={}, headers={"X-Menagerie-Token": status["csrf_token"]})
         assert export.status_code == 200
         config = json.loads((tmp_path / "opencode-managed.json").read_text())
-        assert config["providers"]["llama.cpp"]["settings"]["baseURL"] == status["gateway_url"]
+        assert config["providers"]["menagerie"]["settings"]["baseURL"] == status["gateway_url"]
         assert (await client.get("/v1/models")).status_code == 200
         assert json.loads((tmp_path / "opencode-managed.json").read_text()) == config
 
@@ -55,17 +55,41 @@ async def test_wizard_configuration_saves_without_loading_and_preserves_snapshot
         assert store.get("deployment", deployment["id"])["profile_snapshot"]["config"]["ctx-size"] == 65536
 
 
-async def test_personal_migration_endpoints_are_not_product_features(tmp_path):
+async def test_unrelated_history_is_preserved(tmp_path):
     archive = tmp_path / "history.sqlite3"
     archive.write_bytes(b"preserved historical data")
     app = create_app(tmp_path)
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-            headers = {"X-Menagerie-Token": (await client.get("/api/status")).json()["csrf_token"]}
-            for path in ("/api/import/shelf/preview", "/api/import/shelf"):
-                assert (await client.post(path, json={}, headers=headers)).status_code == 404
             assert (await client.get("/api/history/legacy")).status_code == 404
             assert app.state.store.list("job") == []
             assert archive.read_bytes() == b"preserved historical data"
+    finally:
+        await app.state.manager.close()
+
+
+async def test_add_from_file_registers_in_place_with_token(tmp_path):
+    import asyncio
+    import struct
+    weights = tmp_path / "model.gguf"
+    original = b"GGUF" + struct.pack("<IQQ", 3, 0, 0)
+    weights.write_bytes(original)
+    app = create_app(tmp_path / "state")
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+            assert (await client.post("/api/models/local", json={"path": str(weights)})).status_code == 403
+            headers = {"X-Menagerie-Token": (await client.get("/api/status")).json()["csrf_token"]}
+            response = await client.post("/api/models/local", json={"path": str(weights)}, headers=headers)
+            assert response.status_code == 200
+            ident = response.json()["id"]
+            for _ in range(100):
+                job = app.state.store.get("job", ident)
+                if job["state"] in {"SUCCEEDED", "FAILED"}:
+                    break
+                await asyncio.sleep(.01)
+            assert job["state"] == "SUCCEEDED", job
+            model, = (await client.get("/api/models")).json()
+            assert model["local_path"] == str(weights) and model["source"] == "local"
+            assert weights.read_bytes() == original
     finally:
         await app.state.manager.close()

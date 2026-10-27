@@ -40,10 +40,10 @@ async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
             assert store.get("deployment", second["id"]) == second
             rows = (await client.get("/v1/models")).json()["data"]
             gemma = next(row for row in rows if row["id"] == "gemma4")
-            assert gemma["shelf"]["catalog_id"] == "gemma4"
-            assert gemma["shelf"]["model"]["name"] == "Gemma Renamed"
+            assert gemma["menagerie"]["catalog"]["catalog_id"] == "gemma4"
+            assert gemma["menagerie"]["catalog"]["model"]["name"] == "Gemma Renamed"
             await client.post("/api/integration/opencode/export", json={}, headers=headers)
-            models = json.loads((tmp_path / "opencode-managed.json").read_text())["providers"]["llama.cpp"]["models"]
+            models = json.loads((tmp_path / "opencode-managed.json").read_text())["providers"]["menagerie"]["models"]
             assert models["gemma4"]["name"] == "Gemma Renamed"
             assert models["gemma4"]["modelID"] == "gemma4"
             store.put("session", {"id": "session", "deployment_snapshot": first,

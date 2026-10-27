@@ -15,7 +15,7 @@ from .jobs import Jobs
 from .manager import Manager, Conflict, ACTIVE, redact
 from .schema import Artifact, Runtime, Profile, Deployment, DeploymentSet, Settings, ResourcePreview
 from .store import Store, encode, identity, uid
-from .catalog import normalize, export_config
+from .catalog import normalize, export_config, apply_reasoning
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -140,6 +140,9 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             return deployment_rows()
         if kind == "runtimes":
             return [r | {"capabilities": r.get("capabilities", {}) | {"schema": adapters.option_schema(r)}} for r in store.list("runtime")]
+        if kind == "models":
+            from .capabilities import inspect
+            return [r | {"discovered_capabilities": inspect(r.get("metadata", {}))} for r in store.list("artifact")]
         return store.list(kinds[kind])
 
     @app.get("/api/models")
@@ -231,8 +234,8 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 store.event("deployment_separated", {"name": unit["name"], "members": unit["member_ids"]}, ident, c)
             return {"member_ids": unit["member_ids"]}
 
-    @app.post("/api/models/import")
-    async def import_model(request: Request):
+    @app.post("/api/models/local")
+    async def add_local_model(request: Request):
         body = await request.json()
         async def work(ident):
             jobs.progress(ident, "Reading metadata and hashing weights")
@@ -240,7 +243,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             artifact.update(id="artifact-" + (artifact["sha256"] or identity(artifact["local_path"]))[:20], source="local")
             existing = next((a for a in store.list("artifact") if a.get("sha256") and a["sha256"] == artifact["sha256"] or a["local_path"] == artifact["local_path"]), None)
             return existing or store.put("artifact", artifact)
-        return jobs.submit("Import local artifact", work)
+        return jobs.submit("Add local model", work)
 
     @app.post("/api/runtimes")
     async def runtime(body: Runtime):
@@ -516,6 +519,20 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     async def hf_search(q: str):
         return await jobs.hf_search(q)
 
+    @app.post("/api/models/{ident}/inspect")
+    async def inspect_model(ident: str):
+        artifact = store.get("artifact", ident)
+        async def action(job):
+            jobs.progress(job, "Inspecting local metadata; weights stay in place")
+            inspected = await asyncio.to_thread(adapters.inspect_artifact, artifact["local_path"])
+            metadata = {k: v for k, v in inspected["metadata"].items() if k != "file_sha256"}
+            if artifact.get("repo") and artifact.get("source_revision"):
+                upstream = await jobs.hf_files(artifact["repo"], artifact["source_revision"])
+                metadata["discovery"] = upstream["capabilities"]
+            current = store.get("artifact", ident)
+            return store.put("artifact", current | {"metadata": current.get("metadata", {}) | metadata})
+        return jobs.submit("Inspect model capabilities", action)
+
     @app.get("/api/catalog/hf/files")
     async def hf_files(repo: str, revision: str = "main"):
         return await jobs.hf_files(repo, revision)
@@ -541,7 +558,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.post("/api/downloads")
     async def download(request: Request):
         body = await request.json()
-        return jobs.submit("Download model", lambda job: jobs.download(job, body["repo"], body["revision"], body["filename"]))
+        return jobs.submit("Download model", lambda job: jobs.download(job, body["repo"], body["revision"], body["filename"], body.get("projector")))
 
     @app.get("/api/catalog/ollama")
     async def ollama():
@@ -571,6 +588,20 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     jobs.progress(ident, f"{progress.get('status', 'Downloading')} · {progress.get('completed', 0):,} / {progress.get('total', 0):,} bytes")
             return {"model": name, "storage_owner": "Ollama", "note": "Ollama owns its blob format. Direct use with other engines is not assumed."}
         return jobs.submit("Ollama pull", action)
+
+    @app.get("/api/catalog/ollama/show")
+    async def ollama_show(model: str):
+        import re
+        from .capabilities import ollama
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_./:-]{0,199}", model):
+            raise ValueError("Invalid Ollama model name")
+        try:
+            response = await manager.client.post("http://127.0.0.1:11434/api/show", json={"model": model}, timeout=10)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise ValueError("Ollama model inspection unavailable; ensure this model is installed locally") from exc
+        info = response.json()
+        return {"model": model, "details": info.get("details", {}), "capabilities": ollama(info)}
 
     @app.post("/api/runtimes/install/preview")
     async def install_preview(request: Request):
@@ -604,7 +635,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             catalog = normalize(d["profile_snapshot"], d["alias"])
             catalog["catalog_id"] = d["alias"]
             catalog["model"]["name"] = d["name"]
-            rows.append({"id": d["alias"], "object": "model", "created": 0, "owned_by": "menagerie", "shelf": catalog, "menagerie": {"deployment_id": d["id"], "state": d["state"], "residency": d["residency"]}})
+            rows.append({"id": d["alias"], "object": "model", "created": 0, "owned_by": "menagerie", "menagerie": {"catalog": catalog, "deployment_id": d["id"], "state": d["state"], "residency": d["residency"]}})
         return rows
 
     @app.post("/api/integration/opencode/export")
@@ -640,6 +671,14 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         body = await request.json()
         correlation = uid()
         started = time.monotonic()
+        if "menagerie_variant" in body:
+            candidate = next((d for d in store.list("deployment") if d.get("alias") == body.get("model") and d.get("enabled")), None)
+            if candidate:
+                try:
+                    apply_reasoning(body, candidate["profile_snapshot"])
+                except ValueError as exc:
+                    # Invalid selectors must not trigger an expensive on-demand load.
+                    return JSONResponse({"error": {"message": str(exc), "type": "invalid_request_error"}}, 400)
         try:
             d = await manager.acquire(body.get("model", ""))
         except KeyError:
@@ -660,6 +699,11 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     session["output_tokens"] = session.get("output_tokens", 0) + (record["output_tokens"] or 0)
                     session["total_request_seconds"] = session.get("total_request_seconds", 0) + record["latency"]
                     store.put("session", session, historical=False, c=c)
+        try:
+            body = apply_reasoning(body, d["profile_snapshot"])
+        except ValueError as exc:
+            finish("invalid_reasoning_option")
+            return JSONResponse({"error": {"message": str(exc), "type": "invalid_request_error"}}, 400)
         body["model"] = d["alias"]
         sending = asyncio.create_task(manager.client.send(manager.client.build_request("POST", f"http://127.0.0.1:{d['port']}/v1/chat/completions", json=body, headers={"X-Request-ID": correlation}), stream=True))
         try:
@@ -732,13 +776,25 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 finish(error)
         return StreamingResponse(relay(), media_type="text/event-stream", headers={"X-Request-ID": correlation, "X-Menagerie-Deployment": d["id"], "X-Accel-Buffering": "no"})
 
-    dist = ROOT / "frontend/dist"
+    dist = Path(__file__).resolve().parent / "static"
+    if not dist.exists():
+        dist = ROOT / "frontend/dist"
     if dist.exists():
         app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
         @app.get("/favicon.svg")
         async def favicon():
             return FileResponse(dist / "favicon.svg", media_type="image/svg+xml")
+        @app.get("/logo.png")
+        async def logo():
+            return FileResponse(dist / "logo.png", media_type="image/png")
+        @app.get("/logo-mono.png")
+        async def logo_mono():
+            return FileResponse(dist / "logo-mono.png", media_type="image/png")
         @app.get("/")
         async def index():
             return FileResponse(dist / "index.html", headers={"Cache-Control": "no-store"})
+    else:
+        @app.get("/")
+        async def missing_dashboard():
+            return JSONResponse({"error": "Dashboard assets missing. Build frontend with npm ci && npm run build, or install a Menagerie wheel."}, status_code=503)
     return app

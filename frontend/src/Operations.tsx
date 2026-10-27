@@ -20,6 +20,7 @@ export function LaunchReview({modal, deployments, close, done, host}: {modal: Ro
 export function Connect({endpoint, deployments, close}: {endpoint: string; deployments: Row[]; close: () => void}) {
   const [tab, setTab] = useState('Example request'), [alias, setAlias] = useState(deployments.find(d => d.lifecycle?.serving)?.alias || ''), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const available = deployments.filter(d => d.lifecycle?.serving);
+  const pluginCommand = `menagerie plugin install --gateway-port ${new URL(endpoint || 'http://127.0.0.1:8001/v1').port || '80'}`;
   const request = [
     `curl ${endpoint}/chat/completions`,
     `  -H 'Content-Type: application/json'`,
@@ -28,7 +29,7 @@ export function Connect({endpoint, deployments, close}: {endpoint: string; deplo
   return <Dialog title="Connect client" close={close} wide><div className="endpoint-field"><span>Base URL</span><code>{endpoint || 'Loading…'}</code>{endpoint && <CopyButton value={endpoint} label="Copy base URL"/>}</div><Field label="Model"><div className="copy-value"><select value={alias} onChange={e => setAlias(e.target.value)}>{available.map(d => <option key={d.id} value={d.alias}>{d.alias}</option>)}</select>{alias && <CopyButton value={alias} label="Copy model"/>}</div></Field>{!available.length && <p className="muted">No models are available to clients yet.</p>}<p className="muted">Use this endpoint on the machine running Menagerie. Inference is loopback-only.</p>
     <Tabs items={['Example request', 'OpenCode']} value={tab} onChange={setTab}/>
     {tab === 'Example request' && alias && <div className="code-block"><CopyButton value={request} label="Copy example request"/><pre>{request}</pre></div>}
-    {tab === 'OpenCode' && <><p>Export a provider fragment to merge into your client configuration.</p><button onClick={async () => {try {const r = await api('/api/integration/opencode/export', {}); setNotice('Saved to ' + r.path); setError('');} catch (e) {setError(message(e));}}}>Export configuration</button><p className="muted">Clients using dynamic discovery do not need a static export.</p></>}
+    {tab === 'OpenCode' && <><p>Install Menagerie's bundled discovery plugin on the machine running OpenCode:</p><div className="code-block"><CopyButton value={pluginCommand} label="Copy plugin install command"/><pre>{pluginCommand}</pre></div><p className="muted">For source installations use .venv/bin/menagerie. Then restart the owning OpenCode server and reconnect OpenChamber. Existing client settings and model defaults are preserved.</p><p>Without the plugin, export a static provider fragment to merge into your configuration:</p><button onClick={async () => {try {const r = await api('/api/integration/opencode/export', {}); setNotice('Saved to ' + r.path); setError('');} catch (e) {setError(message(e));}}}>Export configuration</button><p className="muted">Do not combine static model overrides with discovery unless intentional.</p></>}
     {notice && <p role="status" className="muted path">{notice}</p>}{error && <p role="alert" className="error-text">{error}</p>}
   </Dialog>;
 }

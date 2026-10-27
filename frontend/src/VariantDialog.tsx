@@ -11,6 +11,7 @@ export function VariantDialog({source,name,api,close,queued,openModel}:Props){
   const [data,setData]=useState<Row|null>(null),[refs,setRefs]=useState<Row[]>([]),[revision,setRevision]=useState('main');
   const [selection,setSelection]=useState<Selection>({}),[exact,setExact]=useState(''),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [submitting,setSubmitting]=useState(false),[localAvailable,setLocalAvailable]=useState(false),[related,setRelated]=useState<Row[]|null>(null),[relatedBusy,setRelatedBusy]=useState(false);
+  const [projector,setProjector]=useState('');
   const variants=useMemo(()=>data?(source==='hf'?hfVariants(data.files):ollamaVariants(data.models)):[],[data,source]);
   const matches=candidates(variants,selection);
   const selected:Variant|undefined=matches.length===1?matches[0]:matches.find(v=>v.id===exact);
@@ -23,7 +24,7 @@ export function VariantDialog({source,name,api,close,queued,openModel}:Props){
     return()=>{node.close();document.body.style.overflow=overflow;before?.focus()};
   },[]);
   useEffect(()=>{
-    let active=true;setLoading(true);setError('');setData(null);setSelection({});setExact('');
+    let active=true;setLoading(true);setError('');setData(null);setSelection({});setExact('');setProjector('');
     (async()=>{
       try{
         const next=await api(source==='hf'?`/api/catalog/hf/files?repo=${encodeURIComponent(name)}&revision=${encodeURIComponent(revision)}`:`/api/catalog/ollama/variants?model=${encodeURIComponent(name)}`);
@@ -41,7 +42,7 @@ export function VariantDialog({source,name,api,close,queued,openModel}:Props){
     if(!ready||!selected||!data)return;
     setSubmitting(true);setError('');
     try{
-      await api(source==='hf'?'/api/downloads':'/api/catalog/ollama/pull',source==='hf'?{repo:name,revision:data.revision,filename:selected.id}:{name:selected.id});
+      await api(source==='hf'?'/api/downloads':'/api/catalog/ollama/pull',source==='hf'?{repo:name,revision:data.revision,filename:selected.id,...(selected.format==='GGUF'&&projector?{projector}:{})}:{name:selected.id});
       queued();close();
     }catch(e){setError(String(e));setSubmitting(false)}
   }
@@ -61,6 +62,7 @@ export function VariantDialog({source,name,api,close,queued,openModel}:Props){
       {notice&&<p>{notice}</p>}
       {loading?<div className="variant-loading" role="status"><LoaderCircle size={24}/>Loading available variants…</div>:data&&<>
         {variants.length===0&&<p>No primary downloadable weights were found in this repository. Try a linked quantization below.</p>}
+        {data.capabilities&&<details><summary>Detected capabilities & dependencies</summary><p>{[...data.capabilities.input,...(data.capabilities.tools?['tools']:[]),...(data.capabilities.reasoning?['reasoning']:[])].join(' · ')}</p><p>{data.capabilities.evidence.join('; ')||'No conclusive structured metadata.'}</p><p>{data.capabilities.note}</p>{data.capabilities.warnings?.map((w:string)=><p key={w}>{w}</p>)}</details>}
         {dimensions.map((d,index)=>{
           if(d==='format'&&new Set(variants.map(v=>v.format)).size<2)return null;
           if(d==='parameters'&&new Set(variants.map(v=>v.parameters)).size<2)return null;
@@ -72,6 +74,7 @@ export function VariantDialog({source,name,api,close,queued,openModel}:Props){
           return <fieldset className="variant-field" key={d}><legend>{labels[d]}</legend><div className="variant-options">{values.map(value=><button key={value} type="button" className={'variant-chip '+(selection[d]===value?'chosen':'')} aria-pressed={selection[d]===value} disabled={locked||!available.has(value)||submitting} title={locked?'Choose the preceding option first':!available.has(value)?'Not available for this model and selection':value} onClick={()=>{setSelection(choose(variants,selection,d,value));setExact('')}}>{selection[d]===value&&<Check size={13}/>} {value==='None'?'No suffix':value}</button>)}</div></fieldset>
         })}
         {matches.length>1&&dimensions.every(d=>!!selection[d])&&<label>Exact variant<select value={exact} disabled={submitting} onChange={e=>setExact(e.target.value)}><option value="">Choose the supplier variant…</option>{matches.map(v=><option key={v.id} value={v.id}>{v.label}</option>)}</select><small>These files/tags share the same chip choices. Choose the exact supplier variant.</small></label>}
+        {source==='hf'&&selected?.format==='GGUF'&&data.capabilities?.dependencies?.length>0&&<label>Optional multimodal projector<select value={projector} disabled={submitting} onChange={e=>setProjector(e.target.value)}><option value="">Do not download a projector</option>{data.capabilities.dependencies.map((d:Row)=><option key={d.name} value={d.name}>{d.name} · {byteSize(d.size)}</option>)}</select><small>Candidates only: confirm compatibility with these weights. The selected file is checked against its upstream checksum when available and must be enabled in deployment settings.</small></label>}
         <div className="variant-summary" aria-live="polite"><span className="eyebrow">YOUR SELECTION</span>{selected?<>
           <h3>{selected.label}</h3><div className="catalog-chips"><span className="catalog-chip">{selected.format}</span><span className="catalog-chip">{selected.quant}</span>{selected.suffix!=='None'&&<span className="catalog-chip">{selected.suffix}</span>}{selected.parameters!=='Unspecified'&&<span className="catalog-chip">{selected.parameters}</span>}{selected.bytes!==null&&<span className="catalog-chip">{byteSize(selected.bytes)}</span>}{selected.note&&<span className="catalog-chip">{selected.note}</span>}</div>
           {!selected.complete&&<p className="error-text">The supplier listing is missing shards. This variant cannot be downloaded.</p>}

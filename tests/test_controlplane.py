@@ -8,7 +8,7 @@ import struct
 import sys
 import httpx
 import pytest
-from controlplane import adapters, importer
+from controlplane import adapters
 from controlplane.api import create_app
 from controlplane.catalog import normalize
 from controlplane.manager import Manager, Conflict
@@ -224,16 +224,16 @@ async def test_ui_revision_guard_and_model_catalog_contract(tmp_path):
         d = store.get("deployment", "a")
         store.put("deployment", d | {"residency": "on-demand"})
         rows = (await client.get("/v1/models")).json()["data"]
-        assert len(rows) == 1 and rows[0]["shelf"]["version"] == 2
-        # An unloaded enabled deployment is discoverable; an imported disabled
+        assert len(rows) == 1 and rows[0]["menagerie"]["catalog"]["version"] == 2
+        # An unloaded enabled deployment is discoverable; a disabled
         # on-demand deployment is not, even though its profile and weights exist.
         other = store.get("deployment", "b")
         store.put("deployment", other | {"residency": "on-demand", "enabled": False})
         assert [row["id"] for row in (await client.get("/v1/models")).json()["data"]] == ["a"]
-        assert rows[0]["shelf"]["model"]["cost"][0]["cache"]["read"] == 0
+        assert rows[0]["menagerie"]["catalog"]["model"]["cost"][0]["cache"]["read"] == 0
         exported = (await client.post("/api/integration/opencode/export", json={})).json()
         config = json.loads(Path(exported["path"]).read_text())
-        assert config["providers"]["llama.cpp"]["models"]["a"]["modelID"] == "a"
+        assert config["providers"]["menagerie"]["models"]["a"]["modelID"] == "a"
         bad = await client.post("/api/profiles?expected=0", json={"id":"a","name":"a","artifact_id":"weights","runtime_id":"runtime","config":{},"raw_args":[],"catalog":{}})
         assert bad.status_code == 400
     await m.close()

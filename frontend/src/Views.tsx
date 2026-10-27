@@ -1,8 +1,14 @@
 import {useEffect, useRef, useState} from 'react';
 import {ArrowLeft, ArrowUpRight, Plus} from 'lucide-react';
-import {active, api, CopyButton, date, Empty, eventText, gib, Json, Menu, message, mode, number, state, Status, Tabs, visible, type Registry, type Row} from './ui';
+import {active, api, CopyButton, date, Dialog, Empty, eventText, gib, Json, Menu, message, mode, number, state, Status, Tabs, visible, type Registry, type Row} from './ui';
+import {ModelCard} from './ModelCard';
+import {byteSize, parameterSize, quantization} from './variants';
 
 export const go = (path: string) => {window.location.hash = '/' + path;};
+function InspectModel({id}: {id: string}) {
+  const [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
+  return <><button disabled={busy} onClick={async () => {setBusy(true); try {await api(`/api/models/${id}/inspect`, {}); setNotice('Inspection queued. Results refresh automatically; see Activity for progress.');} catch (e) {setNotice(message(e));} finally {setBusy(false);}}}>Refresh capability metadata</button>{notice && <p role="status">{notice}</p>}</>;
+}
 type Actions = {edit: (kind: string, row?: Row, clone?: boolean) => void; load: (kind: string, row: Row) => void; stop: (kind: string, row: Row) => void; enable: (d: Row, enabled: boolean) => void; inspect: (title: string, value: any) => void; revisions: (row: Row) => void};
 export function ActivityFeed({events, deployments}: {events: Row[]; deployments: Row[]}) {
   return events.length ? <ol className="activity-feed">{events.map(e => <li key={e.seq}><span className={'event-dot ' + ((e.data?.to === 'FAILED' || e.data?.error) ? 'failed' : '')}/><span>{eventText(e, deployments)}</span><time dateTime={new Date(e.ts * 1000).toISOString()} title={date(e.ts)}>{new Date(e.ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</time></li>)}</ol> : <p className="muted padded">No recent activity.</p>;
@@ -53,10 +59,41 @@ export function DeploymentDetail({d, tab, data, host, inflight, actions, events}
   </>;
 }
 
-export function ModelLibrary({data, query, setQuery, create, inspect, importModel, discover}: {data: Registry; query: string; setQuery: (q: string) => void; create: (id: string) => void; inspect: (title: string, value: any) => void; importModel: () => void; discover: () => void}) {
-  const rows = (data.models || []).filter(m => m.name.toLowerCase().includes(query.toLowerCase()));
-  if (!data.models?.length) return <Empty title="No models yet"><div className="actions"><button className="primary" onClick={discover}>Discover models</button><button onClick={importModel}>Import local files</button></div></Empty>;
-  return <><input className="search" type="search" aria-label="Search installed models" placeholder="Search models…" value={query} onChange={e => setQuery(e.target.value)}/><div className="model-grid">{rows.map(m => <article className="panel library-card" key={m.id}><span className="format-label">{m.format.toUpperCase()}</span><h2>{m.name}</h2><p className="muted">{[m.architecture, m.quantization, number(m.size_bytes / 1024 ** 3) + ' GiB'].filter(Boolean).join(' · ')}</p><div className="card-actions"><button onClick={() => create(m.id)}>Create deployment</button><button className="quiet" onClick={() => inspect(m.name, m)}>Details</button></div></article>)}</div>{!rows.length && <Empty title="No matching models"/>}</>;
+export function ModelLibrary({data, query, setQuery, create, inspect, addFromFile, discover}: {data: Registry; query: string; setQuery: (q: string) => void; create: (id: string) => void; inspect: (title: string, value: any) => void; addFromFile: () => void; discover: () => void}) {
+  const [format, setFormat] = useState(''), [capability, setCapability] = useState(''), [selected, setSelected] = useState('');
+  function chips(m: Row): string[] {
+    const hints = m.discovered_capabilities || {};
+    const params = parameterSize(m.repo || m.name);
+    const quant = quantization(m.name);
+    const quantLabel = quant.quant !== 'Other / default' ? quant.quant + (quant.suffix !== 'None' ? '_' + quant.suffix : '') : m.quantization;
+    return [m.source === 'huggingface' ? 'Hugging Face' : 'Local file', m.format.toUpperCase(), params !== 'Unspecified' && params, quantLabel && `Quantization: ${quantLabel}`, m.architecture, byteSize(m.size_bytes), hints.reasoning && 'reasoning', hints.tools && 'tools', ...(hints.input || []).filter((v: string) => v !== 'text')].filter(Boolean);
+  }
+  const rows = (data.models || []).filter(m => [m.name, m.repo, m.architecture].filter(Boolean).join(' ').toLowerCase().includes(query.toLowerCase()) && (!format || m.format === format) && (!capability || chips(m).includes(capability)));
+  const groups = new Map<string, Row[]>();
+  for (const row of rows) {const key = row.repo ? `${row.source}:${row.repo}` : row.id; groups.set(key, [...(groups.get(key) || []), row]);}
+  const current = data.models?.find(m => m.id === selected);
+  const siblings = current ? (data.models || []).filter(m => current.repo ? m.repo === current.repo && m.source === current.source : m.id === current.id) : [];
+  if (!data.models?.length) return <Empty title="No models yet"><div className="actions"><button className="primary" onClick={discover}>Discover models</button><button onClick={addFromFile}><Plus size={16}/>Add from File</button></div></Empty>;
+  return <>
+    <div className="toolbar"><input className="search" type="search" aria-label="Search installed models" placeholder="Search models…" value={query} onChange={e => setQuery(e.target.value)}/><select aria-label="Filter model format" value={format} onChange={e => setFormat(e.target.value)}><option value="">All formats</option>{[...new Set((data.models || []).map(m => m.format))].map(f => <option key={f}>{f}</option>)}</select><select aria-label="Filter model capability" value={capability} onChange={e => setCapability(e.target.value)}><option value="">All capabilities</option>{['reasoning', 'tools', 'image', 'audio', 'video'].map(c => <option key={c}>{c}</option>)}</select></div>
+    <p className="muted">Capability badges are detected hints. Deployment settings control what clients see.</p>
+    <div className="catalog-grid">{[...groups].map(([key, models]) => {
+      const m = models[0];
+      return <ModelCard key={key} name={m.repo || m.name} url={m.source === 'huggingface' && m.repo ? `https://huggingface.co/${m.repo}` : undefined} chips={models.length === 1 ? chips(m) : [...new Set(models.flatMap(chips))]} footer={`${models.length} installed variant${models.length === 1 ? '' : 's'}`}><div className="actions"><button onClick={() => models.length === 1 ? create(m.id) : setSelected(m.id)}>{models.length === 1 ? 'Create deployment' : 'Choose variant'}</button><button onClick={() => setSelected(m.id)}>Details</button></div></ModelCard>;
+    })}</div>
+    {!rows.length && <Empty title="No matching models"/>}
+    {current && <Dialog title={current.repo || current.name} close={() => setSelected('')} wide>
+      <label>Installed variant<select value={selected} onChange={e => setSelected(e.target.value)}>{siblings.map(m => <option key={m.id} value={m.id}>{m.name} · {byteSize(m.size_bytes)}</option>)}</select></label>
+      <div className="catalog-chips">{chips(current).map(c => <span className="catalog-chip" key={c}>{c}</span>)}</div>
+      <h3>Capabilities & dependencies</h3>
+      <p>{current.discovered_capabilities?.evidence?.join('; ') || 'No conclusive capability metadata. Configure declarations in the deployment.'}</p><p>{current.discovered_capabilities?.note}</p>
+      {current.discovered_capabilities?.dependencies?.map((d: Row) => <p key={d.name}>{d.name} — {current.metadata?.projector?.name === d.name ? 'Downloaded; confirm compatibility' : 'Candidate; compatibility unverified'}</p>)}
+      <InspectModel key={current.id} id={current.id}/>
+      <h3>Deployments</h3>{(data.deployments || []).filter(d => d.profile_snapshot?.artifact_id === current.id).map(d => <p key={d.id}><a href={`#/deployments/${d.id}`} onClick={() => setSelected('')}>{d.name}</a> · {d.state}</p>)}
+      <details><summary>Local file</summary><code>{current.local_path}</code></details>
+      <div className="dialog-actions"><button onClick={() => inspect(current.name, current)}>Inspect metadata</button><button className="primary" onClick={() => {setSelected(''); create(current.id);}}>Create deployment</button></div>
+    </Dialog>}
+  </>;
 }
 
 export function ActivityPage({tab, jobs, events, deployments, inspect, restore}: {tab: string; jobs: Row[]; events: Row[]; deployments: Row[]; inspect: (title: string, value: any) => void; restore: (path: string, notice: string) => void}) {
