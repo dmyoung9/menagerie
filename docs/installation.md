@@ -1,5 +1,15 @@
 # Installation and recovery
 
+## Recommended release installer
+
+For a quick standalone installation using the published release wheel:
+
+```sh
+curl -sSL https://raw.githubusercontent.com/dmyoung9/menagerie/main/install.sh | bash
+```
+
+The installer supplies an isolated Python environment and dependencies, and offers to set up a background user service, OpenCode plugin, and dashboard launch.
+
 ## Source checkout
 
 Install Python 3.12+, uv, Node.js 22+, npm, and Git through your preferred trusted

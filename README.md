@@ -10,8 +10,13 @@ streaming gateway or the bundled OpenCode discovery plugin.
 
 ## Install
 
-Linux is the initial target. No release wheel has been published yet; build this
-checkout with Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22+, and npm:
+Linux is the initial target. Install the latest release directly:
+
+```sh
+curl -sSL https://raw.githubusercontent.com/dmyoung9/menagerie/main/install.sh | bash
+```
+
+Alternatively, to install from a local checkout or build a wheel:
 
 ```sh
 git clone https://github.com/dmyoung9/menagerie.git
