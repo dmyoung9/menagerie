@@ -69,3 +69,7 @@ drivers remain a host prerequisite. Windows/WSL and cross-distribution acceptanc
 are pending. See [installation and recovery](docs/installation.md),
 [operations](docs/operations.md), and [release validation](docs/release-validation.md)
 for verified coverage and remaining release gates.
+
+## License
+
+Menagerie is licensed under the **GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)**. See the [LICENSE](LICENSE) file for details.
