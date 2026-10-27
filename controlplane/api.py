@@ -149,6 +149,28 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     async def models():
         return store.list("artifact")
 
+    @app.get("/api/engines/catalog")
+    async def engine_catalog():
+        from .engine_catalog import ENGINES
+        return ENGINES
+
+    @app.get("/api/engines/releases")
+    async def engine_releases():
+        from .managed_engines import catalog
+        return await catalog(manager.client, store)
+
+    @app.post("/api/engines/install")
+    async def engine_install(request: Request):
+        from .managed_engines import install
+        body = await request.json()
+        recipe = store.get("engine_recipe", body["recipe_id"])
+        return jobs.submit(f"Install {recipe['engine']} {recipe['version']}", lambda ident: install(jobs, ident, recipe["id"]))
+
+    @app.get("/api/models/{ident}/engine-recommendation")
+    async def engine_recommendation(ident: str):
+        from .engine_catalog import recommend
+        return recommend(store.get("artifact", ident))
+
     @app.get("/api/deployments")
     async def deployments():
         return deployment_rows()
@@ -160,6 +182,9 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.post("/api/deployment-sets")
     async def save_deployment_set(body: DeploymentSet, expected: int | None = None):
         async with manager.lock:
+            if body.members:
+                from .resources import validate_budget
+                validate_budget(manager, [m.model_dump(exclude_none=True) for m in body.members])
             with store.transaction() as c:
                 data = body.model_dump(exclude_none=True)
                 drafts = data.pop("members", None)
@@ -196,7 +221,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         if not body.get("plan_token"):
             raise Conflict("Review the launch plan first")
         unit = manager.unit(ident)
-        return jobs.submit("Load " + unit["name"], lambda job: manager.activate([ident], body.get("override", False), token=body["plan_token"]))
+        return jobs.submit("Load " + unit["name"], lambda job: manager.activate([ident], token=body["plan_token"]))
 
     @app.post("/api/serving-deployments/{ident}/stop")
     async def stop_serving(ident: str):
@@ -261,6 +286,8 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             keys = ("engine", "execution_kind", "executable", "env", "command_template")
             if previous and (any(previous.get(k) != data.get(k) for k in keys) or previous["capabilities"].get("sha256") != data["capabilities"].get("sha256")):
                 raise Conflict("Runtime installations are version-specific. Clone/register a new installation instead of changing its executable or launch identity.")
+            if previous and previous.get("managed"):
+                data["managed"] = previous["managed"]
         return store.put("runtime", data)
 
     @app.get("/api/runtimes/{ident}/capabilities")
@@ -292,6 +319,8 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.post("/api/deployments")
     async def deployment(body: Deployment, expected: int | None = None):
         async with manager.lock:
+            from .resources import validate_budget
+            validate_budget(manager, [body.model_dump(exclude_none=True)])
             with store.transaction() as c:
                 saved = save_member(body.model_dump(exclude_none=True), expected, c)
                 owner = deployment_sets.unit_for(store, saved["id"])
@@ -346,7 +375,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.post("/api/deployments/{ident}/start")
     async def start(ident: str, request: Request):
         body = await request.json()
-        return jobs.submit("Start deployment", lambda job: manager.activate([ident], body.get("override", False), token=body.get("plan_token")))
+        return jobs.submit("Start deployment", lambda job: manager.activate([ident], token=body.get("plan_token")))
 
     @app.post("/api/deployments/{ident}/stop")
     async def stop(ident: str):
@@ -455,7 +484,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     d["port"] = next(port for port in range(8110, 65536) if port not in ports)
                     ports.add(d["port"])
                     deployments.append(store.put("deployment", d, c=c)["id"])
-                policy = saved.get("deployment_policy", {"residency": "pinned", "priority": 50, "idle_timeout": 0, "allow_eviction": False, "allow_uncertain": False, "queue_timeout": 300})
+                policy = saved.get("deployment_policy", {"residency": "pinned", "priority": 50, "idle_timeout": 0, "allow_eviction": False, "queue_timeout": 300})
                 value = DeploymentSet(name="Restored " + (saved.get("deployment_name") or ident[:8]), member_ids=deployments, **(policy | {"enabled": False})).model_dump(exclude_none=True)
                 return save_set(value | {"restored_from_activation": ident}, c=c)
 
@@ -485,7 +514,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             return [dict(r) | {"data": json.loads(r["data"])} for r in c.execute("SELECT * FROM requests ORDER BY ts DESC LIMIT 300")]
 
     @app.post("/api/registry/{kind}/{ident}/delete")
-    async def delete_record(kind: str, ident: str):
+    async def delete_record(kind: str, ident: str, remove_files: bool = False):
         if kind not in {"models", "runtimes", "profiles", "deployments"}:
             raise HTTPException(404)
         async with manager.lock:
@@ -502,10 +531,15 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     raise Conflict("Deployment snapshots still reference this record")
                 if kind != "profiles" and any(p.get(key) == ident for p in store.list("profile")):
                     raise Conflict("Profiles still reference this record")
+            if remove_files:
+                if kind != "runtimes":
+                    raise ValueError("File removal is only supported for managed engines")
+                from .managed_engines import remove
+                remove(store, row)
             with store.transaction() as c:
                 c.execute("DELETE FROM objects WHERE kind=? AND id=?", (kinds[kind], ident))
-                store.event("delete", {"kind": kind, "id": ident, "note": "Disk artifacts and historical revisions retained"}, c=c)
-            return {"deleted": ident, "disk_files_preserved": True}
+                store.event("delete", {"kind": kind, "id": ident, "disk_files_preserved": not remove_files}, c=c)
+            return {"deleted": ident, "disk_files_preserved": not remove_files}
 
     @app.post("/api/settings")
     async def settings(body: Settings):
@@ -545,63 +579,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     async def hf_quantizations(repo: str):
         return await jobs.hf_quantizations(repo)
 
-    @app.get("/api/catalog/ollama/search")
-    async def ollama_search(q: str = ""):
-        from .discovery import ollama_catalog
-        return await ollama_catalog(manager.client, query=q)
-
-    @app.get("/api/catalog/ollama/variants")
-    async def ollama_variants(model: str):
-        from .discovery import ollama_catalog
-        return await ollama_catalog(manager.client, model=model)
-
     @app.post("/api/downloads")
     async def download(request: Request):
         body = await request.json()
         return jobs.submit("Download model", lambda job: jobs.download(job, body["repo"], body["revision"], body["filename"], body.get("projector")))
-
-    @app.get("/api/catalog/ollama")
-    async def ollama():
-        try:
-            response = await manager.client.get("http://127.0.0.1:11434/api/tags", timeout=3)
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPError:
-            return {"models": [], "note": "Ollama is not reachable. Blobs are not reinterpreted as GGUF files."}
-
-    @app.post("/api/catalog/ollama/pull")
-    async def ollama_pull(request: Request):
-        import re
-        body = await request.json()
-        name = body.get("name", "")
-        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_./:-]{0,199}", name):
-            raise ValueError("Invalid Ollama model name")
-        async def action(ident):
-            async with manager.client.stream("POST", "http://127.0.0.1:11434/api/pull", json={"model": name, "stream": True}) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    progress = json.loads(line)
-                    if progress.get("error"):
-                        raise ValueError(progress["error"])
-                    jobs.progress(ident, f"{progress.get('status', 'Downloading')} · {progress.get('completed', 0):,} / {progress.get('total', 0):,} bytes")
-            return {"model": name, "storage_owner": "Ollama", "note": "Ollama owns its blob format. Direct use with other engines is not assumed."}
-        return jobs.submit("Ollama pull", action)
-
-    @app.get("/api/catalog/ollama/show")
-    async def ollama_show(model: str):
-        import re
-        from .capabilities import ollama
-        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_./:-]{0,199}", model):
-            raise ValueError("Invalid Ollama model name")
-        try:
-            response = await manager.client.post("http://127.0.0.1:11434/api/show", json={"model": model}, timeout=10)
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise ValueError("Ollama model inspection unavailable; ensure this model is installed locally") from exc
-        info = response.json()
-        return {"model": model, "details": info.get("details", {}), "capabilities": ollama(info)}
 
     @app.post("/api/runtimes/install/preview")
     async def install_preview(request: Request):

@@ -16,11 +16,6 @@ variables, reasoning markers, and `enable_thinking`. Missing metadata means
 unknown, not an assertion that a feature is unsupported. Tags and descriptions in
 search results remain weaker hints.
 
-The local Ollama inventory's **Inspect capabilities** uses `/api/show` declarations.
-Those apply to Ollama's runtime, not automatically to another engine. Ollama still
-owns its packages and dependency resolution; Menagerie does not reinterpret its
-blobs or add an Ollama serving adapter.
-
 GGUF `mmproj` files are shown as companion **candidates**, never automatically
 paired. Select a compatible projector explicitly during download. It is pinned to
 the same repository commit, checksummed, and compared to an upstream digest when

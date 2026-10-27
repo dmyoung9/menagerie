@@ -66,10 +66,10 @@ next step boundary, while pending permissions/forms are cancelled. This is usefu
 for an OpenChamber-managed server when the separate CLI service is stopped.
 Verify the resulting model catalog, not just the reload response.
 
-Activate matching backend and plugin versions together. The current plugin reads
-`menagerie.catalog`; an older `shelf` response is not a compatible substitute.
-Saved reasoning presets must appear as explicit `model.variants` in the live
-catalog before any client can display them. A newer dashboard alone does not
+Activate matching backend and plugin versions together. The plugin reads
+`menagerie.catalog`; a catalog from a different backend version is not a compatible
+substitute. Saved reasoning presets must appear as explicit `model.variants` in the
+live catalog before any client can display them. A newer dashboard alone does not
 update an already-running Python backend.
 
 ## Update, remove, and recover

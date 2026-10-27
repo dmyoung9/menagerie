@@ -2,7 +2,7 @@
 
 A serving deployment owns one or more models. Each member keeps its own API alias,
 runtime, configuration snapshot, port, process log, and session history. Loading mode,
-priority, idle timeout, client availability, uncertainty permission, and eviction
+priority, idle timeout, client availability, and eviction
 permission belong to the deployment.
 
 ## Operation
@@ -30,9 +30,10 @@ permission belong to the deployment.
   they were running at shutdown. A manual unload clears that restart intent.
 
 For automatic switching in both directions, both deployments must permit eviction,
-have compatible priorities, and not be pinned. On-demand starts with uncertain
-memory estimates also require explicit permission. Group membership does not bypass
-these safeguards.
+have compatible priorities, and not be pinned. On-demand starts are admitted against
+the reviewed memory estimate; there is no separate uncertainty approval. A start can
+still fail if external memory use changes after admission, and that failure stays
+visible. Group membership does not bypass these safeguards.
 
 ## Creation
 

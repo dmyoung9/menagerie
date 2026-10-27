@@ -5,7 +5,7 @@ async page => {
   const errors = [], writes = [];
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', e => {if(e.type()==='error'&&!e.text().startsWith('Failed to load resource:'))errors.push(e.text());});
-  const policy = {residency:'on-demand',priority:50,idle_timeout:300,allow_eviction:true,allow_uncertain:true,enabled:true,queue_timeout:300};
+  const policy = {residency:'on-demand',priority:50,idle_timeout:300,allow_eviction:true,enabled:true,queue_timeout:300};
   const profile = {id:'profile',name:'Model settings',revision:1,config:{'ctx-size':32768,parallel:1},catalog:{model:{limit:{context:32768}}},artifact_id:'weights',runtime_id:'engine',raw_args:[]};
   const member = (id,name,state) => ({...policy,id,name,state,alias:id,port:8120,profile_id:'profile',profile_snapshot:profile,revision:1,reservation_mib:0,gpu:0,lifecycle:{serving:true}});
   let members=[member('large','Bonsai 27B','READY')];
@@ -56,7 +56,6 @@ async page => {
   await dialog.getByRole('combobox',{name:'Add installed model',exact:true}).selectOption('gemma-weights');
   await dialog.getByRole('button',{name:'Add model',exact:true}).click();
   await dialog.getByLabel('Can unload to make room for another deployment',{exact:true}).check();
-  await dialog.getByLabel('Allow on-demand loading with uncertain memory estimates',{exact:true}).check();
   await dialog.getByRole('button',{name:'Save deployment',exact:true}).click();
   await page.getByRole('heading',{name:'Qwen + Gemma',exact:true}).waitFor();
   assert(writes.length===1,'Creation unexpectedly loaded or stopped a model');

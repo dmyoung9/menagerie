@@ -11,7 +11,7 @@ from test_controlplane import seed, baseline, port
 
 
 def link(store, ids=("a", "b"), **policy):
-    value = {"id": "pair", "name": "Pair", "member_ids": list(ids), "residency": "on-demand", "priority": 50, "idle_timeout": 1, "allow_eviction": True, "allow_uncertain": True, "enabled": True, "queue_timeout": 5} | policy
+    value = {"id": "pair", "name": "Pair", "member_ids": list(ids), "residency": "on-demand", "priority": 50, "idle_timeout": 1, "allow_eviction": True, "enabled": True, "queue_timeout": 5} | policy
     with store.transaction() as c:
         saved = store.put("deployment_set", value, c=c)
         for ident in ids:
@@ -161,7 +161,7 @@ async def test_plan_expands_full_unit_and_pinned_units_are_not_automatic_victims
     link(store, residency="pinned")
     third(store)
     try:
-        await m.activate(["pair"], True)
+        await m.activate(["pair"])
         m.host["gpus"][0]["free_mib"] = 3000
         assert m.automatic_stops(["c"]) == []
         plan = m.validate(["c"], ["a"])
@@ -180,7 +180,7 @@ async def test_new_deployment_owns_shared_policy_and_ignores_unused_group_record
             s = (await client.get("/api/status")).json()
             assert len(s["serving_deployments"]) == 2
             headers = {"X-Menagerie-Token": s["csrf_token"]}
-            body = {"name": "Pair", "member_ids": ["a", "b"], "residency": "on-demand", "allow_eviction": True, "allow_uncertain": True}
+            body = {"name": "Pair", "member_ids": ["a", "b"], "residency": "on-demand", "allow_eviction": True}
             response = await client.post("/api/deployment-sets", json=body, headers=headers)
             assert response.status_code == 200, response.text
             created = response.json()
@@ -229,7 +229,7 @@ async def test_membership_change_invalidates_review_token(tmp_path):
         plan = m.validate(["a"])
         link(store)
         with pytest.raises(Conflict, match="plan changed"):
-            await m.activate(["a"], True, token=plan["plan_token"])
+            await m.activate(["a"], token=plan["plan_token"])
         assert store.list("session") == []
     finally:
         await m.close()
@@ -256,7 +256,7 @@ async def test_per_gpu_planning_does_not_evict_an_unrelated_gpu(tmp_path):
 async def test_live_membership_changes_are_rejected_and_separation_preserves_members(tmp_path):
     app, store, m = await setup(tmp_path)
     try:
-        await m.activate(["a"], True)
+        await m.activate(["a"])
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
             headers = {"X-Menagerie-Token": (await client.get("/api/status")).json()["csrf_token"]}
             body = {"name": "Pair", "member_ids": ["a", "b"], "residency": "on-demand"}
@@ -300,7 +300,7 @@ async def test_public_api_launch_and_member_stop_control_the_complete_deployment
             assert unreviewed.status_code == 409
             plan = (await client.post("/api/serving-deployments/pair/validate", json={}, headers=headers)).json()
             assert set(plan["estimates"]) == {"a", "b"}
-            launched = await client.post("/api/serving-deployments/pair/start", json={"override": True, "plan_token": plan["plan_token"]}, headers=headers)
+            launched = await client.post("/api/serving-deployments/pair/start", json={"plan_token": plan["plan_token"]}, headers=headers)
             assert launched.status_code == 200, launched.text
             await wait_job(store, launched.json()["id"])
             assert all(d["state"] == "READY" for d in store.list("deployment"))
@@ -330,7 +330,7 @@ async def test_pressure_never_splits_a_deployment_or_unloads_a_busy_member(tmp_p
     _, store, m = await setup(tmp_path)
     link(store, residency="evictable")
     try:
-        await m.activate(["pair"], True)
+        await m.activate(["pair"])
         a = await m.acquire("a")
         def pressure():
             value = baseline()
@@ -354,7 +354,7 @@ async def test_pinned_restart_restores_whole_unit_but_manual_unload_stays_unload
     _, store, m = await setup(tmp_path)
     link(store, residency="pinned")
     monkeypatch.setattr(telemetry, "sample", lambda: baseline() | {"ts": time.time()})
-    await m.activate(["pair"], True)
+    await m.activate(["pair"])
     await m.close()
     restarted = Manager(store)
     try:

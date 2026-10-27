@@ -49,8 +49,8 @@ def test_start_requires_explicit_approval(monkeypatch, capsys):
     monkeypatch.setattr(cli.Client, "request", request)
     assert cli.main(["start", "deployment"]) == 1
     assert len(calls) == 1 and calls[0][0].endswith("/validate")
-    assert cli.main(["start", "deployment", "--approve", "--allow-uncertain"]) == 0
-    assert calls[-1][1] == {"plan_token": "reviewed", "override": True}
+    assert cli.main(["start", "deployment", "--approve"]) == 0
+    assert calls[-1][1] == {"plan_token": "reviewed"}
 
 
 def test_service_install_preserves_unmanaged_and_requires_explicit_lifecycle(tmp_path, monkeypatch):
@@ -72,6 +72,18 @@ def test_service_install_preserves_unmanaged_and_requires_explicit_lifecycle(tmp
     with pytest.raises(ValueError, match="unmanaged"):
         service.manage("install", state, 8027, 8028)
     assert unit.read_text() == "# owned by somebody else"
+
+
+def test_service_install_can_pin_a_stable_interpreter_across_releases(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(service, "systemctl", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "inactive\n", ""))
+    state, interpreter = tmp_path / "state", tmp_path / "app/current/bin/python"
+    first = service.manage("install", state, 8027, 8028, interpreter)
+    text = Path(first["path"]).read_text()
+    assert service.quote(interpreter) + " -m controlplane " in text
+    assert service.quote(sys.executable) not in text
+    # A later release installs the same unit, so an upgrade needs no manual removal.
+    assert service.manage("install", state, 8027, 8028, interpreter)["path"] == first["path"]
 
 
 def test_service_rejects_directive_injection():

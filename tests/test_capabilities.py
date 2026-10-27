@@ -7,7 +7,7 @@ import pytest
 
 from controlplane import adapters
 from controlplane.api import create_app
-from controlplane.capabilities import inspect, ollama
+from controlplane.capabilities import inspect
 from controlplane.catalog import apply_reasoning, normalize
 from controlplane.jobs import Jobs
 
@@ -80,7 +80,6 @@ def test_metadata_hints_do_not_invent_reasoning_off_or_effort_levels():
     assert not inspect({})["reasoning"]
     assert inspect({"tokenizer.chat_template": "<think>"})["reasoning"]
     assert not inspect({"tokenizer.chat_template": "<think>"})["thinking_toggle"]
-    assert not ollama({"capabilities": ["thinking", "vision"]})["thinking_toggle"]
 
 
 def test_effort_detection_requires_explicit_levels_in_template():

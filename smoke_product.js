@@ -8,7 +8,7 @@ async (page) => {
   page.on('console', e => {if(e.type()==='error'&&!e.text().startsWith('Failed to load resource:')) errors.push(e.text());});
   const writes = [];
   const profile = {id:'profile-a',name:'Example settings',revision:1,artifact_id:'model-a',runtime_id:'engine-a',config:{'ctx-size':32768,parallel:1},raw_args:[],catalog:{catalog_id:'example',model:{limit:{context:32768,output:1024}}}};
-  const makeDeployment = (id, name, state, residency, enabled=true) => ({id,name,state,residency,enabled,profile_id:profile.id,profile_snapshot:profile,revision:1,alias:id,port:8120,priority:50,idle_timeout:300,gpu:0,queue_timeout:300,reservation_mib:0,allow_eviction:false,allow_uncertain:false,lifecycle:{serving:enabled && (state==='READY'||residency==='on-demand'),failure:state==='FAILED'?'Runtime exited unexpectedly':null,last_stop_reason:state==='STOPPED'?'Idle unload':null}});
+  const makeDeployment = (id, name, state, residency, enabled=true) => ({id,name,state,residency,enabled,profile_id:profile.id,profile_snapshot:profile,revision:1,alias:id,port:8120,priority:50,idle_timeout:300,gpu:0,queue_timeout:300,reservation_mib:0,allow_eviction:false,lifecycle:{serving:enabled && (state==='READY'||residency==='on-demand'),failure:state==='FAILED'?'Runtime exited unexpectedly':null,last_stop_reason:state==='STOPPED'?'Idle unload':null}});
   let registry = {
     models:[{id:'model-a',name:'Example 27B',format:'gguf',size_bytes:8*1024**3,architecture:'example',local_path:'/models/example.gguf',source:'local'}],
     runtimes:[{id:'engine-a',name:'llama.cpp',engine:'llama.cpp',execution_kind:'native',executable:'/engines/llama-server',env:{},command_template:[],trust:true,capabilities:{formats:['gguf'],schema:{'ctx-size':{type:'integer',min:512,max:1048576},parallel:{type:'integer',min:1,max:64},'gpu-layers':{type:'string',default:'all'}}}}],
@@ -26,6 +26,8 @@ async (page) => {
     if(path==='/api/status') return send({csrf_token:'test-token',host,settings,gateway_url:'http://127.0.0.1:9123/v1',deployments:registry.deployments.map(d=>({...d,inflight:d.id==='ready'?1:0}))});
     if(path.startsWith('/api/registry/')) return send(registry[path.split('/').at(-1)]||[]);
     if(path==='/api/integration/opencode') return send({endpoint:'http://127.0.0.1:9123/v1'});
+    if(path==='/api/engines/releases') return send({engines:[]});
+    if(path.endsWith('/engine-recommendation')) return send({engine:'llama.cpp',reason:'GGUF engine'});
     if(path==='/api/events/stream') return route.fulfill({contentType:'text/event-stream',body:'id: 1\nevent: operation\ndata: '+JSON.stringify({seq:1,ts:1700000000,kind:'state',deployment_id:'idle',data:{to:'STOPPED',reason:'Idle unload'}})+'\n\n'});
     if(path==='/api/history/metrics') return send([{...host,ts:1699999900},host]);
     if(path.endsWith('/logs')) return send({text:'Runtime ready\nNo requests in flight'});
@@ -83,11 +85,11 @@ async (page) => {
   assert(saved.config['ctx-size']===65536&&saved.config.parallel===2,'Per-request context must map to shared engine pool');
   assert(saved.config['gpu-layers']==='all','Supported GPU defaults were not applied');
   assert(!writes.some(w=>w.path==='/api/profiles'),'Deployment creation must not require a separate profile write');
-  assert(await dialog.getByRole('button',{name:'Load',exact:true}).isDisabled(),'Uncertain launch needs approval');
-  await dialog.getByRole('checkbox').check();
+   assert(!(await dialog.getByRole('button',{name:'Load',exact:true}).isDisabled()),'Capacity notes must not require approval');
+   assert(await dialog.getByRole('checkbox').count()===0,'Memory approval checkbox must be absent');
   await dialog.getByRole('button',{name:'Load',exact:true}).click();
   await dialog.waitFor({state:'hidden'});
-  assert(writes.some(w=>w.path.endsWith('/start')&&w.payload.override&&w.payload.plan_token==='review-token'),'Launch approval was not submitted');
+   assert(writes.some(w=>w.path.endsWith('/start')&&!('override' in w.payload)&&w.payload.plan_token==='review-token'),'Reviewed launch was not submitted');
   uncertain=false;
   await page.getByRole('button',{name:'Load now',exact:true}).click();
   await dialog.getByRole('heading',{name:'Review launch',exact:true}).waitFor();
@@ -96,7 +98,8 @@ async (page) => {
   await page.getByRole('navigation').getByRole('link',{name:'Settings'}).click();
   await page.getByRole('heading',{name:'Settings',exact:true}).waitFor();
   assert(await page.getByRole('button',{name:'Migration',exact:true}).count()===0,'Settings should not expose a personal migration workflow');
-  await page.getByRole('button',{name:'Register engine',exact:true}).click();
+   await page.locator('summary').filter({hasText:'Advanced engine sources'}).click();
+   await page.getByRole('button',{name:'Register existing engine',exact:true}).click();
   await dialog.getByLabel('Executable path',{exact:true}).fill('/runtime/server');
   await dialog.getByRole('checkbox').check();
   await dialog.getByRole('button',{name:'Save',exact:true}).click();
@@ -149,5 +152,5 @@ async (page) => {
   await page.getByRole('alert').filter({hasText:'Connection lost'}).waitFor();
   assert(!errors.length,errors.join('\n'));
   await page.evaluate(() => {window.productSmokePassed = true;});
-  return {result:'passed',checks:['navigation and browser Back','dialog focus','unload action','inactive filter','logs','shared context controls','atomic creation retry','direct configuration editing','no profile workflow','uncertainty consent','failed-save preservation','invalid JSON guard','five mobile views','clean installation','disconnection'],writesIntercepted:writes.length};
+  return {result:'passed',checks:['navigation and browser Back','dialog focus','unload action','inactive filter','logs','shared context controls','atomic creation retry','direct configuration editing','no profile workflow','no memory consent','failed-save preservation','invalid JSON guard','five mobile views','clean installation','disconnection'],writesIntercepted:writes.length};
 }

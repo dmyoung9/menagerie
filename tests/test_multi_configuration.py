@@ -84,7 +84,7 @@ async def test_reused_weights_have_independent_serving_lifecycles(tmp_path):
             for name in ("one", "two"):
                 members = [{"name": f"{name}-{i}", "alias": f"{name}-{i}", "port": port(), "reservation_mib": 1000,
                             "configuration": {"name": "Gemma", "artifact_id": "weights", "runtime_id": "runtime"}} for i in range(2)]
-                response = await client.post("/api/deployment-sets", json={"name": name, "residency": "on-demand", "allow_uncertain": True, "members": members}, headers=headers)
+                response = await client.post("/api/deployment-sets", json={"name": name, "residency": "on-demand", "members": members}, headers=headers)
                 assert response.status_code == 200, response.text
                 units.append(response.json())
             acquired_one = await manager.acquire("one-0")

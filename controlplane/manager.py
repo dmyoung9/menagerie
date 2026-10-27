@@ -190,7 +190,15 @@ class Manager:
         p = d["profile_snapshot"]
         a = self.store.get("artifact", p["artifact_id"])
         measured = [s for s in self.store.list("session") if s.get("profile_hash") == identity(p) and s.get("peak_gpu_mib", 0) > 0 and s.get("outcome") == "stopped"]
-        return estimate(a, p["config"], d.get("reservation_mib", 0), [s["peak_gpu_mib"] for s in measured])
+        result = estimate(a, p["config"], d.get("reservation_mib", 0), [s["peak_gpu_mib"] for s in measured])
+        runtime = self.store.get("runtime", p["runtime_id"])
+        gpu = next((g for g in self.host.get("gpus", []) if g["index"] == d.get("gpu", 0)), {})
+        if runtime["engine"] == "vllm" and gpu.get("total_mib"):
+            allocated = round(gpu["total_mib"] * float(p["config"].get("gpu-memory-utilization", .5)))
+            required = result["peak_mib"]
+            result.update(peak_mib=max(required, allocated), required_mib=required, allocation_mib=allocated,
+                          components=None, reservation_mib=d.get("reservation_mib") or max(required, allocated))
+        return result
 
     def validate(self, ids, authorized_stops=None):
         duplicates = len(set(ids)) != len(ids)
@@ -238,7 +246,6 @@ class Manager:
                     sock.close()
             est = self.estimate(d)
             estimates[d["id"]] = est
-            warnings.append(f"{d['alias']}: {est['confidence']}-confidence memory estimate. {est['provenance']}")
         settings = self.settings()
         if shutil.disk_usage(self.store.root).free < 128 * 1024 * 1024:
             errors.append("Insufficient registry/log disk capacity (128 MiB reserve required)")
@@ -253,14 +260,17 @@ class Manager:
                 warnings.append(f"Estimated peak exceeds currently free GPU {gpu['index']} capacity")
             if gpu["free_mib"] < settings["gpu_headroom_mib"] and not authorized_stops:
                 errors.append("GPU below desktop headroom gate")
-        if any(d["gpu"] not in [g["index"] for g in self.host.get("gpus", [])] for d in selected):
+        if any(str(d["profile_snapshot"]["config"].get("gpu-layers", "all")) != "0" and d["gpu"] not in [g["index"] for g in self.host.get("gpus", [])] for d in selected):
             errors.append("Selected NVIDIA GPU has no telemetry")
+        ram_needed = sum(estimates[d["id"]].get("ram_mib", 0) for d in selected if d["state"] not in ACTIVE)
+        if ram_needed > self.host.get("ram_available_mib", 0) - settings["ram_headroom_mib"]:
+            errors.append("CPU/RAM offload exceeds currently available system memory")
         if self.host.get("ram_available_mib", 0) < settings["ram_headroom_mib"]:
             errors.append("Host below RAM headroom gate")
         plan = {"deployments": [{"id": d["id"], "profile": identity(d["profile_snapshot"]), "revision": d["revision"]} for d in selected], "authorized_stops": [{"id": i, "revision": self.store.get("deployment", i)["revision"]} for i in authorized_stops], "units": [{"id": u["id"], "revision": u["revision"]} for u in deployment_sets.units(self.store) if set(u["member_ids"]) & set(ids + authorized_stops)]}
         return {"errors": errors, "warnings": warnings, "estimates": estimates, "stops": authorized_stops, "plan_token": identity(plan), "impact": "Stops lose KV caches. Failed replacement launches attempt to restore stopped deployments."}
 
-    async def activate(self, ids, override=False, authorized_stops=None, token=None):
+    async def activate(self, ids, authorized_stops=None, token=None):
         if not ids or len(set(ids)) != len(ids):
             raise Conflict("Select distinct models or deployments to load")
         timeout = max(self.unit(i)["queue_timeout"] for i in ids)
@@ -271,13 +281,13 @@ class Manager:
                         expanded = deployment_sets.expand(self.store, ids)
                         stops = self.automatic_stops(expanded) if authorized_stops is None else deployment_sets.expand(self.store, authorized_stops)
                         if not any(self.inflight.get(i, 0) for i in stops):
-                            return await self._activate_locked(expanded, override, stops, token)
+                            return await self._activate_locked(expanded, stops, token)
                         self.request_changed.clear()
                     await self.wait_for_requests()
         except TimeoutError as exc:
             raise Conflict("Timed out waiting for deployment capacity or active requests") from exc
 
-    async def _activate_locked(self, ids, override=False, authorized_stops=None, token=None):
+    async def _activate_locked(self, ids, authorized_stops=None, token=None):
         # Every caller owns self.lock, including request admission. No request
         # can slip between selecting victims and reserving its member slot.
         if self.stopping:
@@ -289,8 +299,6 @@ class Manager:
             raise Conflict("; ".join(check["errors"]))
         if any(self.inflight.get(i, 0) for i in authorized_stops or []):
             raise Conflict("Deployment has active requests")
-        if check["warnings"] and not override and not all(self.store.get("deployment", i)["allow_uncertain"] for i in ids):
-            raise Conflict("Uncertain memory estimates require explicit override")
         stopped, started = [], []
         unit = self.unit(ids[0])
         activation = self.store.put("activation", {"id": uid(), "deployment_id": unit["id"], "deployment_name": unit["name"], "deployment_policy": {k: unit[k] for k in deployment_sets.POLICY_KEYS}, "started_at": time.time(), "deployments": [self.store.get("deployment", i) for i in ids], "authorized_stops": authorized_stops or [], "plan": check, "state": "STARTING"})

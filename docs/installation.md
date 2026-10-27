@@ -3,7 +3,8 @@
 ## Source checkout
 
 Install Python 3.12+, uv, Node.js 22+, npm, and Git through your preferred trusted
-package sources. GPU drivers and engines are separate prerequisites.
+package sources. GPU drivers are a host prerequisite; engines can be installed
+from Menagerie's dashboard.
 
 ```sh
 git clone https://github.com/dmyoung9/menagerie.git
@@ -46,8 +47,9 @@ journalctl --user -u menagerie.service -n 50
 
 For a checkout, substitute `.venv/bin/menagerie`. The installer records that
 environment's absolute Python path; it does not assume a checkout directory.
-It refuses to overwrite unmanaged or differently configured units. It never
-enables, starts, restarts, or replaces an existing service implicitly. Inspect and
+It refuses to overwrite unmanaged or differently configured units. The
+`menagerie service install` command only registers the unit; the guided installer
+enables/restarts it when its service option is selected. Inspect and
 back up an existing unit yourself before replacing it.
 
 Custom ports/state can be captured at registration:
@@ -102,6 +104,12 @@ For rollback, stop Menagerie, reinstall the retained version, and inspect its
 compatibility with the database. If necessary restore the matching backup below.
 Do not assume older code can read a newer database.
 
+With the guided installer, `bash install.sh --rollback` swaps the retained previous
+application back into place without downloading anything. It refuses to run when no
+complete previous release exists, and only restarts `menagerie.service` when that
+unit belongs to the same installation. Running it again returns to the newer
+release. Database compatibility still governs whether rollback is safe.
+
 ### Restore a registry backup
 
 Stop **all** Menagerie processes using the state directory. Preserve the current
@@ -137,9 +145,52 @@ model paths separately before deciding what to remove.
 - **Dashboard missing:** rebuild with `uv sync --reinstall-package menagerie`, or
   install a wheel with bundled assets. For frontend development use `npm run build`.
 - **Runtime won't load:** inspect Activity/launch errors, engine compatibility,
-  executable permissions, capacity, and explicit uncertainty approvals.
+  executable permissions and capacity. Memory estimates do not require approval.
 - **OCI GPU failure:** confirm your host's NVIDIA/container runtime setup separately.
 - **Client model missing:** check deployment enablement, aliases, declared
   capabilities, and regenerate/reload the client fragment.
 - **Port changed:** pass the control port to CLI commands with `--port`; regenerate
   the client fragment so its gateway URL matches.
+## Guided installer
+
+Before release publication, build a wheel with `uv build --wheel`, then run:
+
+```sh
+bash install.sh --wheel dist/menagerie-2.0.0-py3-none-any.whl
+```
+
+The installer downloads a pinned, SHA-256-verified uv binary and uses it to supply
+Python 3.12 and application dependencies in user space. It offers user-service
+startup, the OpenCode plugin, and opening the dashboard. `--yes` skips prompts;
+select optional actions explicitly with `--service`, `--plugin`, and `--open`.
+Use `--prefix` and `--bin-dir` for an isolated installation.
+
+Published releases must provide the wheel and its `.whl.sha256` alongside a
+`vVERSION` tag. Once published, the intended command is:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dmyoung9/menagerie/main/install.sh | bash
+```
+
+**That download path is not release-ready until publication.** Local-wheel
+installation is the verified path today.
+
+## Guided-install updates and recovery
+
+Run the installer again with the new wheel. Application environments are
+content-addressed under `~/.local/share/menagerie/app/releases`; the installer
+switches `current` only after installation and asset checks succeed. The prior
+target remains available as `previous`. Models and registry state live outside
+this application directory and are preserved.
+
+The optional unit runs `<prefix>/current/bin/python`, so an upgrade or rollback
+needs only a service restart; it does not need to be removed and recreated.
+`bash install.sh --rollback` swaps `current` and `previous` atomically and restarts
+the unit when it belongs to that installation. Back up registry state before
+upgrading; application rollback is not a substitute for restoring a compatible
+database backup.
+
+To remove an installation, disable/stop and remove its optional user service,
+remove the optional plugin with `menagerie plugin remove`, then remove the
+installer's CLI symlink and application prefix. Keep the state directory to
+preserve models, engine installations, configuration, and history.

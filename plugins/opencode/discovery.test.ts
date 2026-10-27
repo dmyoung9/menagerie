@@ -130,6 +130,7 @@ test('refresh, deduplication, outage retention, empty inventory and disposal', a
     return new Response(JSON.stringify(data));
   }, log: text => h.logs.push(text)});
   try {
+    assert.equal(h.models[0].id, 'model-a', 'startup must publish models before the first request');
     await discovery.refresh();
     assert.equal(h.models[0].id, 'model-a');
     await discovery.refresh();

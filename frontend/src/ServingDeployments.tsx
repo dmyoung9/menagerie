@@ -26,9 +26,9 @@ export function ServingTable({rows, host, actions, compact = false}: {rows: Row[
     <td className="numeric">{gib(host.deployments?.[member.id]?.gpu_mib)}</td><td className="numeric">{member.inflight || 0}</td>{!compact && <td/>}</tr>)}</Fragment>)}</tbody></table>{!rows.length && <Empty title="No matching deployments"/>}</div>;
 }
 
-const sharedKeys = ['residency', 'priority', 'idle_timeout', 'allow_eviction', 'allow_uncertain', 'enabled', 'queue_timeout'];
+const sharedKeys = ['residency', 'priority', 'idle_timeout', 'allow_eviction', 'enabled', 'queue_timeout'];
 export function DeploymentSetEditor({initial, modelId, data, close, saved}: {initial?: Row; modelId?: string; data: Registry; close: () => void; saved: (id: string) => void}) {
-  const [value, setValue] = useState<Row>({name: 'New deployment', residency: 'on-demand', priority: 50, idle_timeout: 300, allow_eviction: false, allow_uncertain: false, enabled: true, queue_timeout: 300, ...(initial ? Object.fromEntries(['id', 'name', ...sharedKeys].map(k => [k, initial[k]])) : {}), members: (initial?.members || []).map((m: Row) => editable('deployments', m))});
+  const [value, setValue] = useState<Row>({name: 'New deployment', residency: 'on-demand', priority: 50, idle_timeout: 300, allow_eviction: false, enabled: true, queue_timeout: 300, ...(initial ? Object.fromEntries(['id', 'name', ...sharedKeys].map(k => [k, initial[k]])) : {}), members: (initial?.members || []).map((m: Row) => editable('deployments', m))});
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [separate, setSeparate] = useState(false);
   const [artifactId, setArtifactId] = useState(modelId || data.models?.[0]?.id || ''), [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState(0);
@@ -42,24 +42,33 @@ export function DeploymentSetEditor({initial, modelId, data, close, saved}: {ini
   const updateMember = (index: number, change: Row) => setValue(v => ({...v, members: v.members.map((m: Row, i: number) => i === index ? {...m, ...change} : m)}));
   async function addModel() {
     const model = data.models?.find(m => m.id === artifactId);
-    const runtime = data.runtimes?.find(r => r.capabilities?.formats?.includes(model?.format));
-    if (!model || !runtime) {setError('Register a compatible engine for this model first.'); return;}
+    if (!model) {setError('Choose a model first.'); return;}
+    setBusy(true);
+    let recommended: string | null = null;
+    try {recommended = (await api(`/api/models/${model.id}/engine-recommendation`)).engine;} catch { /* Manual selection remains available. */ }
+    const compatible = (data.runtimes || []).filter(r => model.format === 'unknown' || r.capabilities?.formats?.includes(model.format));
+    const runtime = compatible.find(r => r.engine === recommended) || compatible[0];
     const used = [...(data.deployments || []), ...value.members];
     const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 100) || 'model';
     const base = slug(value.name) + '-' + slug(model.name).slice(0, 40);
     let alias = base, suffix = 2;
     while (used.some(m => m.alias === alias)) alias = base + '-' + suffix++;
     const port = Array.from({length: 50000}, (_, i) => 8120 + i).find(p => !used.some(m => m.port === p));
-    const schema = runtime.capabilities?.schema || {};
+    const schema = runtime?.capabilities?.schema || {};
     const config = Object.fromEntries(Object.entries(schema).filter(([, f]: [string, any]) => f.default !== undefined).map(([k, f]: [string, any]) => [k, ['threads', 'threads-batch'].includes(k) && data.host?.[0]?.cpu_count ? Math.min(f.default, data.host[0].cpu_count) : f.default]));
+    if (runtime?.managed?.backend === 'cpu') config['gpu-layers'] = '0';
+    const meta = model.metadata || {}, hf = meta.config?.text_config || meta.config || {};
+    const modelContext = meta[`${model.architecture}.context_length`] || hf.max_position_embeddings;
+    if (modelContext) for (const key of ['ctx-size', 'max-model-len']) if (config[key]) config[key] = Math.min(config[key], modelContext);
     const gpus = data.host?.[0]?.gpus || [];
     const gpu = [...gpus].sort((a: Row, b: Row) => (b.free_mib - (preview.data?.gpus?.find((g: Row) => g.index === b.index)?.draft_mib || 0)) - (a.free_mib - (preview.data?.gpus?.find((g: Row) => g.index === a.index)?.draft_mib || 0)))[0]?.index ?? 0;
-    const member = {...defaults.deployments, name: model.name, alias, port, gpu, configuration: {name: model.name, artifact_id: model.id, runtime_id: runtime.id, config, raw_args: [], catalog: {}}};
+    const member = {...defaults.deployments, name: model.name, alias, port, gpu, configuration: {name: model.name, artifact_id: model.id, runtime_id: runtime?.id || '', config, raw_args: [], catalog: {}}};
     set('members', [...value.members, member]);
     setSelected(value.members.length);
     setError('');
     setBusy(true);
     try {
+      if (!runtime) return;
       const budget = await api('/api/resources/preview', {members: [...value.members, member]});
       const rec = budget.members.at(-1)?.recommendation;
       if (rec?.context_default != null) setValue(v => ({...v, members: v.members.map((m: Row) => m.port === port && JSON.stringify(m.configuration.config) === JSON.stringify(config) ? {...m, configuration: {...m.configuration, config: {...config, [rec.context_key]: rec.context_default}}} : m)}));
@@ -90,7 +99,6 @@ export function DeploymentSetEditor({initial, modelId, data, close, saved}: {ini
       <Field label="Mode"><select value={value.residency} onChange={e => set('residency', e.target.value)}><option value="on-demand">On demand</option><option value="pinned">Pinned</option><option value="evictable">Evictable</option></select></Field>
       {value.residency === 'on-demand' && <Duration value={value.idle_timeout} change={v => set('idle_timeout', v)}/>}
       {value.residency !== 'pinned' && <label className="check"><input type="checkbox" checked={value.allow_eviction} onChange={e => set('allow_eviction', e.target.checked)}/>Can unload to make room for another deployment</label>}
-      {value.residency === 'on-demand' && <label className="check"><input type="checkbox" checked={value.allow_uncertain} onChange={e => set('allow_uncertain', e.target.checked)}/>Allow on-demand loading with uncertain memory estimates</label>}
       <details><summary>Advanced</summary><div className="form-grid"><Field label="Priority"><input required type="number" min={0} max={100} value={value.priority} onChange={e => set('priority', Number(e.target.value))}/></Field><Field label="Switch timeout (seconds)"><input required type="number" min={1} max={1800} value={value.queue_timeout} onChange={e => set('queue_timeout', Number(e.target.value))}/></Field></div><label className="check"><input type="checkbox" checked={value.enabled} onChange={e => set('enabled', e.target.checked)}/>Enabled for clients</label></details>
     </fieldset>{value.members.length > 0 && <DraftResources preview={preview.data} error={preview.error}/>}<div className="dialog-actions">{initial && value.members.length > 1 && <button type="button" className="danger subtle" disabled={busy} onClick={() => setSeparate(true)}>Separate models…</button>}<button className="primary" disabled={busy || value.members.length < 1 || value.members.some(aliasError) || Object.values(invalid).some(Boolean)}>{busy ? 'Saving…' : 'Save deployment'}</button></div></form>
     {separate && <section className="warning"><p>Make each model a standalone deployment? Current shared policies will be kept.</p><button className="danger" disabled={busy} onClick={async () => {setBusy(true); try {await api(`/api/deployment-sets/${initial!.id}/dissolve?expected=${initial!.revision}`, {}); saved('');} catch (e) {setError(message(e));} finally {setBusy(false);}}}>Separate models</button></section>}

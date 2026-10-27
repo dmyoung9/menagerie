@@ -34,10 +34,6 @@ export function hfVariants(files:CatalogFile[]):Variant[]{
   return result;
 }
 
-export function ollamaVariants(models:{name:string;description?:string}[]):Variant[]{
-  return models.map(m=>({id:m.name,label:m.name,format:'Ollama',...quantization(m.name),parameters:parameterSize(m.name),files:[],bytes:null,complete:true,note:m.description?.split('•').slice(1,3).join(' · ').trim()}));
-}
-
 export const dimensions=['format','parameters','quant','suffix'] as const;
 export type Dimension=typeof dimensions[number];
 export type Selection=Partial<Record<Dimension,string>>;

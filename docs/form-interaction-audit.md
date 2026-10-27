@@ -16,7 +16,7 @@
 ## Reviewed, retained
 
 - Catalog variant selection already provides constrained choices, a summary, and a bounded confirmation flow.
-- Launch review keeps capacity uncertainty and proposed unloads at the point of consent.
+- Launch review shows capacity notes and asks for approval only for proposed unloads.
 - Recovery, backup, and telemetry deletion retain short consequence-focused dialogs.
 
 ## Remaining refinements

@@ -122,11 +122,12 @@ export async function startDiscovery(ctx: Context, options: {
     pending ??= perform().finally(() => {pending = undefined;});
     return pending;
   };
+  // Make the first inventory available before setup completes. Standalone CLI
+  // requests can resolve their model immediately after plugin initialization.
+  await refresh();
   const timer = setInterval(() => {void refresh();}, options.interval ?? 30_000);
-  const initial = setTimeout(() => {void refresh();}, 1000);
   return {refresh, async dispose() {
     stopped = true;
-    clearTimeout(initial);
     clearInterval(timer);
     controller?.abort();
     await pending;

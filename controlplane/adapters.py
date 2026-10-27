@@ -9,7 +9,7 @@ import struct
 
 FIELDS = {
     "mmproj": {"type": "string", "label": "Multimodal projector path"},
-    "ctx-size": {"type": "integer", "default": 8192, "min": 512, "max": 1048576, "units": "tokens", "label": "Context pool"},
+    "ctx-size": {"type": "integer", "default": 8192, "min": 32, "max": 1048576, "units": "tokens", "label": "Context pool"},
     "parallel": {"type": "integer", "default": 1, "min": 1, "max": 128, "label": "Parallel slots"},
     "gpu-layers": {"type": "string", "default": "all", "label": "GPU layers"},
     "cache-type-k": {"type": "enum", "choices": ["f16", "q8_0", "q4_0"], "default": "q8_0", "label": "K cache"},
@@ -25,7 +25,7 @@ FIELDS = {
 }
 OWNED = {"model", "model-path", "served-model-name", "m", "host", "port", "alias", "a", "api-key", "api-key-file", "models-preset", "models-dir", "models-max", "path", "log-file", "logdir", "daemon", "rpc", "model-url", "hf-repo", "hf-file", "hf-token", "trust-remote-code"}
 IGNORED = {"load-on-startup", "stop-timeout", "sleep-idle-seconds"}
-ENV_KEYS = {"LD_LIBRARY_PATH", "CUDA_VISIBLE_DEVICES", "GGML_CUDA_ENABLE_UNIFIED_MEMORY", "OMP_NUM_THREADS", "HF_HOME", "VLLM_WORKER_MULTIPROC_METHOD"}
+ENV_KEYS = {"LD_LIBRARY_PATH", "CUDA_VISIBLE_DEVICES", "GGML_CUDA_ENABLE_UNIFIED_MEMORY", "OMP_NUM_THREADS", "HF_HOME", "XDG_CACHE_HOME", "TRITON_CACHE_DIR", "CUDA_CACHE_PATH", "VLLM_CACHE_ROOT", "VLLM_WORKER_MULTIPROC_METHOD"}
 
 
 async def command(argv, env=None, timeout=30):
@@ -65,7 +65,8 @@ async def probe(runtime):
     if not path.is_file() or not os.access(path, os.X_OK):
         raise ValueError("Runtime executable does not exist or is not executable")
     env = environment(runtime)
-    text = await command([str(path), "--help"], env, 45)
+    help_args = ["serve", "--help=all"] if runtime["engine"] == "vllm" else ["--help"]
+    text = await command([str(path), *help_args], env, 120 if runtime["engine"] == "vllm" else 45)
     flags = sorted(set(re.findall(r"--([a-zA-Z0-9][a-zA-Z0-9-]*)", text)))
     version = await command([str(path), "--version"], env, 20) if runtime["engine"] in ("llama.cpp", "prism") else runtime.get("version") or "unverified"
     return {"version": version.strip()[-1500:], "flags": flags,
@@ -160,10 +161,11 @@ def gguf_metadata(path):
 
 def validate_profile(profile, artifact, runtime):
     errors = []
-    if artifact["format"] not in runtime.get("capabilities", {}).get("formats", []):
+    if artifact["format"] != "unknown" and artifact["format"] not in runtime.get("capabilities", {}).get("formats", []):
         errors.append("Artifact format is not supported by the probed adapter")
-    if "PQ2" in artifact["local_path"].upper() and runtime["engine"] != "prism":
-        errors.append("PQ2 weights require the Prism adapter")
+    from .engine_catalog import recommend
+    if recommend(artifact)["engine"] == "prism" and runtime["engine"] == "llama.cpp":
+        errors.append("These ternary weights need specialized kernels; select Prism rather than stock llama.cpp")
     schema = option_schema(runtime)
     flags = runtime.get("capabilities", {}).get("flags", [])
     for k, v in profile["config"].items():
@@ -183,6 +185,35 @@ def validate_profile(profile, artifact, runtime):
     for arg in profile["raw_args"]:
         if "\x00" in arg or arg.startswith("-") and arg.lstrip("-").split("=")[0] in OWNED:
             errors.append("Advanced flags may not override supervisor-owned options")
+    config = profile["config"]
+    meta, arch = artifact.get("metadata", {}), artifact.get("architecture", "")
+    hf = meta.get("config", {}).get("text_config") or meta.get("config", {})
+    context = meta.get(f"{arch}.context_length") or hf.get("max_position_embeddings")
+    layers = meta.get(f"{arch}.block_count") or hf.get("num_hidden_layers")
+    def number(key, default):
+        value = config.get(key, default)
+        return value if type(value) in (int, float) else default
+    parallel = max(1, number("parallel", 1))
+    if type(context) is int and context > 0:
+        key = "ctx-size" if runtime["engine"] in ("llama.cpp", "prism") else "max-model-len"
+        maximum = context * parallel if key == "ctx-size" else context
+        if number(key, 0) > maximum:
+            errors.append(f"{key} exceeds the model context limit ({maximum})")
+    if "ctx-size" in config and number("ctx-size", 8192) < parallel * 32:
+        errors.append("Context pool must provide at least 32 tokens per parallel slot")
+    if number("ubatch-size", 256) > number("batch-size", 512):
+        errors.append("Physical batch must not exceed batch size")
+    gpu_layers = config.get("gpu-layers", "all")
+    if gpu_layers != "all":
+        if not re.fullmatch(r"\d+", str(gpu_layers)) or (type(layers) is int and int(gpu_layers) > layers):
+            errors.append("GPU layer count must be between zero and the model layer count")
+    if runtime.get("managed", {}).get("backend") == "cpu" and gpu_layers != "0" and gpu_layers != 0:
+        errors.append("This CPU engine requires GPU layers set to zero")
+    if config.get("flash-attn") == "off" and config.get("cache-type-v", "f16") != "f16":
+        errors.append("Quantized V cache requires flash attention")
+    constrained = {"ctx-size", "max-model-len", "parallel", "gpu-layers", "batch-size", "ubatch-size", "cache-type-k", "cache-type-v", "flash-attn"}
+    if runtime["engine"] != "custom" and any(arg.startswith("--") and arg[2:].split("=")[0] in constrained for arg in profile["raw_args"]):
+        errors.append("Use typed configuration fields for context, memory and batch options")
     if profile["raw_args"] and runtime["engine"] != "custom":
         for arg in profile["raw_args"]:
             if arg.startswith("-") and not arg.startswith("--") and not re.fullmatch(r"-\d+(\.\d+)?", arg):

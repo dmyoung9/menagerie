@@ -18,11 +18,11 @@ def quote(value, environment=False):
     return '"' + value + '"'
 
 
-def unit(state, port, gateway_port):
+def unit(state, port, gateway_port, interpreter=None):
     if not all(1 <= p <= 65535 for p in (port, gateway_port)):
         raise ValueError("Ports must be 1..65535")
     # Keep the venv interpreter path, not its resolved system-Python symlink.
-    executable = os.path.abspath(sys.executable)
+    executable = os.path.abspath(interpreter or sys.executable)
     return MARKER + f"""[Unit]
 Description=Menagerie inference control plane
 After=network.target
@@ -54,7 +54,7 @@ def systemctl(*args, check=True):
     return result
 
 
-def manage(operation, state, port, gateway_port):
+def manage(operation, state, port, gateway_port, interpreter=None):
     if not sys.platform.startswith("linux"):
         raise ValueError("User services require Linux and systemd")
     path = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "systemd/user/menagerie.service"
@@ -71,7 +71,7 @@ def manage(operation, state, port, gateway_port):
             raise ValueError("First run: systemctl --user disable --now menagerie.service")
         path.unlink(missing_ok=True)
     else:
-        content = unit(state, port, gateway_port)
+        content = unit(state, port, gateway_port, interpreter)
         if path.exists() and path.read_text() != content:
             raise ValueError("A different managed unit exists; stop/disable and remove it explicitly before reinstalling")
         state.mkdir(parents=True, exist_ok=True, mode=0o700)

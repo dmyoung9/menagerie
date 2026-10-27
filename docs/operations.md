@@ -7,14 +7,16 @@ deployment usage, unattributed usage, protected reserve, and available capacity.
 Select a block/legend to inspect it. Stale telemetry is labeled. GPU process
 attribution is shown only on single-GPU hosts because process samples aggregate devices.
 
-Models supports **Discover** (Hugging Face and public Ollama catalogs) and
+Models supports **Discover** (Hugging Face) and
 **+ Add from File** (host-local GGUF or safetensors). Variant selection requires a
-complete choice; split GGUF shards are registered together. Ollama library tags
-are browsable without a local engine; pulling them requires local Ollama. Existing
+complete choice; split GGUF shards are registered together. Existing
 files are referenced in place, not copied or uploaded by the browser.
 
-Settings → Engines registers trusted executables, reviewed source builds, or
-digest-pinned OCI images. No browser component controls processes directly.
+Settings → Engines installs versioned llama.cpp/Prism release binaries or an
+isolated vLLM environment. Downloads, verification, and probing appear in Activity.
+Updates install alongside existing engines; deployments retain their chosen version.
+Referenced engines cannot be removed. Existing executables, source builds, and
+digest-pinned OCI images remain under Advanced engine sources.
 
 Deployments have independent model settings and stable API aliases. Editing a
 loaded deployment requires unloading. Duplicate creates an independent, inactive
@@ -24,18 +26,20 @@ See [multi-model deployments](multi-model-deployments.md).
 
 The composer previews the whole draft alongside existing usage and desktop reserve.
 Context, concurrency, cache, and member changes update estimates without launching.
-Context recommendations are soft guidance; layer metadata bounds GPU-layer inputs
-when available. Reservations are displayed separately, never added to predicted
-usage. Context per request is converted to a shared pool for engines that divide
-it between parallel slots. Generic KV/overhead estimates are low-confidence for
-hybrid models, CPU offload, auxiliary models, and engine-owned pools. Predicted
-offload RAM is not yet available. Launch review rechecks actual admission.
+Context and concurrency inputs use capacity limits with peer settings preserved;
+layer metadata bounds GPU-layer inputs. The backend rejects known-invalid model
+limits, batch/cache combinations, and draft budgets. Reservations are displayed
+separately, never added to predicted usage. llama.cpp's context is a shared pool
+across parallel slots. CPU/RAM offload is explicit and slower, with approximate RAM
+requirements shown. vLLM's allocation fraction is accounted for separately from its
+estimated model/context requirement. Hybrid architectures and engine overhead still
+need broader measurement. Launch review rechecks actual admission.
 
 ## Admission and lifecycle
 
 - A host registry lock and serialized admission prevent competing reservations
   bypassing capacity checks. Reservations above physical capacity plus desktop
-  reserve are errors; unknown memory estimates require explicit authorization.
+  reserve are errors. Memory estimates never require an approval checkbox.
 - Reservations are **not physical GPU isolation**. External processes can consume
   memory; estimates and observed session peaks are workload-dependent.
 - Default startup gates require 2 GiB free VRAM and 4 GiB available RAM. Newly

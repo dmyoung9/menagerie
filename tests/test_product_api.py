@@ -43,7 +43,7 @@ async def test_wizard_configuration_saves_without_loading_and_preserves_snapshot
         assert response.status_code == 200, response.text
         profile = response.json()
         assert profile["catalog"]["model"]["limit"] == {"context": 32768, "output": 8192}
-        response = await client.post("/api/deployments", json={"name": "Example", "profile_id": profile["id"], "alias": "example", "port": 8120, "residency": "on-demand", "allow_uncertain": False}, headers=headers)
+        response = await client.post("/api/deployments", json={"name": "Example", "profile_id": profile["id"], "alias": "example", "port": 8120, "residency": "on-demand"}, headers=headers)
         assert response.status_code == 200, response.text
         deployment = response.json()
         assert deployment["state"] == "STOPPED"

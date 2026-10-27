@@ -59,19 +59,6 @@ async (page) => {
   await page.keyboard.press('Escape');
   await dialog.waitFor({state:'detached'});
 
-  // Ollama browsing works without a local engine and states that limitation.
-  await catalog.getByRole('button',{name:'Ollama library',exact:true}).click();
-  await catalog.getByLabel('Catalog search').fill('llama3.2');
-  await catalog.getByRole('button',{name:'Search catalog',exact:true}).click();
-  const ollamaCard=catalog.locator('.catalog-card').filter({hasText:'llama3.2'}).first();
-  await ollamaCard.getByRole('button',{name:'Choose variant'}).click();
-  await dialog.locator('.variant-loading').waitFor({state:'detached',timeout:45000});
-  if(!(await dialog.locator('.warning').innerText()).includes('offline')) throw new Error('Ollama offline limitation is missing');
-  if(await dialog.getByRole('button',{name:/Download/}).isDisabled()!==true) throw new Error('Offline Ollama download is enabled');
-  if(!(await dialog.getByRole('link',{name:/Open llama3.2 on Ollama/}).getAttribute('href')).startsWith('https://ollama.com/library/')) throw new Error('Wrong Ollama supplier link');
-  await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
-  await dialog.waitFor({state:'detached'});
-
   // Mobile: the modal fits the viewport and does not create page overflow.
   await page.setViewportSize({width:390,height:844});
   await page.reload();
@@ -86,5 +73,5 @@ async (page) => {
   if(!box||box.x<0||box.y<0||box.x+box.width>390||box.y+box.height>844) throw new Error('Modal exceeds the mobile viewport');
   await page.keyboard.press('Escape');
   if(errors.length)throw new Error(errors.join('\n'));
-  return {hfCardChips:hfChips,splitShards:submitted,ollamaOffline:true,mobileModal:true,pageErrors:errors};
+  return {hfCardChips:hfChips,splitShards:submitted,mobileModal:true,pageErrors:errors};
 }

@@ -85,9 +85,9 @@ def parser():
         command.add_argument("id", help="Deployment ID (not API alias)")
         if name == "start":
             command.add_argument("--approve", action="store_true", help="Approve the reviewed launch plan")
-            command.add_argument("--allow-uncertain", action="store_true", help="Explicitly authorize uncertain memory estimates")
     service = commands.add_parser("service", parents=[common], help="Manage the optional systemd user unit; never enables or starts it implicitly")
     service.add_argument("operation", choices=["install", "status", "remove"])
+    service.add_argument("--interpreter", help="Stable interpreter for the unit (default: this environment's Python)")
     service.add_argument("--gateway-port", type=int, default=8001)
     plugin = commands.add_parser("plugin", parents=[common], help="Install/remove the bundled OpenCode V2 discovery plugin without editing user JSONC")
     plugin.add_argument("operation", choices=["install", "status", "remove"])
@@ -113,7 +113,7 @@ def main(argv=None):
             result = manage(args.operation, args.config_dir, args.gateway_port)
         elif args.action == "service":
             from .service import manage
-            result = manage(args.operation, state_path(args.state), args.port, args.gateway_port)
+            result = manage(args.operation, state_path(args.state), args.port, args.gateway_port, args.interpreter)
             code = result.get("exit_code", 0)
         else:
             client = Client(args.port, args.timeout)
@@ -129,10 +129,10 @@ def main(argv=None):
                 path = "/api/serving-deployments/" + urllib.parse.quote(args.id, safe="")
                 if args.action == "start":
                     plan = client.request(path + "/validate", {})
-                    if not args.approve or plan.get("errors") or (plan.get("warnings") and not args.allow_uncertain):
-                        result, code = {"plan": plan, "queued": False, "hint": "Review the plan, then use start ID --approve. Uncertain estimates additionally require --allow-uncertain."}, 1
+                    if not args.approve or plan.get("errors"):
+                        result, code = {"plan": plan, "queued": False, "hint": "Review the plan, then use start ID --approve."}, 1
                     else:
-                        result = client.request(path + "/start", {"plan_token": plan["plan_token"], "override": args.allow_uncertain})
+                        result = client.request(path + "/start", {"plan_token": plan["plan_token"]})
                 else:
                     result = client.request(path + "/stop", {})
         print(json.dumps(result, indent=2))

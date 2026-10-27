@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {ArrowLeft, ArrowUpRight, Plus} from 'lucide-react';
 import {active, api, CopyButton, date, Dialog, Empty, eventText, gib, Json, Menu, message, mode, number, state, Status, Tabs, visible, type Registry, type Row} from './ui';
 import {ModelCard} from './ModelCard';
+import {EngineCatalog} from './EngineCatalog';
 import {byteSize, parameterSize, quantization} from './variants';
 
 export const go = (path: string) => {window.location.hash = '/' + path;};
@@ -109,8 +110,14 @@ export function ActivityPage({tab, jobs, events, deployments, inspect, restore}:
 }
 
 export function SettingsPage({tab, data, status, actions, policy, backup, install, pull}: {tab: string; data: Registry; status: Row; actions: Actions; policy: () => void; backup: () => void; install: () => void; pull: () => void}) {
+  const [notice, setNotice] = useState('');
+  async function removeEngine(runtime: Row) {
+    if (!window.confirm(`Remove ${runtime.name} and its installed files? Referenced engines cannot be removed.`)) return;
+    try {await api(`/api/registry/runtimes/${runtime.id}/delete?remove_files=true`, {}); setNotice('Engine removed.');}
+    catch (e) {setNotice(message(e));}
+  }
   return <><Tabs items={['Engines', 'Host', 'Recovery']} value={tab} onChange={t => go('settings/' + t.toLowerCase())}/>
-    {tab === 'Engines' && <><div className="toolbar"><button className="primary" onClick={() => actions.edit('runtimes')}><Plus size={16}/>Register engine</button><button onClick={install}>Build from source</button><button onClick={pull}>Pull image</button></div><div className="model-grid">{(data.runtimes || []).map(r => <section className="panel library-card" key={r.id}><span className="format-label">{r.execution_kind}</span><h2>{r.name}</h2><p className="muted">{r.engine}</p><div className="card-actions"><button onClick={() => actions.inspect(r.name, r)}>Details</button><Menu label={'Actions for ' + r.name}><button onClick={() => actions.edit('runtimes', r)}>Edit</button><button onClick={() => actions.edit('runtimes', r, true)}>Duplicate</button></Menu></div></section>)}</div>{!data.runtimes?.length && <Empty title="No engines registered"/>}</>}
+    {tab === 'Engines' && <><EngineCatalog runtimes={data.runtimes || []}/><h2>Installed engines</h2>{notice && <p role="status">{notice}</p>}<div className="model-grid">{(data.runtimes || []).map(r => <section className="panel library-card" key={r.id}><span className="format-label">{r.managed ? 'Managed' : r.execution_kind}</span><h2>{r.name}</h2><p className="muted">{r.engine}</p><div className="card-actions"><button onClick={() => actions.inspect(r.name, r)}>Details</button><Menu label={'Actions for ' + r.name}><button onClick={() => actions.edit('runtimes', r)}>Edit</button>{r.managed ? <button onClick={() => removeEngine(r)}>Remove engine files</button> : <button onClick={() => actions.edit('runtimes', r, true)}>Duplicate</button>}</Menu></div></section>)}</div>{!data.runtimes?.length && <Empty title="No engines installed"/>}<details><summary>Advanced engine sources</summary><div className="toolbar"><button onClick={() => actions.edit('runtimes')}><Plus size={16}/>Register existing engine</button><button onClick={install}>Build from source</button><button onClick={pull}>Pull image</button></div></details></>}
     {tab === 'Host' && <section className="panel padded"><div className="section-heading"><h2>Capacity & history</h2><button onClick={policy}>Edit policy</button></div><dl className="properties"><dt>GPU reserve</dt><dd>{gib(status.settings?.gpu_headroom_mib)} GiB</dd><dt>RAM reserve</dt><dd>{gib(status.settings?.ram_headroom_mib)} GiB</dd><dt>Temperature limit</dt><dd>{status.settings?.temperature_limit} °C</dd><dt>Sampling</dt><dd>{status.settings?.sample_seconds} seconds</dd><dt>Detailed history</dt><dd>{status.settings?.retention_days} days</dd><dt>Summary history</dt><dd>{status.settings?.summary_days} days</dd></dl><a className="button" href="/metrics" target="_blank" rel="noreferrer">Prometheus metrics <ArrowUpRight size={14}/></a></section>}
     {tab === 'Recovery' && <section className="panel padded"><h2>Registry backup</h2><p className="muted">Includes configuration and history, not model files.</p><button onClick={backup}>Create backup</button><details><summary>Storage</summary><code className="path">{status.state_path}</code></details></section>}
   </>;

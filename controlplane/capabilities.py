@@ -32,11 +32,3 @@ def inspect(metadata):
             "reasoning_effort": sorted(set(effort + upstream.get("reasoning_effort", []))),
             "evidence": evidence + upstream.get("evidence", []), "dependencies": upstream.get("dependencies", []),
             "note": "Detected model hints, not proof of engine support. Confirm before advertising to clients."}
-
-
-def ollama(info):
-    caps = info.get("capabilities", [])
-    return {"input": ["text"] + (["image"] if "vision" in caps else []), "output": ["text"],
-            "tools": "tools" in caps, "reasoning": "thinking" in caps, "thinking_toggle": False,
-            "evidence": ["Ollama /api/show capabilities"], "dependencies": [],
-            "note": "Declared by Ollama for its runtime; thinking does not guarantee an off switch. Ollama manages package dependencies."}
