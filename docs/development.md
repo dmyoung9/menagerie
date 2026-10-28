@@ -46,6 +46,12 @@ context/concurrency, launch review, empty installation, disconnection, and mobil
 layouts. Run with `playwright-cli run-code --filename=/absolute/path/to/smoke_product.js`.
 All API requests are intercepted; no serving processes are changed.
 Other fixture runners cover catalogs, forms, resources, and multi-model flows.
+`smoke_first_run.js` checks first-response onboarding with missing telemetry,
+streaming, failure/retry and mobile layout on :8037 (intercepts API and gateway).
+For opt-in clean Linux trial installation, build wheel + sdist with `uv build`,
+then run `bash scripts/check_linux_install.sh dist/menagerie-2.0.0-py3-none-any.whl`.
+This uses a disposable Docker container and maintainer `gh` access to release
+assets; it never installs into the host HOME and performs no inference.
 `smoke_controlplane.js` is a read-only installed-dashboard check; do not run it
 against an arbitrary deployment without reviewing its target.
 
@@ -95,7 +101,7 @@ before claiming those combinations are supported.
 - Test service registration/removal and upgrade/backup/restore on a disposable host
   before advertising unattended deployment. Existing service files are never overwritten.
 - Record engine/model-specific live acceptance separately; do not run inference in CI.
-- Choose a license and review dependency/artwork distribution terms before publication.
+- License is AGPL-3.0-or-later; review dependency/artwork distribution terms for each release.
 - Publish reviewed versioned artifacts deliberately; CI does not publish automatically.
 
 The version is currently `2.0.0`; keep Python, API, CLI, and frontend version strings

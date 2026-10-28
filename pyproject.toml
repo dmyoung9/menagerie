@@ -18,7 +18,7 @@ menagerie = "controlplane.cli:main"
 packages = ["controlplane"]
 
 [tool.hatch.build.targets.sdist]
-include = ["controlplane/", "frontend/src/", "frontend/public/", "frontend/index.html", "frontend/package.json", "frontend/package-lock.json", "frontend/tsconfig.json", "plugins/opencode/*.ts", "plugins/opencode/*.json", "scripts/", "install.sh", "hatch_build.py", "README.md", "SECURITY.md", "docs/", "tests/", "menagerie.service"]
+include = ["controlplane/", "frontend/src/", "frontend/public/", "frontend/index.html", "frontend/package.json", "frontend/package-lock.json", "frontend/tsconfig.json", "frontend/tests/", "plugins/opencode/*.ts", "plugins/opencode/*.json", "scripts/", "install.sh", "hatch_build.py", "README.md", "LICENSE", "uv.lock", "SECURITY.md", "docs/", "tests/", "smoke_*.js", "menagerie.service"]
 
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"

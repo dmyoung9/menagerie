@@ -1,6 +1,13 @@
 # Release validation
 
-This checkout is not yet a published or fully accepted release.
+Release v2.0.0 is published with a wheel and matching SHA-256 asset. Publication
+does not establish acceptance on every platform; evidence below has a bounded scope.
+The repository is private: anonymous release downloads return 404. Use the
+shareable Linux trial archive described in installation.md until the owner
+explicitly chooses public distribution. No visibility change is implied.
+
+For the current #10/#11 clean-container, trial-bundle, real NVIDIA first-response,
+restart and fixture evidence, see [Linux acceptance](friend-ready-linux-acceptance.md).
 
 ## Verified in this implementation pass
 
@@ -54,9 +61,8 @@ This checkout is not yet a published or fully accepted release.
   x86_64 with a single NVIDIA GPU.
 - Complete architecture-aware estimates for hybrid models and vLLM's reservation
   behavior; current estimates are approximate.
-- License decision and authorized publication of installer, wheel, and matching
-  `.whl.sha256` release asset. The installer's default download URL cannot work
-  until those assets exist; `--wheel` is the verified pre-publication path.
+- Further releases must publish matching wheel/checksum assets. v2.0.0 assets
+  exist; the project license is AGPL-3.0-or-later.
 
 Release discovery is live upstream discovery, not a certification that every new
 upstream build has been tested. Installs are versioned and probed; deployment
