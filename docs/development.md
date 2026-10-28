@@ -41,11 +41,15 @@ npm ci
 npm run dev -- --port 8037
 ```
 
-`smoke_product.js` exercises fixture-backed UI workflows, accessibility/focus,
-context/concurrency, launch review, empty installation, disconnection, and mobile
-layouts. Run with `playwright-cli run-code --filename=/absolute/path/to/smoke_product.js`.
-All API requests are intercepted; no serving processes are changed.
-Other fixture runners cover catalogs, forms, resources, and multi-model flows.
+Run `npm run build`, `npm test`, and `npm run test:ui` from `frontend/`.
+The automated browser suite starts its own isolated Vite server on :8049 and
+intercepts every API request; it never changes live serving processes. See the
+[design-system guide](frontend-design-system.md) for the exact shadcn preset,
+component ownership, regeneration policy, and desktop/mobile accessibility checks.
+The ad-hoc fixture runners (`smoke_product.js`, forms, capabilities, resources,
+and multi-model flows) can also be run with
+`playwright-cli run-code --filename=/absolute/path/to/smoke_product.js` against
+their documented fixture-server ports.
 `smoke_controlplane.js` is a read-only installed-dashboard check; do not run it
 against an arbitrary deployment without reviewing its target.
 
