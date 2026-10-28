@@ -2,13 +2,52 @@
 
 ## Recommended release installer
 
-For a quick standalone installation using the published release wheel:
+The repository is currently private. Anonymous GitHub installer/release URLs
+return 404; do not ask friends to supply credentials to an installer. Send them
+a Linux trial archive instead: extract it and run `bash ./install`. The wrapper
+checks its bundled wheel checksum and uses the same isolated installer.
+The bundle also supplies dependency constraints exported from the committed lock;
+their checksum is checked and their digest participates in the environment ID.
+
+Maintainers can build the archive without publishing or including user state:
+
+```sh
+uv build
+uv run --no-sync python scripts/build_trial_bundle.py dist/menagerie-2.0.0-py3-none-any.whl --source dist/menagerie-2.0.0.tar.gz
+```
+
+The resulting `dist/menagerie-linux-trial.tar.gz` includes instructions and the
+license and matching source distribution (not required at runtime). Build both
+artifacts from the same reviewed checkout. It is not an offline package: managed Python/dependencies and engines/
+models still require internet. Obtain it through a trusted channel; its checksum
+detects corruption, not publisher identity. No repository credentials are included.
+
+After an explicitly authorized public release, the anonymous installer command
+will be (ordinary curl does not inherit GitHub CLI authentication):
 
 ```sh
 curl -sSL https://raw.githubusercontent.com/dmyoung9/menagerie/main/install.sh | bash
 ```
 
 The installer supplies an isolated Python environment and dependencies, and offers to set up a background user service, OpenCode plugin, and dashboard launch.
+
+No system Python, Node, Git, or source checkout is required. A supported Linux
+host needs Bash, curl, tar, sha256sum and standard GNU filesystem utilities, plus
+network access to GitHub and Python package/download services. The managed
+bootstrap targets glibc Linux x86_64/aarch64; this is not a claim of ARM hardware
+acceptance or Alpine/musl support. GPU drivers remain host prerequisites.
+
+If you decline the service, or no systemd user session is available, run the
+absolute launcher path printed by the installer (normally
+`~/.local/bin/menagerie serve`). Keep that terminal open and visit
+http://127.0.0.1:8017; Ctrl+C stops it. You do not need to edit PATH. Run the same
+command again to reopen with the saved state. `--open` opens an already-running
+dashboard; it does not start a foreground daemon for you.
+
+Use **Overview → Get your first response** for a starter-model path, existing-model
+registration, and an in-dashboard test prompt. Engine/download progress and
+failures appear in Activity. Loading is asynchronous: wait for Ready, not merely
+a queued notification. No OpenCode installation is required.
 
 ## Source checkout
 
@@ -182,8 +221,9 @@ Published releases must provide the wheel and its `.whl.sha256` alongside a
 curl -fsSL https://raw.githubusercontent.com/dmyoung9/menagerie/main/install.sh | bash
 ```
 
-**That download path is not release-ready until publication.** Local-wheel
-installation is the verified path today.
+Release v2.0.0 provides the wheel and checksum at that path for authorized GitHub
+users. Anonymous access remains blocked by repository visibility; use the trial
+archive for friends. Local-wheel installation remains available for development.
 
 ## Guided-install updates and recovery
 

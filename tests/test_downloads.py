@@ -92,3 +92,46 @@ async def test_download_persists_one_artifact_for_the_complete_shard_set(
     assert [s["path"] for s in artifact["metadata"]["shards"]] == [
         str(tmp_path / "cache" / n) for n in names
     ]
+
+
+@pytest.mark.asyncio
+async def test_interrupted_download_can_be_retried_without_partial_registration(
+    tmp_path, monkeypatch
+):
+    store = Store(tmp_path / "state")
+    jobs = Jobs(SimpleNamespace(store=store))
+    jobs.progress = lambda ident, text: None
+    weights = b"GGUF" + struct.pack("<IQQ", 3, 0, 0)
+    names = ["model-00001-of-00002.gguf", "model-00002-of-00002.gguf"]
+
+    async def hf_files(repo, revision):
+        return {
+            "files": [
+                {
+                    "name": n,
+                    "size": len(weights),
+                    "sha256": hashlib.sha256(weights).hexdigest(),
+                }
+                for n in names
+            ]
+        }
+
+    jobs.hf_files = hf_files
+    interrupted = True
+
+    def download(repo_id, filename, revision, cache_dir, tqdm_class):
+        if interrupted and filename == names[1]:
+            raise OSError("Connection interrupted")
+        path = tmp_path / filename
+        path.write_bytes(weights)
+        return str(path)
+
+    monkeypatch.setattr(jobs_module, "hf_hub_download", download)
+    with pytest.raises(OSError, match="Connection interrupted"):
+        await jobs.download("first", "org/model-GGUF", "a" * 40, names[0])
+    assert store.list("artifact") == []
+    assert (tmp_path / names[0]).read_bytes() == weights
+    interrupted = False
+    artifact = await jobs.download("retry", "org/model-GGUF", "a" * 40, names[0])
+    assert len(store.list("artifact")) == 1
+    assert artifact["size_bytes"] == len(weights) * 2

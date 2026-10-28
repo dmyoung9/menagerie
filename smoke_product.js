@@ -85,8 +85,8 @@ async (page) => {
   assert(saved.config['ctx-size']===65536&&saved.config.parallel===2,'Per-request context must map to shared engine pool');
   assert(saved.config['gpu-layers']==='all','Supported GPU defaults were not applied');
   assert(!writes.some(w=>w.path==='/api/profiles'),'Deployment creation must not require a separate profile write');
-   assert(await dialog.getByRole('button',{name:'Load',exact:true}).isDisabled(),'Uncertain launch needs approval');
-   await dialog.getByRole('checkbox').check();
+   assert(await dialog.getByRole('button',{name:'Load',exact:true}).isEnabled(),'Uncertain estimates must remain advisory');
+   assert(await dialog.getByRole('checkbox').count()===0,'Uncertainty alone must not require approval');
   await dialog.getByRole('button',{name:'Load',exact:true}).click();
   await dialog.waitFor({state:'hidden'});
    assert(writes.some(w=>w.path.endsWith('/start')&&w.payload.override&&w.payload.plan_token==='review-token'),'Launch approval was not submitted');

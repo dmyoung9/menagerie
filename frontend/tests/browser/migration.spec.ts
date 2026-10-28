@@ -234,7 +234,7 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
   );
 });
 
-test('launch review requires consent and submits its plan token; local files use the original endpoint', async ({
+test('launch warnings remain advisory and submit the plan token; local files use the original endpoint', async ({
   page,
   fixture,
 }) => {
@@ -243,8 +243,8 @@ test('launch review requires consent and submits its plan token; local files use
   const dialog = page.getByRole('dialog');
   await expect(
     dialog.getByRole('button', { name: 'Load', exact: true }),
-  ).toBeDisabled();
-  await dialog.getByRole('checkbox').check();
+  ).toBeEnabled();
+  await expect(dialog.getByRole('checkbox')).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Load', exact: true }).click();
   await expect(dialog).toBeHidden();
   expect(

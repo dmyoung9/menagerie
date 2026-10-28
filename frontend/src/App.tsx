@@ -68,6 +68,7 @@ import {
   Tabs,
 } from './ui';
 import brandLogo from './assets/logo-mono.png';
+import { FirstRun } from './FirstRun';
 import type {
   AppStatus,
   EditableSource,
@@ -581,6 +582,16 @@ export default function App() {
               )}
               {page === 'overview' && (
                 <>
+                  <FirstRun
+                    data={data}
+                    host={host}
+                    api={api}
+                    queued={() => {
+                      setNotice('Download queued — see Activity for progress');
+                      void reload();
+                    }}
+                    create={newDeployment}
+                  />
                   <div className="stats">
                     {(host.gpus || []).map((g, index: number) => (
                       <Card

@@ -10,7 +10,12 @@ streaming gateway or the bundled OpenCode discovery plugin.
 
 ## Install
 
-Linux is the initial target. Install the latest release directly:
+Linux is the initial target. While the GitHub repository is private, ask for a
+**Linux trial archive**, extract it, then run `bash ./install` from the extracted
+folder. It includes the application and installer, not models or user data;
+internet is still needed for managed dependencies and model/engine downloads.
+
+Once the repository is public, the anonymous release installer will be:
 
 ```sh
 curl -sSL https://raw.githubusercontent.com/dmyoung9/menagerie/main/install.sh | bash
@@ -30,10 +35,15 @@ offers a background user service, OpenCode plugin installation, and opening the
 dashboard. Use `--yes` for unattended installation; optional actions require
 `--service`, `--plugin`, or `--open`. No sudo or shell startup-file changes.
 
-Run `~/.local/bin/menagerie serve`, or use the optional service. Open
+Run `~/.local/bin/menagerie serve`, or use the optional service. Keep the
+terminal open for foreground operation; press Ctrl+C to stop. Open
 **[127.0.0.1:8017](http://127.0.0.1:8017)**.
 
 ## Your first model
+
+Open **Overview → Get your first response** for an engine/model checklist and a
+small starter-model option. After saving and loading a deployment, send a test
+prompt there without installing a separate client. Existing local models work too.
 
 1. **Models → Discover:** search Hugging Face, choose a variant, and download.
    **+ Add from File** also accepts existing local GGUF files or safetensors folders.

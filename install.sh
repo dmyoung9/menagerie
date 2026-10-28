@@ -6,13 +6,14 @@ umask 077
 prefix="${XDG_DATA_HOME:-$HOME/.local/share}/menagerie/app"
 bin_dir="$HOME/.local/bin"
 version=2.0.0
-wheel=''
+wheel='' constraints=''
 service=ask plugin=ask open=ask
 unattended=false rollback=false
 usage() {
   cat <<'EOF'
 Usage: bash install.sh [options]
   --wheel PATH          Install a locally built wheel (before publication)
+  --constraints PATH    Use release dependency constraints (trial bundle)
   --version VERSION     Release version (default: 2.0.0)
   --prefix PATH         Application directory
   --bin-dir PATH        CLI launcher directory
@@ -26,7 +27,7 @@ EOF
 }
 while (($#)); do
   case "$1" in
-    --wheel|--version|--prefix|--bin-dir)
+    --wheel|--version|--prefix|--bin-dir|--constraints)
       (($# >= 2)) || { usage >&2; exit 2; }
       key="${1#--}"; key="${key//-/_}"; printf -v "$key" '%s' "$2"; shift 2 ;;
     --service) service=yes; shift ;; --no-service) service=no; shift ;;
@@ -40,6 +41,10 @@ while (($#)); do
 done
 [[ "$(uname -s)" == Linux ]] || { echo 'This installer currently supports Linux.' >&2; exit 1; }
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Use a release version such as 2.0.0.' >&2; exit 2; }
+if [[ -n "$constraints" ]]; then
+  [[ -f "$constraints" ]] || { echo 'Dependency constraints file not found.' >&2; exit 1; }
+  constraints="$(realpath "$constraints")"
+fi
 for command in curl tar sha256sum mktemp; do
   command -v "$command" >/dev/null || { echo "Required utility missing: $command" >&2; exit 1; }
 done
@@ -131,13 +136,19 @@ export UV_PYTHON_INSTALL_DIR="$prefix/python"
 export UV_CACHE_DIR="$prefix/cache"
 export UV_NO_CONFIG=1
 digest="$(sha256sum "$wheel" | cut -d ' ' -f 1)"
+if [[ -n "$constraints" ]]; then
+  # The installed environment identity includes its dependency selection.
+  digest="$(printf '%s\n%s\n' "$digest" "$(sha256sum "$constraints" | cut -d ' ' -f 1)" | sha256sum | cut -d ' ' -f 1)"
+fi
 release="$prefix/releases/$digest"
 if [[ ! -d "$release" ]]; then
   mkdir -p "$prefix/releases"
   mkdir "$release"
   created="$release"
   "$uv" venv --python 3.12 --managed-python "$release"
-  "$uv" pip install --python "$release/bin/python" "$wheel"
+  dependency_args=()
+  if [[ -n "$constraints" ]]; then dependency_args=(--constraint "$constraints"); fi
+  "$uv" pip install --python "$release/bin/python" "${dependency_args[@]}" "$wheel"
   "$release/bin/menagerie" --version
   "$release/bin/python" -I -c 'from pathlib import Path; import controlplane; assert (Path(controlplane.__file__).parent / "static/index.html").is_file(), "Wheel lacks dashboard assets"'
   touch "$release/.complete"
@@ -165,10 +176,15 @@ choose() {
   [[ "$answer" == y || "$answer" == Y || "$answer" == yes ]]
 }
 if choose "$service" 'Run Menagerie in the background at login?'; then
-  if "$prefix/current/bin/python" -I -m controlplane.cli service install --interpreter "$prefix/current/bin/python"; then
-    systemctl --user enable menagerie.service
+  if ! command -v systemctl >/dev/null || ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo 'No systemd user session is available. Installation is complete; use the foreground command below.' >&2
+  elif "$prefix/current/bin/python" -I -m controlplane.cli service install --interpreter "$prefix/current/bin/python"; then
     # An upgrade requires an explicit restart to run the selected application.
-    systemctl --user restart menagerie.service
+    if systemctl --user enable menagerie.service && systemctl --user restart menagerie.service; then
+      echo 'Started menagerie.service.'
+    else
+      echo 'Service activation failed; the application is installed. Inspect systemctl --user status menagerie.service, or use the foreground command below.' >&2
+    fi
   else
     echo 'Service setup did not complete; the application itself is installed.' >&2
     echo 'Resolve the message above, then run: menagerie service install' >&2
@@ -177,13 +193,16 @@ fi
 if choose "$plugin" 'Install the OpenCode discovery plugin?'; then "$launcher" plugin install; fi
 if choose "$open" 'Open the dashboard?'; then
   if curl -fsS http://127.0.0.1:8017/health >/dev/null; then
-    xdg-open http://127.0.0.1:8017/
+    if ! command -v xdg-open >/dev/null || ! xdg-open http://127.0.0.1:8017/; then
+      echo 'Open http://127.0.0.1:8017/ in your browser.'
+    fi
   else
     echo 'Start Menagerie with: menagerie serve. Then open http://127.0.0.1:8017/'
   fi
 fi
 echo "Installed: $launcher"
-echo 'Start: menagerie serve · Dashboard: http://127.0.0.1:8017/'
+printf 'Start in a terminal: %q serve\n' "$launcher"
+echo 'Keep that terminal open; press Ctrl+C to stop. Dashboard: http://127.0.0.1:8017/'
 case ":$PATH:" in *":$bin_dir:"*) ;; *) echo "Add $bin_dir to PATH, or use the full launcher path." ;; esac
 if [[ -n "$previous" && "$previous" != "$release" ]]; then
   echo "Previous application retained at $prefix/previous; switch back with: bash install.sh --rollback"

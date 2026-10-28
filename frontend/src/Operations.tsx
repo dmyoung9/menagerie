@@ -64,9 +64,7 @@ export function LaunchReview({
   }, [modal.kind, modal.row.id]);
   const names = (ids: string[]) =>
     ids.map((id) => deployments.find((d) => d.id === id)?.name || id);
-  const needsAcceptance = Boolean(
-    plan?.warnings?.length || plan?.stops?.length,
-  );
+  const needsAcceptance = Boolean(plan?.stops?.length);
   return (
     <Dialog title="Review launch" close={close} busy={busy} wide>
       <h3>{modal.row.name}</h3>
@@ -153,7 +151,7 @@ export function LaunchReview({
             </Alert>
           ))}
           {plan.warnings.length > 0 && (
-            <details>
+            <details open>
               <summary>Memory uncertainty ({plan.warnings.length})</summary>
               {plan.warnings.map((w: string) => (
                 <p className="warning" key={w}>
@@ -168,11 +166,7 @@ export function LaunchReview({
                 checked={accepted}
                 onCheckedChange={(checked) => setAccepted(checked)}
               />
-              {plan.stops.length
-                ? plan.warnings.length
-                  ? 'Approve these unloads and uncertain memory estimates'
-                  : 'Approve these unloads'
-                : 'Allow loading with uncertain memory estimates'}
+              Approve these unloads
             </label>
           )}
           <div className="dialog-actions">
@@ -195,7 +189,7 @@ export function LaunchReview({
                 setError('');
                 try {
                   await api(`/api/${modal.kind}/${modal.row.id}/start`, {
-                    override: accepted,
+                    override: true,
                     plan_token: plan.plan_token,
                   });
                   done();
