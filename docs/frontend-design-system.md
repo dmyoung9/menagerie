@@ -69,7 +69,9 @@ handling, modal focus, scroll locking, and dismissal.
 Local source customizations: NativeSelect wrappers fill their field; Slider
 forwards accessible names/value text to thumbs; Sonner receives its theme from
 the caller without a Next.js theme dependency; CardTitle retains native heading
-semantics. RSC-only `use client` directives
+semantics; FieldSet allows shrinking below native fieldset min-content width so
+long model names do not force mobile editors wider than their viewport.
+RSC-only `use client` directives
 are removed from owned source in this Vite SPA. Retain these when updating.
 NativeSelect is deliberately used for large model/engine option lists and
 native required-form validation; Base Select is used for the small residency

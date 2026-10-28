@@ -267,6 +267,12 @@ for (const width of [1440, 390]) test(`primary surfaces have no page overflow or
   await dialog.getByRole('button', {name: 'Add model', exact: true}).click();
   await expect(dialog.getByRole('heading', {name: 'Resource preview', exact: true})).toBeVisible();
   expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const save = dialog.getByRole('button', {name: 'Save deployment', exact: true});
+  await expect(save).toBeEnabled();
+  await expect(save).toHaveCSS('opacity', '1');
+  expect(await dialog.locator('.dialog-body').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const inputBox = (await dialog.getByLabel('Name', {exact: true}).boundingBox())!;
+  expect(inputBox.x + inputBox.width).toBeLessThanOrEqual(width);
   const result = await new AxeBuilder({page}).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
   expect(result.violations.map(v => ({id: v.id, nodes: v.nodes.map(n => n.target)}))).toEqual([]);
   await page.screenshot({path: testInfo.outputPath(`editor-${width}.png`), fullPage: true});
