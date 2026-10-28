@@ -29,7 +29,7 @@ export function RuntimeSettings({schema, value, change, host = {}, recommendatio
     const context = ['ctx-size', 'max-model-len'].includes(key);
     const recommended = context && recommendation.context_key === key ? recommendation.context_recommended_max : undefined;
     const capacity = context ? recommended : key === 'parallel' ? recommendation.parallel_recommended_max : undefined;
-    const max = key === 'gpu-memory-utilization' && recommendation.gpu_memory_utilization_max !== undefined ? Math.min(f.max, recommendation.gpu_memory_utilization_max) : typeof capacity === 'number' ? Math.min(f.max, capacity) : thread && host.cpu_count ? Math.min(f.max || host.cpu_count, host.cpu_count) : key === 'ubatch-size' ? Math.min(f.max, value['batch-size'] ?? schema['batch-size']?.default ?? f.max) : f.max;
+    const max = key === 'gpu-memory-utilization' && recommendation.gpu_memory_utilization_max !== undefined ? Math.min(f.max, recommendation.gpu_memory_utilization_max) : context ? f.max : typeof capacity === 'number' ? Math.min(f.max, capacity) : thread && host.cpu_count ? Math.min(f.max || host.cpu_count, host.cpu_count) : key === 'ubatch-size' ? Math.min(f.max, value['batch-size'] ?? schema['batch-size']?.default ?? f.max) : f.max;
     const numeric = ['integer', 'number'].includes(f.type);
     const stops = [...new Set([f.min, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, max].filter(n => typeof n === 'number' && n >= f.min && n <= max))].sort((a, b) => a - b);
     const effective = Number(current ?? f.default ?? f.min);
