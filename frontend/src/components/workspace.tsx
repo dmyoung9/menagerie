@@ -1,5 +1,5 @@
 import {Children, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ReactElement, type ReactNode} from 'react';
-import {Check, Copy, MoreHorizontal, X} from 'lucide-react';
+import {Check, Copy, LoaderCircle, MoreHorizontal, X} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
@@ -19,7 +19,8 @@ const fieldControls = new Set<unknown>([Input, Textarea, NativeSelect]);
 export function Status({value}: {value: string}) {
   const failed = /failed|degraded|error/i.test(value);
   const ready = /ready|succeeded|complete/i.test(value);
-  return <Badge variant={failed ? 'destructive' : ready ? 'default' : 'secondary'} className="whitespace-nowrap">{value}</Badge>;
+  const pending = /loading|starting|queued|running|unloading/i.test(value);
+  return <Badge variant={failed ? 'destructive' : ready ? 'default' : 'secondary'} className="whitespace-nowrap">{pending && <LoaderCircle data-icon="inline-start" className="animate-spin"/>}{value}</Badge>;
 }
 
 export function Empty({title, children}: {title: string; children?: ReactNode}) {

@@ -1,7 +1,13 @@
+import {Alert, AlertDescription} from '@/components/ui/alert';
+import {FieldSet, FieldGroup} from '@/components/ui/field';
+import {NativeSelect, NativeSelectOption} from '@/components/ui/native-select';
+import {Button} from '@/components/ui/button';
+import {Input} from '@/components/ui/input';
+import {Checkbox} from '@/components/ui/checkbox';
 import {useEffect, useState} from 'react';
 import {api, Dialog, Field, JsonEdit, message, type Registry, type Row} from './ui';
 import {defaults} from './Editors';
-import {RuntimeSettings} from './FormControls';
+import {Choices, RuntimeSettings} from './FormControls';
 import {DraftResources, useResourcePreview} from './Resources';
 import {Capabilities} from './Capabilities';
 
@@ -51,43 +57,43 @@ export function DeploymentWizard({data, modelId, close, created, setupEngine}: {
   };
   return <Dialog title={['New deployment', 'Configuration', 'Review deployment'][step]} close={close} busy={busy} wide>
     <ol className="steps" aria-label="Deployment setup">{['Model & engine', 'Configuration', 'Review'].map((s, i) => <li key={s} aria-current={i === step ? 'step' : undefined} className={i <= step ? 'current' : ''}><span>{i + 1}</span>{s}</li>)}</ol>
-    {error && <p className="alert error" role="alert">{error}</p>}
+    {error && <Alert variant="destructive" className="mb-5" role="alert"><AlertDescription className="flex flex-wrap items-center justify-between gap-3 whitespace-pre-line">{error}</AlertDescription></Alert>}
     <form onSubmit={e => {e.preventDefault(); if (step < 2) advance();}}>
-      <fieldset disabled={busy}>
+      <FieldSet disabled={busy}>
         {step === 0 && <>
-          <><Field label="Model"><select required value={artifactId} onChange={e => {setArtifactId(e.target.value); setRuntimeId(''); setExtra({});}}><option value="" disabled>Select model…</option>{(data.models || []).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
-            {engines.length ? <Field label="Engine"><select value={runtime?.id} onChange={e => {setRuntimeId(e.target.value); setExtra({});}}>{engines.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></Field> : <div className="empty"><h3>No compatible engine</h3><button type="button" onClick={setupEngine}>Set up engine</button></div>}
+          <><Field label="Model"><NativeSelect required value={artifactId} onChange={e => {setArtifactId(e.target.value); setRuntimeId(''); setExtra({});}}><NativeSelectOption value="" disabled>Select model…</NativeSelectOption>{(data.models || []).map(m => <NativeSelectOption key={m.id} value={m.id}>{m.name}</NativeSelectOption>)}</NativeSelect></Field>
+            {engines.length ? <Field label="Engine"><NativeSelect value={runtime?.id} onChange={e => {setRuntimeId(e.target.value); setExtra({});}}>{engines.map(r => <NativeSelectOption key={r.id} value={r.id}>{r.name}</NativeSelectOption>)}</NativeSelect></Field> : <div className="empty"><h3>No compatible engine</h3><Button variant="outline" type="button" onClick={setupEngine}>Set up engine</Button></div>}
           </>
         </>}
         {step === 1 && <>
-          <Field label="Name"><input required value={displayName} onChange={e => setName(e.target.value)}/></Field>
-          <Field label="API model"><input required pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}" value={apiAlias} onChange={e => setAlias(e.target.value)}/></Field>
+          <Field label="Name"><Input required value={displayName} onChange={e => setName(e.target.value)}/></Field>
+          <Field label="API model"><Input required pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}" value={apiAlias} onChange={e => setAlias(e.target.value)}/></Field>
           <>
-            {hasContext && <Field label="Context / request" hint={suggestedContext ? `Suggested ceiling: ${suggestedContext.toLocaleString()} tokens per request (estimated)` : 'Capacity recommendation unavailable or minimum context does not fit'}><div className="segmented">{[8192, 16384, 32768].map(n => <button type="button" disabled={n * (hasParallel ? parallel : 1) > (schema[contextKey].max || 1048576)} aria-pressed={!custom && context === n} key={n} onClick={() => {setContext(n); setCustom(false);}}>{n / 1024}K{suggestedContext && n > suggestedContext ? ' ⚠' : ''}</button>)}<button type="button" aria-pressed={custom} onClick={() => setCustom(true)}>Custom</button>{recommendation?.context_default != null && <button type="button" onClick={() => {setContext(Math.max(schema[contextKey].min || 512, Math.floor(recommendation.context_default / (hasParallel ? parallel : 1)))); setCustom(true);}}>Use suggested default</button>}</div>{custom && <input aria-label="Custom context / request" type="number" required min={schema[contextKey].min || 512} max={(schema[contextKey].max || 1048576) / (hasParallel ? parallel : 1)} value={context} onChange={e => setContext(Number(e.target.value))}/>}</Field>}
-            {hasParallel && <Field label="Concurrent requests" hint={`Shared context pool: ${(context * parallel).toLocaleString()} tokens`}><input type="number" min={1} max={schema.parallel.max || 64} required value={parallel} onChange={e => setParallel(Number(e.target.value))}/></Field>}
+            {hasContext && <Field label="Context / request" hint={suggestedContext ? `Suggested ceiling: ${suggestedContext.toLocaleString()} tokens per request (estimated)` : 'Capacity recommendation unavailable or minimum context does not fit'}><Choices label="Context size" value={custom ? 'custom' : String(context)} options={[...[8192, 16384, 32768].map(n => ({value: String(n), label: `${n / 1024}K${suggestedContext && n > suggestedContext ? ' ⚠' : ''}`, disabled: n * (hasParallel ? parallel : 1) > (schema[contextKey].max || 1048576)})), {value: 'custom', label: 'Custom'}]} change={next => {setCustom(next === 'custom'); if (next !== 'custom') setContext(Number(next));}}/>{recommendation?.context_default != null && <Button variant="outline" type="button" onClick={() => {setContext(Math.max(schema[contextKey].min || 512, Math.floor(recommendation.context_default / (hasParallel ? parallel : 1)))); setCustom(true);}}>Use suggested default</Button>}{custom && <Input aria-label="Custom context / request" type="number" required min={schema[contextKey].min || 512} max={(schema[contextKey].max || 1048576) / (hasParallel ? parallel : 1)} value={context} onChange={e => setContext(Number(e.target.value))}/>}</Field>}
+            {hasParallel && <Field label="Concurrent requests" hint={`Shared context pool: ${(context * parallel).toLocaleString()} tokens`}><Input type="number" min={1} max={schema.parallel.max || 64} required value={parallel} onChange={e => setParallel(Number(e.target.value))}/></Field>}
             {!hasContext && <p className="muted">This engine requires manual context configuration in Advanced.</p>}
           </>
-          <Field label="Mode"><select value={residency} onChange={e => setResidency(e.target.value)}><option value="on-demand">On demand</option><option value="pinned">Pinned</option><option value="evictable">Evictable</option></select><small>{residency === 'on-demand' ? 'Loads when a client sends a request.' : residency === 'pinned' ? 'Never automatically unloaded to make room.' : 'Loads manually; can make room when idle and authorized.'}</small></Field>
-          {residency === 'on-demand' && <Field label="Unload after idle"><select value={idle} onChange={e => setIdle(Number(e.target.value))}>{[60, 300, 900, 1800, 0].map(s => <option key={s} value={s}>{s ? s / 60 + ' minutes' : 'Never'}</option>)}</select></Field>}
+          <Field label="Mode"><NativeSelect value={residency} onChange={e => setResidency(e.target.value)}><NativeSelectOption value="on-demand">On demand</NativeSelectOption><NativeSelectOption value="pinned">Pinned</NativeSelectOption><NativeSelectOption value="evictable">Evictable</NativeSelectOption></NativeSelect><small>{residency === 'on-demand' ? 'Loads when a client sends a request.' : residency === 'pinned' ? 'Never automatically unloaded to make room.' : 'Loads manually; can make room when idle and authorized.'}</small></Field>
+          {residency === 'on-demand' && <Field label="Unload after idle"><NativeSelect value={idle} onChange={e => setIdle(Number(e.target.value))}>{[60, 300, 900, 1800, 0].map(s => <NativeSelectOption key={s} value={s}>{s ? s / 60 + ' minutes' : 'Never'}</NativeSelectOption>)}</NativeSelect></Field>}
           <Capabilities key={artifactId + ':' + runtime?.id} catalog={catalog} change={setCatalog} hints={artifact?.discovered_capabilities} runtime={runtime} valid={(key, ok) => setInvalid(v => ({...v, [key]: !ok}))}/>
-          {artifact?.metadata?.projector && schema.mmproj && <button type="button" onClick={() => setExtra({...extra, mmproj: artifact.metadata.projector.path})}>Use downloaded projector: {artifact.metadata.projector.name}</button>}
+          {artifact?.metadata?.projector && schema.mmproj && <Button variant="outline" type="button" onClick={() => setExtra({...extra, mmproj: artifact.metadata.projector.path})}>Use downloaded projector: {artifact.metadata.projector.name}</Button>}
           <details><summary>Advanced</summary>
             <><RuntimeSettings schema={Object.fromEntries(Object.entries(schema).filter(([key]) => !['ctx-size', 'max-model-len', 'parallel'].includes(key)))} value={extra} change={setExtra} host={data.host?.[0]} recommendation={recommendation}/>
               {!hasContext && <JsonEdit label="Runtime options (JSON)" value={extra} onChange={setExtra} onValid={valid => setInvalid(v => ({...v, config: !valid}))}/>}
               <JsonEdit label="Additional engine arguments" value={args} onChange={setArgs} onValid={valid => setInvalid(v => ({...v, args: !valid}))}/>
             </>
-            <div className="form-grid">{[['port', 'Private port', 1024, 65535], ['gpu', 'GPU index', 0, 31], ['reservation_mib', 'VRAM reservation (MiB; 0 = estimate)', 0, undefined], ['priority', 'Priority', 0, 100], ['queue_timeout', 'Queue timeout (seconds)', 1, 1800]].map(([key, label, min, max]) => <Field key={String(key)} label={String(label)}><input required type="number" min={min as number} max={max as number | undefined} value={advanced[key!]} onChange={e => setAdvanced({...advanced, [key!]: Number(e.target.value)})}/></Field>)}</div>
-            {residency !== 'pinned' && <label className="check"><input type="checkbox" checked={advanced.allow_eviction} onChange={e => setAdvanced({...advanced, allow_eviction: e.target.checked})}/>Allow automatic unloading when idle</label>}
+            <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">{[['port', 'Private port', 1024, 65535], ['gpu', 'GPU index', 0, 31], ['reservation_mib', 'VRAM reservation (MiB; 0 = estimate)', 0, undefined], ['priority', 'Priority', 0, 100], ['queue_timeout', 'Queue timeout (seconds)', 1, 1800]].map(([key, label, min, max]) => <Field key={String(key)} label={String(label)}><Input required type="number" min={min as number} max={max as number | undefined} value={advanced[key!]} onChange={e => setAdvanced({...advanced, [key!]: Number(e.target.value)})}/></Field>)}</FieldGroup>
+            {residency !== 'pinned' && <label className="check"><Checkbox  checked={advanced.allow_eviction} onCheckedChange={checked => setAdvanced({...advanced, allow_eviction: checked})}/>Allow automatic unloading when idle</label>}
           </details>
         </>}
         {step === 2 && <>
           <h3>{displayName}</h3><dl className="properties"><dt>API model</dt><dd><code>{apiAlias}</code></dd><dt>Engine</dt><dd>{runtime?.name}</dd>{hasContext && <><dt>Context / request</dt><dd>{context.toLocaleString()}</dd></>}<dt>Mode</dt><dd>{residency === 'on-demand' ? 'On demand' : residency === 'pinned' ? 'Pinned' : 'Evictable'}</dd>{residency === 'on-demand' && <><dt>Unload after idle</dt><dd>{idle ? idle / 60 + ' minutes' : 'Never'}</dd></>}</dl>
           <p className="muted">Loading requires a capacity review. Creating without loading leaves this enabled for clients{residency === 'on-demand' ? '; the first request can trigger loading' : ''}.</p>
-          {residency === 'on-demand' && <><label className="check"><input type="checkbox" checked={advanced.allow_uncertain} onChange={e => setAdvanced({...advanced, allow_uncertain: e.target.checked})}/>Allow on-demand loading with uncertain memory estimates</label>{!advanced.allow_uncertain && <p className="warning">Client-triggered loading may be blocked until this permission is granted.</p>}</>}
+          {residency === 'on-demand' && <><label className="check"><Checkbox  checked={advanced.allow_uncertain} onCheckedChange={checked => setAdvanced({...advanced, allow_uncertain: checked})}/>Allow on-demand loading with uncertain memory estimates</label>{!advanced.allow_uncertain && <p className="warning">Client-triggered loading may be blocked until this permission is granted.</p>}</>}
         </>}
-      </fieldset>
+      </FieldSet>
       {step > 0 && <DraftResources preview={preview.data} error={preview.error}/>}
-      <div className="dialog-actions">{step > 0 && <button type="button" disabled={busy} onClick={() => setStep(s => s - 1)}>Back</button>}{step < 2 ? <button className="primary" disabled={Object.values(invalid).some(Boolean) || !runtime}>Next</button> : <><button type="button" disabled={busy} onClick={() => void submit(false)}>Create without loading</button><button type="button" className="primary" disabled={busy} onClick={() => void submit(true)}>{busy ? 'Creating…' : 'Create & review launch'}</button></>}</div>
+      <div className="dialog-actions">{step > 0 && <Button variant="outline" type="button" disabled={busy} onClick={() => setStep(s => s - 1)}>Back</Button>}{step < 2 ? <Button variant="default" type="submit"  disabled={Object.values(invalid).some(Boolean) || !runtime}>Next</Button> : <><Button variant="outline" type="button" disabled={busy} onClick={() => void submit(false)}>Create without loading</Button><Button variant="default" type="button"  disabled={busy} onClick={() => void submit(true)}>{busy ? 'Creating…' : 'Create & review launch'}</Button></>}</div>
     </form>
   </Dialog>;
 }

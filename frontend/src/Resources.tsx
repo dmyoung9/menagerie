@@ -1,3 +1,6 @@
+import {Button} from '@/components/ui/button';
+import {Badge} from '@/components/ui/badge';
+import {Card, CardHeader, CardTitle, CardContent} from '@/components/ui/card';
 import {useEffect, useState} from 'react';
 import {api, gib, message, type Row} from './ui';
 
@@ -12,15 +15,21 @@ function layout(tiles: Tile[], x = 0, y = 0, w = 100, h = 100): Rect[] {
   const ratio = sum / total;
   return w >= h ? [...layout(tiles.slice(0, split), x, y, w * ratio, h), ...layout(tiles.slice(split), x + w * ratio, y, w * (1 - ratio), h)] : [...layout(tiles.slice(0, split), x, y, w, h * ratio), ...layout(tiles.slice(split), x, y + h * ratio, w, h * (1 - ratio))];
 }
-function hue(key: string) {return [205, 285, 35, 155, 335, 185, 65][[...key].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 997, 0) % 7];}
+function tileColor(tile: Tile) {
+  if (tile.kind === 'free') return 'var(--muted)';
+  if (tile.kind === 'reserve') return 'var(--chart-3)';
+  if (tile.kind === 'external') return 'var(--secondary)';
+  const index = [...(tile.group || tile.id)].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 997, 0) % 5;
+  return `var(--chart-${index + 1})`;
+}
 export function ResourceMap({title, total, tiles, summary}: {title: string; total: number; tiles: Tile[]; summary?: string}) {
   const [selected, setSelected] = useState('');
   const valid = tiles.filter(t => Number.isFinite(t.mib) && t.mib > 0);
   const chosen = valid.find(t => t.id === selected);
   return <section className="resource-card"><div className="section-heading"><h3>{title}</h3><span>{gib(total)} GiB capacity</span></div>
     {summary && <p className="resource-verdict">{summary}</p>}
-    <div className="resource-map" role="group" aria-label={title + ' resource breakdown'}>{layout(valid).map(t => <button type="button" key={t.id} className={'resource-tile ' + (t.kind || '')} style={{left: t.x + '%', top: t.y + '%', width: t.w + '%', height: t.h + '%', backgroundColor: t.kind ? undefined : `hsl(${hue(t.group || t.id)} 45% 31%)`}} aria-label={`${t.label}: ${gib(t.mib)} GiB${t.detail ? '. ' + t.detail : ''}`} aria-pressed={selected === t.id} title={`${t.label}: ${gib(t.mib)} GiB${t.detail ? '\n' + t.detail : ''}`} onClick={() => setSelected(t.id)}><span>{t.label}</span><strong>{gib(t.mib)} GiB</strong></button>)}</div>
-    <div className="resource-legend">{valid.map(t => <button type="button" key={t.id} aria-pressed={selected === t.id} onClick={() => setSelected(t.id)}><i style={{background: t.kind === 'free' ? '#244237' : t.kind === 'reserve' ? '#5a4c36' : t.kind === 'external' ? '#424b5c' : `hsl(${hue(t.group || t.id)} 45% 45%)`}}/>{t.label}<b>{gib(t.mib)}</b></button>)}</div>
+    <div className="resource-map" role="group" aria-label={title + ' resource breakdown'}>{layout(valid).map(t => <Button variant="ghost" type="button" key={t.id} className={'resource-tile ' + (t.kind || '')} style={{left: t.x + '%', top: t.y + '%', width: t.w + '%', height: t.h + '%', backgroundColor: t.kind ? undefined : `color-mix(in oklch, ${tileColor(t)} 28%, var(--background))`}} aria-label={`${t.label}: ${gib(t.mib)} GiB${t.detail ? '. ' + t.detail : ''}`} aria-pressed={selected === t.id} title={`${t.label}: ${gib(t.mib)} GiB${t.detail ? '\n' + t.detail : ''}`} onClick={() => setSelected(t.id)}><span>{t.label}</span><strong>{gib(t.mib)} GiB</strong></Button>)}</div>
+    <div className="resource-legend">{valid.map(t => <Button variant="ghost" type="button" key={t.id} aria-pressed={selected === t.id} onClick={() => setSelected(t.id)}><i style={{background: tileColor(t)}}/>{t.label}<b>{gib(t.mib)}</b></Button>)}</div>
     {chosen && <p className="resource-inspector" role="status"><strong>{chosen.label}: {gib(chosen.mib)} GiB.</strong> {chosen.detail} {chosen.href && <a href={chosen.href}>Open deployment →</a>}</p>}
   </section>;
 }
@@ -39,7 +48,7 @@ export function useResourcePreview(members: Row[], sampleTs?: number) {
 }
 
 export function DraftResources({preview, error}: {preview?: Row; error?: string}) {
-  return <aside className="draft-resources" aria-label="Deployment resource preview"><div className="section-heading"><h2>Resource preview</h2><span className="resource-tag">Estimated</span></div>
+  return <Card role="complementary" className="draft-resources" aria-label="Deployment resource preview"><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2"><CardTitle role="heading" aria-level={2}>Resource preview</CardTitle><Badge variant="secondary">Estimated</Badge></CardHeader><CardContent>
     {!preview ? <p className="muted" role="status">{error ? 'Preview unavailable: ' + error : 'Calculating draft budget…'}</p> : <>
       {!preview.gpus.length && <p className="warning">GPU capacity unavailable. Select a GPU with telemetry before relying on this preview.</p>}
       {preview.gpus.map((g: Row) => {
@@ -59,14 +68,14 @@ export function DraftResources({preview, error}: {preview?: Row; error?: string}
       {preview.members.map((m: Row) => <p className="muted" key={m.key}>{m.name}: predicted peak {gib(m.estimate.peak_mib)} GiB · reservation {gib(m.estimate.reservation_mib)} GiB (not additional usage).</p>)}
       <small className="muted">{preview.note}</small>
     </>}
-  </aside>;
+  </CardContent></Card>;
 }
 
 export function LiveResources({host, deployments, settings}: {host: Row; deployments: Row[]; settings: Row}) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {const timer = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(timer);}, []);
   const stale = !host.ts || now / 1000 - host.ts > 10;
-  return <section className="panel padded live-resources"><div className="section-heading"><h2>Where your resources go</h2><span className="resource-tag">{stale ? 'Telemetry stale / unavailable' : 'Live · observed'}</span></div>
+  return <Card className="mb-5 min-w-0 live-resources"><CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2"><CardTitle role="heading" aria-level={2}>Where your resources go</CardTitle><Badge variant="secondary">{stale ? 'Telemetry stale / unavailable' : 'Live · observed'}</Badge></CardHeader><CardContent>
     <p className="muted">Select a block to inspect it. Reserve is held out of available space, not added to observed usage.</p>
     <div className="resource-grid">{(host.gpus || []).map((g: Row) => {
       if (typeof g.used_mib !== 'number' || !g.total_mib) return <p key={g.index}>GPU {g.index}: memory telemetry unavailable.</p>;
@@ -89,5 +98,5 @@ export function LiveResources({host, deployments, settings}: {host: Row; deploym
       {id: 'free', label: 'Available to deploy', mib: Math.max(0, host.ram_available_mib - (settings.ram_headroom_mib || 4096)), kind: 'free'},
     ]} summary={`${host.cpu_percent ?? '—'}% CPU · ${gib(host.swap_used_mib)} GiB swap used`}/>}
     </div>
-  </section>;
+  </CardContent></Card>;
 }
