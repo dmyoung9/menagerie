@@ -38,23 +38,34 @@ def test_split_gguf_expands_to_complete_ordered_set():
 
 def test_incomplete_split_gguf_is_rejected():
     with pytest.raises(ValueError, match="found 1 of 2"):
-        selected_download(files("BF16/model-00001-of-00002.gguf"), "BF16/model-00001-of-00002.gguf")
+        selected_download(
+            files("BF16/model-00001-of-00002.gguf"), "BF16/model-00001-of-00002.gguf"
+        )
 
 
 def test_duplicate_split_shard_is_rejected():
     with pytest.raises(ValueError, match="found 2 of 2"):
-        selected_download(files("model-00001-of-00002.gguf", "model-00001-of-00002.gguf"), "model-00001-of-00002.gguf")
+        selected_download(
+            files("model-00001-of-00002.gguf", "model-00001-of-00002.gguf"),
+            "model-00001-of-00002.gguf",
+        )
 
 
 @pytest.mark.asyncio
-async def test_download_persists_one_artifact_for_the_complete_shard_set(tmp_path, monkeypatch):
+async def test_download_persists_one_artifact_for_the_complete_shard_set(
+    tmp_path, monkeypatch
+):
     store = Store(tmp_path / "state")
     jobs = Jobs(SimpleNamespace(store=store))
     jobs.progress = lambda ident, text: None
     weights = b"GGUF" + struct.pack("<IQQ", 3, 0, 0)
     digest = hashlib.sha256(weights).hexdigest()
     names = ["BF16/model-00001-of-00002.gguf", "BF16/model-00002-of-00002.gguf"]
-    metadata = {"files": [{"name": name, "size": len(weights), "sha256": digest} for name in names]}
+    metadata = {
+        "files": [
+            {"name": name, "size": len(weights), "sha256": digest} for name in names
+        ]
+    }
     downloaded = []
 
     async def hf_files(repo, revision):
@@ -78,4 +89,6 @@ async def test_download_persists_one_artifact_for_the_complete_shard_set(tmp_pat
     assert artifact["size_bytes"] == len(weights) * 2
     assert artifact["sha256"] == digest
     assert [s["name"] for s in artifact["metadata"]["shards"]] == names
-    assert [s["path"] for s in artifact["metadata"]["shards"]] == [str(tmp_path / "cache" / n) for n in names]
+    assert [s["path"] for s in artifact["metadata"]["shards"]] == [
+        str(tmp_path / "cache" / n) for n in names
+    ]

@@ -75,6 +75,36 @@ are pending. See [installation and recovery](docs/installation.md),
 [operations](docs/operations.md), and [release validation](docs/release-validation.md)
 for verified coverage and remaining release gates.
 
+## Linting and formatting
+
+Run these checks before opening a pull request (CI runs them too):
+
+```sh
+# Python, from the repository root
+uv sync --locked --no-install-project
+uv run --no-sync ruff check .
+uv run --no-sync ruff format --check .
+
+# Run in each of frontend/ and plugins/opencode/
+npm ci
+npm run check
+npm run lint
+npm run format:check
+```
+
+To apply fixes, use `uv run --no-sync ruff check . --fix` and
+`uv run --no-sync ruff format .` for Python, or `npm run lint:fix` and
+`npm run format` in either JavaScript package. Prettier shares the root
+configuration and skips generated output and lockfiles. Hook dependencies and
+fast-refresh boundaries are enforced as errors. The shadcn primitives retain
+their intentional public variant/helper exports. Both TypeScript packages reject
+explicit `any`; frontend lint runs with a zero-warning budget. Domain contracts
+live in `frontend/src/types/`, with runtime wire/JSON decoders in
+`frontend/src/contracts.ts`. The frontend `check` command also type-checks tests,
+build/test configuration, and compile-only negative type assertions. A Python
+test checks the frontend decoders against real offline ASGI responses when
+Node.js 22+ is available (as it is in CI).
+
 ## License
 
 Menagerie is licensed under the **GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)**. See the [LICENSE](LICENSE) file for details.

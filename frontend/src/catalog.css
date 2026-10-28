@@ -1,18 +1,92 @@
-.catalog-grid {display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr));gap:14px}
-.catalog-chips {display:flex;flex-wrap:wrap;gap:6px}
-.catalog-local {margin-top:24px;border-top:1px solid var(--border);padding-top:10px}
-.variant-revision {display:flex;align-items:center;gap:12px;color:var(--muted-foreground)}
-.variant-revision select {max-width:100%}
-.variant-loading {display:flex;align-items:center;justify-content:center;gap:12px;min-height:180px;color:var(--muted-foreground)}
-.variant-field {margin-bottom:22px}
-.variant-options {display:flex;flex-wrap:wrap;gap:8px}
-.variant-summary {background:var(--muted);border:1px solid var(--border);border-radius:var(--radius);padding:17px;margin-top:4px}
-.variant-summary .eyebrow {font-size:10px}
-.variant-summary h3 {overflow-wrap:anywhere;margin:10px 0}
-.variant-summary p {margin-bottom:0;font-size:12px}
-.variant-commit {font-family:monospace;overflow-wrap:anywhere;color:var(--muted-foreground)}
-.variant-summary ul {padding:0;list-style:none;font-size:10px}
-.variant-summary li {display:flex;gap:12px;padding:7px 0;justify-content:space-between;align-items:baseline;flex-wrap:wrap}
-.variant-summary li code {overflow-wrap:anywhere;min-width:0}
-.variant-summary li span {white-space:nowrap;color:var(--muted-foreground)}
-.variant-related-item {white-space:normal;overflow-wrap:anywhere;text-align:left;width:100%;margin-top:8px;height:auto}
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 14px;
+}
+.catalog-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.catalog-local {
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.variant-revision {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted-foreground);
+}
+.variant-revision select {
+  max-width: 100%;
+}
+.variant-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 180px;
+  color: var(--muted-foreground);
+}
+.variant-field {
+  margin-bottom: 22px;
+}
+.variant-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.variant-summary {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 17px;
+  margin-top: 4px;
+}
+.variant-summary .eyebrow {
+  font-size: 10px;
+}
+.variant-summary h3 {
+  overflow-wrap: anywhere;
+  margin: 10px 0;
+}
+.variant-summary p {
+  margin-bottom: 0;
+  font-size: 12px;
+}
+.variant-commit {
+  font-family: monospace;
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+}
+.variant-summary ul {
+  padding: 0;
+  list-style: none;
+  font-size: 10px;
+}
+.variant-summary li {
+  display: flex;
+  gap: 12px;
+  padding: 7px 0;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.variant-summary li code {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.variant-summary li span {
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+.variant-related-item {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  width: 100%;
+  margin-top: 8px;
+  height: auto;
+}

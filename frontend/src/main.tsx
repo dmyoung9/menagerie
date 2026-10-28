@@ -1,9 +1,13 @@
-
-import {createRoot} from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
 import App from './App';
-import {TooltipProvider} from '@/components/ui/tooltip';
-import {Toaster} from '@/components/ui/sonner';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { Toaster } from '@/components/ui/sonner';
 import './theme.css';
 import './style.css';
 
-createRoot(document.getElementById('root')!).render(<TooltipProvider><App/><Toaster theme="dark" closeButton duration={7000}/></TooltipProvider>);
+createRoot(document.getElementById('root')!).render(
+  <TooltipProvider>
+    <App />
+    <Toaster theme="dark" closeButton duration={7000} />
+  </TooltipProvider>,
+);

@@ -6,22 +6,30 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from controlplane import adapters
 from controlplane import managed_engines as engines
 from controlplane.store import Store
-from controlplane import adapters
 
 
 def asset(name, content=b"binary"):
-    return {"name": name, "browser_download_url": "https://example.test/" + name,
-            "digest": "sha256:" + hashlib.sha256(content).hexdigest(), "size": len(content)}
+    return {
+        "name": name,
+        "browser_download_url": "https://example.test/" + name,
+        "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+        "size": len(content),
+    }
 
 
 def test_release_selection_skips_marker_release_and_requires_cuda_libraries():
     cuda = asset("llama-b123-bin-ubuntu-cuda-12.8-x64.tar.gz")
     cpu = asset("llama-b123-bin-ubuntu-x64.tar.gz")
-    releases = [{"tag_name": "v1", "assets": [asset("nightly-tag.txt")]},
-                {"tag_name": "b123", "prerelease": True, "assets": [cuda, cpu]}]
-    assert [r["backend"] for r in engines.release_recipes("llama.cpp", releases, "x86_64")] == ["cpu"]
+    releases = [
+        {"tag_name": "v1", "assets": [asset("nightly-tag.txt")]},
+        {"tag_name": "b123", "prerelease": True, "assets": [cuda, cpu]},
+    ]
+    assert [
+        r["backend"] for r in engines.release_recipes("llama.cpp", releases, "x86_64")
+    ] == ["cpu"]
     releases[1]["assets"].append(asset("cudart-" + cuda["name"]))
     recipes = engines.release_recipes("llama.cpp", releases, "x86_64")
     assert recipes[0]["version"] == "b123"
@@ -45,7 +53,9 @@ def archive(name="bin/llama-server", link=None):
     return output.getvalue()
 
 
-@pytest.mark.parametrize("name,link", [("../escape", None), ("bin/link", "/tmp/outside")])
+@pytest.mark.parametrize(
+    "name,link", [("../escape", None), ("bin/link", "/tmp/outside")]
+)
 def test_archive_rejects_path_and_link_escapes(tmp_path, name, link):
     path = tmp_path / "test.tar.gz"
     path.write_bytes(archive(name, link))
@@ -57,9 +67,18 @@ def test_archive_rejects_path_and_link_escapes(tmp_path, name, link):
 @pytest.mark.asyncio
 async def test_vllm_probe_reads_full_serve_help(tmp_path):
     executable = tmp_path / "vllm"
-    executable.write_text('#!/bin/sh\nif [ "$1" = serve ] && [ "$2" = --help=all ]; then\n echo "--max-model-len --gpu-memory-utilization"\nelse\n echo "--help --version"\nfi\n')
+    executable.write_text(
+        '#!/bin/sh\nif [ "$1" = serve ] && [ "$2" = --help=all ]; then\n echo "--max-model-len --gpu-memory-utilization"\nelse\n echo "--help --version"\nfi\n'
+    )
     executable.chmod(0o700)
-    result = await adapters.probe({"engine": "vllm", "execution_kind": "native", "executable": str(executable), "trust": True})
+    result = await adapters.probe(
+        {
+            "engine": "vllm",
+            "execution_kind": "native",
+            "executable": str(executable),
+            "trust": True,
+        }
+    )
     assert "max-model-len" in result["flags"]
     assert "gpu-memory-utilization" in result["flags"]
 
@@ -68,12 +87,31 @@ async def test_vllm_probe_reads_full_serve_help(tmp_path):
 async def test_install_verifies_probes_and_preserves_existing_install(tmp_path):
     store = Store(tmp_path)
     content = archive()
-    recipe = {"id": "test-recipe", "engine": "llama.cpp", "version": "test", "backend": "cpu",
-              "kind": "archive", "assets": [{"url": "https://example.test/engine.tar.gz",
-              "size": len(content), "sha256": hashlib.sha256(content).hexdigest()}]}
+    recipe = {
+        "id": "test-recipe",
+        "engine": "llama.cpp",
+        "version": "test",
+        "backend": "cpu",
+        "kind": "archive",
+        "assets": [
+            {
+                "url": "https://example.test/engine.tar.gz",
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        ],
+    }
     store.put("engine_recipe", recipe)
-    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=content))) as client:
-        jobs = SimpleNamespace(store=store, manager=SimpleNamespace(client=client), progress=lambda *args: None)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=content)
+        )
+    ) as client:
+        jobs = SimpleNamespace(
+            store=store,
+            manager=SimpleNamespace(client=client),
+            progress=lambda *args: None,
+        )
         runtime = await engines.install(jobs, "job", recipe["id"])
         assert "ctx-size" in runtime["capabilities"]["flags"]
         assert runtime["managed"]["recipe_id"] == recipe["id"]

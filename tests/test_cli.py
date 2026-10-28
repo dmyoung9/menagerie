@@ -1,11 +1,11 @@
-import argparse
 import json
-from pathlib import Path
 import subprocess
 import sys
 import urllib.error
+from pathlib import Path
 
 import pytest
+
 from controlplane import cli, plugin_install, service
 
 
@@ -24,8 +24,10 @@ def test_cli_help_version_and_validation(capsys):
 
 def test_doctor_offline_does_not_create_state(tmp_path, monkeypatch, capsys):
     root = tmp_path / "missing/state"
+
     def offline(*args):
         raise urllib.error.URLError("offline")
+
     monkeypatch.setattr(cli.Client, "request", offline)
     assert cli.main(["doctor", "--state", str(root)]) == 1
     report = json.loads(capsys.readouterr().out)
@@ -36,6 +38,7 @@ def test_doctor_offline_does_not_create_state(tmp_path, monkeypatch, capsys):
 def test_cli_errors_have_exit_codes_and_no_tracebacks(monkeypatch, capsys):
     def offline(*args):
         raise urllib.error.URLError("offline")
+
     monkeypatch.setattr(cli.Client, "request", offline)
     assert cli.main(["status", "--json"]) == 1
     assert "offline" in json.loads(capsys.readouterr().err)["error"]
@@ -43,9 +46,15 @@ def test_cli_errors_have_exit_codes_and_no_tracebacks(monkeypatch, capsys):
 
 def test_start_requires_explicit_approval(monkeypatch, capsys):
     calls = []
+
     def request(self, path, body=None):
         calls.append((path, body))
-        return {"errors": [], "plan_token": "reviewed"} if path.endswith("/validate") else {"id": "job"}
+        return (
+            {"errors": [], "plan_token": "reviewed"}
+            if path.endswith("/validate")
+            else {"id": "job"}
+        )
+
     monkeypatch.setattr(cli.Client, "request", request)
     assert cli.main(["start", "deployment"]) == 1
     assert len(calls) == 1 and calls[0][0].endswith("/validate")
@@ -53,12 +62,18 @@ def test_start_requires_explicit_approval(monkeypatch, capsys):
     assert calls[-1][1] == {"plan_token": "reviewed"}
 
 
-def test_service_install_preserves_unmanaged_and_requires_explicit_lifecycle(tmp_path, monkeypatch):
+def test_service_install_preserves_unmanaged_and_requires_explicit_lifecycle(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     calls = []
+
     def systemctl(*args, **kwargs):
         calls.append(args)
-        return subprocess.CompletedProcess(args, 0, "inactive\n" if "is-active" in args else "disabled\n", "")
+        return subprocess.CompletedProcess(
+            args, 0, "inactive\n" if "is-active" in args else "disabled\n", ""
+        )
+
     monkeypatch.setattr(service, "systemctl", systemctl)
     state = tmp_path / "private state"
     installed = service.manage("install", state, 8027, 8028)
@@ -74,16 +89,25 @@ def test_service_install_preserves_unmanaged_and_requires_explicit_lifecycle(tmp
     assert unit.read_text() == "# owned by somebody else"
 
 
-def test_service_install_can_pin_a_stable_interpreter_across_releases(tmp_path, monkeypatch):
+def test_service_install_can_pin_a_stable_interpreter_across_releases(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    monkeypatch.setattr(service, "systemctl", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "inactive\n", ""))
+    monkeypatch.setattr(
+        service,
+        "systemctl",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "inactive\n", ""),
+    )
     state, interpreter = tmp_path / "state", tmp_path / "app/current/bin/python"
     first = service.manage("install", state, 8027, 8028, interpreter)
     text = Path(first["path"]).read_text()
     assert service.quote(interpreter) + " -m controlplane " in text
     assert service.quote(sys.executable) not in text
     # A later release installs the same unit, so an upgrade needs no manual removal.
-    assert service.manage("install", state, 8027, 8028, interpreter)["path"] == first["path"]
+    assert (
+        service.manage("install", state, 8027, 8028, interpreter)["path"]
+        == first["path"]
+    )
 
 
 def test_service_rejects_directive_injection():
@@ -99,7 +123,10 @@ def test_plugin_install_update_remove_preserve_config_and_backups(tmp_path):
     (config / "opencode.jsonc").write_text(original)
     result = plugin_install.manage("install", config, 8028)
     target = Path(result["path"])
-    assert json.loads((target / "settings.json").read_text())["baseURL"] == "http://127.0.0.1:8028/v1"
+    assert (
+        json.loads((target / "settings.json").read_text())["baseURL"]
+        == "http://127.0.0.1:8028/v1"
+    )
     assert plugin_install.manage("status", config)["installed"]
     updated = plugin_install.manage("install", config)
     assert Path(updated["backup"]).is_dir()

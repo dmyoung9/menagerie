@@ -1,15 +1,72 @@
-.capabilities-panel {margin:20px 0;padding:20px 0;border-block:1px solid var(--border);min-width:0}
-.capability-heading {display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px}
-.capability-heading h3 {margin:0}.capability-heading>span {font-size:11px;color:var(--muted-foreground)}
-.reasoning-heading {margin-top:22px}
-.capability-chips {display:flex;flex-wrap:wrap;gap:8px}
-.capability-hint {color:var(--muted-foreground);font-size:12px;margin:10px 0}
-.capability-limit {margin-top:18px}
-.capability-advanced {margin-top:18px}
-.reasoning-mappings {display:grid;gap:10px;margin:16px 0}
-.mapping-row {display:grid;grid-template-columns:65px minmax(0,1fr);gap:12px;align-items:baseline;font-size:12px}
-.mapping-row>div {display:grid;gap:8px}
-.mapping-row textarea {font-family:monospace;min-height:84px;max-height:200px}
-.output-capabilities {margin-top:18px}
-.capability-evidence {margin-top:18px;font-size:12px;overflow-wrap:anywhere;color:var(--muted-foreground)}
-.capability-evidence p {margin:6px 0}
+.capabilities-panel {
+  margin: 20px 0;
+  padding: 20px 0;
+  border-block: 1px solid var(--border);
+  min-width: 0;
+}
+.capability-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.capability-heading h3 {
+  margin: 0;
+}
+.capability-heading > span {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.reasoning-heading {
+  margin-top: 22px;
+}
+.capability-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.capability-hint {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  margin: 10px 0;
+}
+.capability-limit {
+  margin-top: 18px;
+}
+.capability-advanced {
+  margin-top: 18px;
+}
+.reasoning-mappings {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+.mapping-row {
+  display: grid;
+  grid-template-columns: 65px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.mapping-row > div {
+  display: grid;
+  gap: 8px;
+}
+.mapping-row textarea {
+  font-family: monospace;
+  min-height: 84px;
+  max-height: 200px;
+}
+.output-capabilities {
+  margin-top: 18px;
+}
+.capability-evidence {
+  margin-top: 18px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+}
+.capability-evidence p {
+  margin: 6px 0;
+}

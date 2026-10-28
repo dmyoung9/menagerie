@@ -3,20 +3,38 @@
 A standalone model is a one-member unit. An owning set supplies shared residency
 policy for multiple members without changing their aliases or profile snapshots.
 """
+
 from . import lifecycle
 
-POLICY_KEYS = ("residency", "priority", "idle_timeout", "allow_eviction", "allow_uncertain", "enabled", "queue_timeout")
+POLICY_KEYS = (
+    "residency",
+    "priority",
+    "idle_timeout",
+    "allow_eviction",
+    "allow_uncertain",
+    "enabled",
+    "queue_timeout",
+)
 
 
 def units(store):
     members = {d["id"]: d for d in store.list("deployment")}
     sets = store.list("deployment_set")
     owned = {i for s in sets for i in s["member_ids"]}
-    return [s | {"members": [members[i] for i in s["member_ids"]], "multi_model": True} for s in sets] + [d | {"member_ids": [d["id"]], "members": [d], "multi_model": False} for d in members.values() if d["id"] not in owned]
+    return [
+        s | {"members": [members[i] for i in s["member_ids"]], "multi_model": True}
+        for s in sets
+    ] + [
+        d | {"member_ids": [d["id"]], "members": [d], "multi_model": False}
+        for d in members.values()
+        if d["id"] not in owned
+    ]
 
 
 def unit_for(store, ident):
-    return next((u for u in units(store) if u["id"] == ident or ident in u["member_ids"]), None)
+    return next(
+        (u for u in units(store) if u["id"] == ident or ident in u["member_ids"]), None
+    )
 
 
 def expand(store, ids):
@@ -47,10 +65,26 @@ def state(unit):
 
 def describe(unit, settings, inflight=None):
     value = state(unit)
-    members = [d | {"inflight": (inflight or {}).get(d["id"], 0), "lifecycle": lifecycle.describe(d, settings) | {"serving": lifecycle.visible(d | {"state": value}, settings)}} for d in unit["members"]]
-    errors = [f"{d['name']}: {d['failure_reason']}" for d in members if d.get("failure_reason") and d["state"] in {"FAILED", "ERROR", "DEGRADED"}]
+    members = [
+        d
+        | {
+            "inflight": (inflight or {}).get(d["id"], 0),
+            "lifecycle": lifecycle.describe(d, settings)
+            | {"serving": lifecycle.visible(d | {"state": value}, settings)},
+        }
+        for d in unit["members"]
+    ]
+    errors = [
+        f"{d['name']}: {d['failure_reason']}"
+        for d in members
+        if d.get("failure_reason") and d["state"] in {"FAILED", "ERROR", "DEGRADED"}
+    ]
     effective = unit | {"state": value, "failure_reason": "; ".join(errors) or None}
     derived = lifecycle.describe(effective, settings)
     if errors:
         derived.update(failure="; ".join(errors), last_stop_reason=None)
-    return effective | {"members": members, "inflight": sum((inflight or {}).get(d["id"], 0) for d in members), "lifecycle": derived}
+    return effective | {
+        "members": members,
+        "inflight": sum((inflight or {}).get(d["id"], 0) for d in members),
+        "lifecycle": derived,
+    }

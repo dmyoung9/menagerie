@@ -44,8 +44,16 @@ Generated components are **owned source**, not a centrally upgraded UI package:
   labeled fields, semantic statuses, copying, menus, empty states, route selectors).
 - `frontend/src/hooks/use-confirmation.tsx`: asynchronous AlertDialog confirmation
   for engine changes and removal, with no native `window.confirm` dependency.
-- `frontend/src/ui.tsx`: retained API/token handling, formatters, domain mapping,
-  structured data editing, and compatibility exports for the product modules.
+- `frontend/src/ui.ts`: API/token handling, formatters, domain mapping, and
+  compatibility exports; `frontend/src/Json.tsx` owns structured data editing.
+- `frontend/src/editor-state.ts`, `frontend/src/navigation.ts`, and
+  `frontend/src/hooks/use-resource-preview.ts`: non-component state, navigation,
+  and preview helpers, separate from React refresh boundaries.
+- `frontend/src/types/`: distinct stored records, editor drafts, serving groups,
+  modal states, telemetry, capabilities, history, and resource contracts.
+- `frontend/src/contracts.ts` and `frontend/src/decode.ts`: checked wire and JSON
+  boundaries. `api` returns `unknown`; `readApi` requires a decoder. Decoders
+  retain extension properties while checking the fields consumed by the UI.
 - `.agents/skills/`: project-local upstream shadcn and Radix-to-Base skills;
   `skills-lock.json` records their installation source.
 
@@ -90,6 +98,9 @@ without improving its existing time-series behavior.
 
 ```sh
 cd frontend
+npm run check
+npm run lint
+npm run format:check
 npm run build
 npm test
 npx playwright install chromium  # once, if Chromium is not already available
@@ -102,7 +113,12 @@ live registry or launches a runtime. Checks cover desktop/mobile primary pages,
 catalog/download selection, keyboard menus, focus trapping/restoration, dirty
 and busy dialogs, engine-reset confirmation, launch consent/tokens, form
 validation, multi-model settings, sliders, Select/Switch, polling, SSE, and
-resource drill-down. Axe checks WCAG A/AA rules and contrast on both viewport
+resource drill-down. An isolated effect harness also checks API-client replacement,
+stale-response cancellation, JSON validation across parent rerenders, and runtime
+schema reconciliation without losing edits. Contract tests cover malformed API
+responses, invalid JSON shapes, extension round-trips, nullable telemetry, and
+multi-model groups without a single alias/profile. The backend suite also feeds
+offline ASGI responses through the frontend decoders. Axe checks WCAG A/AA rules and contrast on both viewport
 sizes plus the editor and variant dialog. Screenshots/traces are written to
 ignored `frontend/test-results/`; CI retains them as fixture-only artifacts.
 
