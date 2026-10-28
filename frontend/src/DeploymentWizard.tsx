@@ -83,6 +83,7 @@ export function DeploymentWizard({data, modelId, close, created, setupEngine}: {
         {step === 2 && <>
           <h3>{displayName}</h3><dl className="properties"><dt>API model</dt><dd><code>{apiAlias}</code></dd><dt>Engine</dt><dd>{runtime?.name}</dd>{hasContext && <><dt>Context / request</dt><dd>{context.toLocaleString()}</dd></>}<dt>Mode</dt><dd>{residency === 'on-demand' ? 'On demand' : residency === 'pinned' ? 'Pinned' : 'Evictable'}</dd>{residency === 'on-demand' && <><dt>Unload after idle</dt><dd>{idle ? idle / 60 + ' minutes' : 'Never'}</dd></>}</dl>
           <p className="muted">Loading requires a capacity review. Creating without loading leaves this enabled for clients{residency === 'on-demand' ? '; the first request can trigger loading' : ''}.</p>
+          {residency === 'on-demand' && <><label className="check"><input type="checkbox" checked={advanced.allow_uncertain} onChange={e => setAdvanced({...advanced, allow_uncertain: e.target.checked})}/>Allow on-demand loading with uncertain memory estimates</label>{!advanced.allow_uncertain && <p className="warning">Client-triggered loading may be blocked until this permission is granted.</p>}</>}
         </>}
       </fieldset>
       {step > 0 && <DraftResources preview={preview.data} error={preview.error}/>}

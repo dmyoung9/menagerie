@@ -57,6 +57,7 @@ class DeploymentPolicy(Record):
     priority: int = Field(default=50, ge=0, le=100)
     idle_timeout: int = Field(default=300, ge=0, le=86400)
     allow_eviction: bool = False
+    allow_uncertain: bool = False
     enabled: bool = True
     queue_timeout: int = Field(default=300, ge=1, le=1800)
 

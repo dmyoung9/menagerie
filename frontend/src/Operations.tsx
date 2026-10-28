@@ -5,15 +5,15 @@ export function LaunchReview({modal, deployments, close, done, host}: {modal: Ro
   const [plan, setPlan] = useState<Row | null>(null), [error, setError] = useState(''), [accepted, setAccepted] = useState(false), [busy, setBusy] = useState(false);
   useEffect(() => {let alive = true; api(`/api/${modal.kind}/${modal.row.id}/validate`, {}).then(p => {if (alive) setPlan(p);}).catch(e => {if (alive) setError(message(e));}); return () => {alive = false;};}, [modal.kind, modal.row.id]);
   const names = (ids: string[]) => ids.map(id => deployments.find(d => d.id === id)?.name || id);
-  const needsAcceptance = Boolean(plan?.stops?.length);
+  const needsAcceptance = Boolean(plan?.warnings?.length || plan?.stops?.length);
   return <Dialog title="Review launch" close={close} busy={busy} wide><h3>{modal.row.name}</h3>{error && <p className="alert error" role="alert">{error}</p>}{!plan && !error && <p className="muted">Checking capacity…</p>}{plan && <>
     <div className="table-wrap"><table><thead><tr><th>Model</th><th className="numeric">Estimated VRAM (GiB)</th><th>Confidence</th></tr></thead><tbody>{Object.entries(plan.estimates).map(([id, estimate]: [string, any]) => <tr key={id}><td>{deployments.find(d => d.id === id)?.name || modal.row.name}</td><td className="numeric">{gib(estimate.reservation_mib)}</td><td>{estimate.confidence}</td></tr>)}</tbody>{Object.keys(plan.estimates).length > 1 && <tfoot><tr><td>Total</td><td className="numeric">{gib(Object.values(plan.estimates).reduce((sum: number, e: any) => sum + e.reservation_mib, 0))}</td><td/></tr></tfoot>}</table></div>
     <dl className="properties">{(host.gpus || []).map((g: Row, index: number) => <div className="property-pair" key={g.index ?? index}><dt>GPU {g.index ?? index} free (GiB)</dt><dd>{gib(g.free_mib)}</dd></div>)}</dl>
     {plan.stops.length > 0 && <div className="warning"><h3>Will unload</h3><ul>{names(plan.stops).map(n => <li key={n}>{n}</li>)}</ul><p>KV caches will be lost. Failed launches attempt to restore these deployments.</p></div>}
     {plan.errors.map((e: string) => <p className="alert error" role="alert" key={e}>{e}</p>)}
-    {plan.warnings.length > 0 && <details><summary>Capacity notes ({plan.warnings.length})</summary>{plan.warnings.map((w: string) => <p className="warning" key={w}>{w}</p>)}</details>}
-    {needsAcceptance && <label className="check"><input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)}/>Approve these unloads</label>}
-    <div className="dialog-actions"><button disabled={busy} onClick={close}>Cancel</button><button className="primary" disabled={busy || plan.errors.length > 0 || (needsAcceptance && !accepted)} onClick={async () => {setBusy(true); setError(''); try {await api(`/api/${modal.kind}/${modal.row.id}/start`, {plan_token: plan.plan_token}); done();} catch (e) {setError(message(e));} finally {setBusy(false);}}}>{busy ? 'Submitting…' : 'Load'}</button></div>
+    {plan.warnings.length > 0 && <details><summary>Memory uncertainty ({plan.warnings.length})</summary>{plan.warnings.map((w: string) => <p className="warning" key={w}>{w}</p>)}</details>}
+    {needsAcceptance && <label className="check"><input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)}/>{plan.stops.length ? plan.warnings.length ? 'Approve these unloads and uncertain memory estimates' : 'Approve these unloads' : 'Allow loading with uncertain memory estimates'}</label>}
+    <div className="dialog-actions"><button disabled={busy} onClick={close}>Cancel</button><button className="primary" disabled={busy || plan.errors.length > 0 || (needsAcceptance && !accepted)} onClick={async () => {setBusy(true); setError(''); try {await api(`/api/${modal.kind}/${modal.row.id}/start`, {override: accepted, plan_token: plan.plan_token}); done();} catch (e) {setError(message(e));} finally {setBusy(false);}}}>{busy ? 'Submitting…' : 'Load'}</button></div>
   </>}</Dialog>;
 }
 

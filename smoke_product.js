@@ -85,11 +85,11 @@ async (page) => {
   assert(saved.config['ctx-size']===65536&&saved.config.parallel===2,'Per-request context must map to shared engine pool');
   assert(saved.config['gpu-layers']==='all','Supported GPU defaults were not applied');
   assert(!writes.some(w=>w.path==='/api/profiles'),'Deployment creation must not require a separate profile write');
-   assert(!(await dialog.getByRole('button',{name:'Load',exact:true}).isDisabled()),'Capacity notes must not require approval');
-   assert(await dialog.getByRole('checkbox').count()===0,'Memory approval checkbox must be absent');
+   assert(await dialog.getByRole('button',{name:'Load',exact:true}).isDisabled(),'Uncertain launch needs approval');
+   await dialog.getByRole('checkbox').check();
   await dialog.getByRole('button',{name:'Load',exact:true}).click();
   await dialog.waitFor({state:'hidden'});
-   assert(writes.some(w=>w.path.endsWith('/start')&&!('override' in w.payload)&&w.payload.plan_token==='review-token'),'Reviewed launch was not submitted');
+   assert(writes.some(w=>w.path.endsWith('/start')&&w.payload.override&&w.payload.plan_token==='review-token'),'Launch approval was not submitted');
   uncertain=false;
   await page.getByRole('button',{name:'Load now',exact:true}).click();
   await dialog.getByRole('heading',{name:'Review launch',exact:true}).waitFor();
@@ -152,5 +152,5 @@ async (page) => {
   await page.getByRole('alert').filter({hasText:'Connection lost'}).waitFor();
   assert(!errors.length,errors.join('\n'));
   await page.evaluate(() => {window.productSmokePassed = true;});
-  return {result:'passed',checks:['navigation and browser Back','dialog focus','unload action','inactive filter','logs','shared context controls','atomic creation retry','direct configuration editing','no profile workflow','no memory consent','failed-save preservation','invalid JSON guard','five mobile views','clean installation','disconnection'],writesIntercepted:writes.length};
+  return {result:'passed',checks:['navigation and browser Back','dialog focus','unload action','inactive filter','logs','shared context controls','atomic creation retry','direct configuration editing','no profile workflow','uncertainty consent','failed-save preservation','invalid JSON guard','five mobile views','clean installation','disconnection'],writesIntercepted:writes.length};
 }

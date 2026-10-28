@@ -182,9 +182,6 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.post("/api/deployment-sets")
     async def save_deployment_set(body: DeploymentSet, expected: int | None = None):
         async with manager.lock:
-            if body.members:
-                from .resources import validate_budget
-                validate_budget(manager, [m.model_dump(exclude_none=True) for m in body.members])
             with store.transaction() as c:
                 data = body.model_dump(exclude_none=True)
                 drafts = data.pop("members", None)
@@ -221,7 +218,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         if not body.get("plan_token"):
             raise Conflict("Review the launch plan first")
         unit = manager.unit(ident)
-        return jobs.submit("Load " + unit["name"], lambda job: manager.activate([ident], token=body["plan_token"]))
+        return jobs.submit("Load " + unit["name"], lambda job: manager.activate([ident], body.get("override", False), token=body["plan_token"]))
 
     @app.post("/api/serving-deployments/{ident}/stop")
     async def stop_serving(ident: str):
@@ -319,8 +316,6 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.post("/api/deployments")
     async def deployment(body: Deployment, expected: int | None = None):
         async with manager.lock:
-            from .resources import validate_budget
-            validate_budget(manager, [body.model_dump(exclude_none=True)])
             with store.transaction() as c:
                 saved = save_member(body.model_dump(exclude_none=True), expected, c)
                 owner = deployment_sets.unit_for(store, saved["id"])
@@ -375,7 +370,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.post("/api/deployments/{ident}/start")
     async def start(ident: str, request: Request):
         body = await request.json()
-        return jobs.submit("Start deployment", lambda job: manager.activate([ident], token=body.get("plan_token")))
+        return jobs.submit("Start deployment", lambda job: manager.activate([ident], body.get("override", False), token=body.get("plan_token")))
 
     @app.post("/api/deployments/{ident}/stop")
     async def stop(ident: str):
@@ -484,7 +479,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     d["port"] = next(port for port in range(8110, 65536) if port not in ports)
                     ports.add(d["port"])
                     deployments.append(store.put("deployment", d, c=c)["id"])
-                policy = saved.get("deployment_policy", {"residency": "pinned", "priority": 50, "idle_timeout": 0, "allow_eviction": False, "queue_timeout": 300})
+                policy = saved.get("deployment_policy", {"residency": "pinned", "priority": 50, "idle_timeout": 0, "allow_eviction": False, "allow_uncertain": False, "queue_timeout": 300})
                 value = DeploymentSet(name="Restored " + (saved.get("deployment_name") or ident[:8]), member_ids=deployments, **(policy | {"enabled": False})).model_dump(exclude_none=True)
                 return save_set(value | {"restored_from_activation": ident}, c=c)
 

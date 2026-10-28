@@ -39,7 +39,7 @@ async def seed(store, tmp_path):
     store.put("artifact", adapters.inspect_artifact(weights) | {"id": "weights"})
     for ident in ("a", "b"):
         profile = store.put("profile", {"id": ident, "name": ident, "artifact_id": "weights", "runtime_id": "runtime", "config": {}, "raw_args": [], "catalog": {}})
-        store.put("deployment", {"id": ident, "name": ident, "alias": ident, "port": port(), "profile_id": ident, "profile_snapshot": profile, "state": "STOPPED", "residency": "pinned", "priority": 50, "gpu": 0, "enabled": True, "reservation_mib": 2000, "allow_eviction": False, "idle_timeout": 300, "queue_timeout": 5, "reservation_active": 0})
+        store.put("deployment", {"id": ident, "name": ident, "alias": ident, "port": port(), "profile_id": ident, "profile_snapshot": profile, "state": "STOPPED", "residency": "pinned", "priority": 50, "gpu": 0, "enabled": True, "reservation_mib": 2000, "allow_uncertain": True, "allow_eviction": False, "idle_timeout": 300, "queue_timeout": 5, "reservation_active": 0})
 
 
 def baseline():
@@ -60,7 +60,7 @@ async def test_two_processes_independent_stop_and_failure_rollback(store, tmp_pa
     m = Manager(store)
     m.host = baseline()
     try:
-        await m.activate(["a", "b"])
+        await m.activate(["a", "b"], override=True)
         assert {d["state"] for d in store.list("deployment")} == {"READY"}
         pid_b = store.get("deployment", "b")["pid"]
         await m.stop("a")
@@ -71,7 +71,7 @@ async def test_two_processes_independent_stop_and_failure_rollback(store, tmp_pa
         d["profile_snapshot"]["config"]["fail"] = True
         store.put("deployment", d)
         with pytest.raises(RuntimeError, match="exited"):
-            await m.activate(["a", "b"])
+            await m.activate(["a", "b"], override=True)
         assert all(d["state"] == "FAILED" and not d["reservation_active"] for d in store.list("deployment"))
         assert all(not m.owned(d) for d in store.list("deployment"))
     finally:
@@ -83,7 +83,7 @@ async def test_pinned_policy_and_busy_manual_stop(store, tmp_path):
     m = Manager(store)
     m.host = baseline()
     try:
-        await m.activate(["a"])
+        await m.activate(["a"], True)
         d = await m.acquire("a")
         with pytest.raises(Conflict, match="active requests"):
             await m.stop("a")
@@ -105,7 +105,7 @@ async def test_capacity_port_conflict_and_stale_plan(store, tmp_path):
     store.put("deployment", d | {"reservation_mib": 16000})
     assert any("capacity" in e for e in m.validate(["a"])["errors"])
     with pytest.raises(Conflict, match="changed"):
-        await m.activate(["a"], token=plan["plan_token"])
+        await m.activate(["a"], True, token=plan["plan_token"])
     store.put("deployment", d)
     with socket.socket() as s:
         s.bind(("127.0.0.1", d["port"]))
@@ -119,7 +119,7 @@ async def test_gateway_streaming_nonstream_and_unknown(tmp_path):
     await seed(store, tmp_path)
     m.host = baseline()
     try:
-        await m.activate(["a"])
+        await m.activate(["a"], True)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as c:
             denied = await c.post("/api/settings", json={})
             assert denied.status_code == 403
@@ -157,7 +157,7 @@ async def test_concurrent_admission_cannot_overbook_explicit_reservations(store,
     m = Manager(store)
     m.host = baseline()
     try:
-        results = await asyncio.gather(m.activate(["a"]), m.activate(["b"]), return_exceptions=True)
+        results = await asyncio.gather(m.activate(["a"], True), m.activate(["b"], True), return_exceptions=True)
         assert sum(isinstance(r, Conflict) for r in results) == 1
         assert sum(d["state"] == "READY" for d in store.list("deployment")) == 1
     finally:
@@ -169,12 +169,12 @@ async def test_failed_group_restores_authorized_previous_deployment(store, tmp_p
     m = Manager(store)
     m.host = baseline()
     try:
-        await m.activate(["a"])
+        await m.activate(["a"], True)
         d = store.get("deployment", "b")
         d["profile_snapshot"]["config"]["fail"] = True
         store.put("deployment", d)
         with pytest.raises(RuntimeError):
-            await m.activate(["b"], authorized_stops=["a"])
+            await m.activate(["b"], True, authorized_stops=["a"])
         assert store.get("deployment", "a")["state"] == "READY"
         assert await m.ready(store.get("deployment", "a"))
         assert store.get("deployment", "b")["state"] == "FAILED"
@@ -189,7 +189,7 @@ async def test_runtime_drift_and_stale_pid_do_not_execute_or_kill(store, tmp_pat
     script = tmp_path / "runtime"
     script.write_text(script.read_text() + "\n# changed\n")
     with pytest.raises(Conflict, match="changed"):
-        await m.activate(["a"])
+        await m.activate(["a"], True)
     assert store.get("deployment", "a")["state"] == "FAILED"
     assert not m.owned({"pid": os.getpid(), "pid_started": 0})
     await m.close()
@@ -202,7 +202,7 @@ async def test_pinned_not_automatic_victim_of_on_demand(store, tmp_path):
     try:
         a = store.get("deployment", "a")
         store.put("deployment", a | {"reservation_mib": 9000})
-        await m.activate(["a"])
+        await m.activate(["a"], True)
         b = store.get("deployment", "b")
         store.put("deployment", b | {"residency": "on-demand", "reservation_mib": 9000})
         m.host["gpus"][0]["free_mib"] = 4000
@@ -283,7 +283,7 @@ async def test_pressure_evicts_only_authorized_evictable(store, tmp_path, monkey
         stopped.set()
     monkeypatch.setattr(m, "_stop", observed_stop)
     try:
-        await m.activate(["a", "b"])
+        await m.activate(["a", "b"], True)
         m.loop_task = asyncio.create_task(m.monitor())
         await asyncio.wait_for(stopped.wait(), 5)
         assert store.get("deployment", "a")["state"] == "STOPPED"

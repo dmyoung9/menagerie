@@ -5,7 +5,7 @@ policy for multiple members without changing their aliases or profile snapshots.
 """
 from . import lifecycle
 
-POLICY_KEYS = ("residency", "priority", "idle_timeout", "allow_eviction", "enabled", "queue_timeout")
+POLICY_KEYS = ("residency", "priority", "idle_timeout", "allow_eviction", "allow_uncertain", "enabled", "queue_timeout")
 
 
 def units(store):

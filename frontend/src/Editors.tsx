@@ -7,7 +7,7 @@ import {Capabilities} from './Capabilities';
 
 export const defaults: Record<string, Row> = {
   profiles: {name: 'New profile', artifact_id: '', runtime_id: '', config: {'ctx-size': 8192, parallel: 1, 'gpu-layers': 'all', 'cache-type-k': 'q8_0', 'cache-type-v': 'q8_0', 'flash-attn': 'on'}, raw_args: [], catalog: {}},
-  deployments: {name: 'New deployment', profile_id: '', alias: 'local-model', port: 8120, residency: 'on-demand', priority: 50, idle_timeout: 300, reservation_mib: 0, allow_eviction: false, enabled: true, gpu: 0, queue_timeout: 300},
+  deployments: {name: 'New deployment', profile_id: '', alias: 'local-model', port: 8120, residency: 'on-demand', priority: 50, idle_timeout: 300, reservation_mib: 0, allow_eviction: false, allow_uncertain: false, enabled: true, gpu: 0, queue_timeout: 300},
   runtimes: {name: 'Runtime', engine: 'llama.cpp', execution_kind: 'native', executable: '', env: {}, command_template: [], trust: false},
 };
 export function ConfigurationFields({value, data, set, onValid, recommendation}: {value: Row; data: Registry; set: (value: Row) => void; onValid: (valid: boolean) => void; recommendation?: Row}) {
@@ -82,7 +82,7 @@ export function Editor({kind, initial, data, save, remove, busy, memberOnly = fa
       {value.configuration && <ConfigurationFields value={value.configuration} data={data} set={configuration => set('configuration', configuration)} onValid={valid => setInvalid(prev => ({...prev, configuration: !valid}))} recommendation={preview.data?.members?.[0]?.recommendation}/>}
       {value.configuration && <DraftResources preview={preview.data} error={preview.error}/>}
       {!memberOnly && <><Field label="Mode"><select value={value.residency} onChange={e => set('residency', e.target.value)}><option value="on-demand">On demand</option><option value="pinned">Pinned</option><option value="evictable">Evictable</option></select></Field>{value.residency === 'on-demand' && <Duration value={value.idle_timeout} change={v => set('idle_timeout', v)}/>}</>}
-      <details><summary>Placement</summary><Placement value={value} change={setValue} host={data.host?.[0]}/></details><details><summary>Scheduling</summary>{!memberOnly && <><div className="form-grid">{input('priority', 'Priority', 'number', 0, 100)}{input('queue_timeout', 'Queue timeout (seconds)', 'number', 1, 1800)}</div>{value.residency !== 'pinned' && check('allow_eviction', 'Can unload to make room for another deployment')}</>}</details>
+      <details><summary>Placement</summary><Placement value={value} change={setValue} host={data.host?.[0]}/></details><details><summary>Scheduling</summary>{!memberOnly && <><div className="form-grid">{input('priority', 'Priority', 'number', 0, 100)}{input('queue_timeout', 'Queue timeout (seconds)', 'number', 1, 1800)}</div>{value.residency !== 'pinned' && check('allow_eviction', 'Can unload to make room for another deployment')}{check('allow_uncertain', 'Allow on-demand loading with uncertain memory estimates')}</>}</details>
       {!memberOnly && check('enabled', 'Enabled for clients')}
     </>}
     {kind === 'runtimes' && <>
