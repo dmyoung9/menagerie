@@ -45,14 +45,14 @@ async page => {
   await dialog.getByLabel('ctx-size',{exact:true}).fill('32768');
   await dialog.getByRole('button',{name:'Example model · KV cache: 4 GiB',exact:false}).waitFor();
   await dialog.getByRole('button',{name:'Add model',exact:true}).click();
-  await dialog.getByText('Suggested pool ceiling: 8,192 tokens.',{exact:false}).filter({visible:true}).waitFor();
+  await dialog.getByText('Context pool limit: 8,192 tokens.',{exact:false}).filter({visible:true}).waitFor();
   await dialog.getByLabel('ctx-size',{exact:true}).filter({visible:true}).fill('131072');
   await dialog.getByText('Over budget',{exact:false}).waitFor();
   assert(drafts.at(-1).members.length===2,'Preview omitted peer model');
   const layerSection=dialog.getByText('Memory & GPU',{exact:true}).filter({visible:true});
   await layerSection.click();
   await dialog.getByLabel('GPU layer mode',{exact:true}).filter({visible:true}).selectOption('custom');
-  await dialog.getByText('32 model layers available',{exact:true}).filter({visible:true}).waitFor();
+  await dialog.getByText('32 model layers.',{exact:false}).filter({visible:true}).waitFor();
   assert(await dialog.getByLabel('GPU layer count',{exact:true}).filter({visible:true}).getAttribute('max')==='32','Layer control ignores model bound');
   const previewRect = await dialog.locator('.draft-resources').boundingBox();
   assert(previewRect.x > 900 && previewRect.y >= 70 && previewRect.y < 300,'Preview is not visible beside the scrolled editor');

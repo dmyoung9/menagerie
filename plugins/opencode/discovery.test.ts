@@ -1,18 +1,36 @@
 import assert from 'node:assert/strict';
-import {test} from 'node:test';
-import type {Context} from '@opencode/plugin/promise/plugin';
-import {inventory, localEndpoint, startDiscovery} from './discovery.ts';
-import {Effect, Layer} from 'effect';
-import {HttpClientResponse, type HttpClientRequest} from 'effect/http';
-import {AI} from '@opencode/ai/promise';
-import {RequestExecutor} from '@opencode/ai/route';
-import {OpenAICompatible} from '@opencode/ai/providers/openai-compatible';
+import { test } from 'node:test';
+import type { Context } from '@opencode/plugin/promise/plugin';
+import type { Model } from '@opencode/plugin';
+import { inventory, localEndpoint, startDiscovery } from './discovery.ts';
+import { Effect, Layer } from 'effect';
+import { HttpClientResponse, type HttpClientRequest } from 'effect/http';
+import { AI } from '@opencode/ai/promise';
+import { RequestExecutor } from '@opencode/ai/route';
+import { OpenAICompatible } from '@opencode/ai/providers/openai-compatible';
 
 function payload(id = 'model-a') {
-  return {data: [{id, menagerie: {catalog: {version: 2, catalog_id: id, model: {
-    name: 'Example', enabled: true, capabilities: {tools: true, input: ['text'], output: ['text']},
-    limit: {context: 32768, output: 8192}, variants: [], cost: [{input: 0, output: 0, cache: {read: 0, write: 0}}],
-  }}}}]};
+  return {
+    data: [
+      {
+        id,
+        menagerie: {
+          catalog: {
+            version: 2,
+            catalog_id: id,
+            model: {
+              name: 'Example',
+              enabled: true,
+              capabilities: { tools: true, input: ['text'], output: ['text'] },
+              limit: { context: 32768, output: 8192 },
+              variants: [],
+              cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+            },
+          },
+        },
+      },
+    ],
+  };
 }
 
 test('declared identity, limits and capabilities survive the SDK schema', () => {
@@ -22,69 +40,174 @@ test('declared identity, limits and capabilities survive the SDK schema', () => 
   assert.equal(model.limit.context, 32768);
   assert.equal(model.capabilities.tools, true);
   assert.equal(model.enabled, true);
-  assert.deepEqual(inventory({data: []}), []);
+  assert.deepEqual(inventory({ data: [] }), []);
 });
 
 test('explicit reasoning variants and multimodal declarations survive SDK discovery', () => {
   const source = payload();
   const row = source.data[0];
-  const variants = [{id: 'default', body: {}}, {id: 'instant', body: {chat_template_kwargs: {enable_thinking: false}}}, {id: 'high', body: {reasoning_effort: 'high'}}];
-  const [model] = inventory({data: [{...row, menagerie: {catalog: {...row.menagerie.catalog, model: {
-    ...row.menagerie.catalog.model, capabilities: {tools: true, input: ['text', 'image', 'audio'], output: ['text'], reasoning: {supported: true}},
-    compatibility: {reasoningField: 'reasoning_content'}, variants,
-  }}}}]});
-  assert.deepEqual(model.variants, variants.filter(v => v.id !== 'default'));
+  const variants = [
+    { id: 'default', body: {} },
+    {
+      id: 'instant',
+      body: { chat_template_kwargs: { enable_thinking: false } },
+    },
+    { id: 'high', body: { reasoning_effort: 'high' } },
+  ];
+  const [model] = inventory({
+    data: [
+      {
+        ...row,
+        menagerie: {
+          catalog: {
+            ...row.menagerie.catalog,
+            model: {
+              ...row.menagerie.catalog.model,
+              capabilities: {
+                tools: true,
+                input: ['text', 'image', 'audio'],
+                output: ['text'],
+                reasoning: { supported: true },
+              },
+              compatibility: { reasoningField: 'reasoning_content' },
+              variants,
+            },
+          },
+        },
+      },
+    ],
+  });
+  assert.deepEqual(
+    model.variants,
+    variants.filter((v) => v.id !== 'default'),
+  );
   assert.deepEqual(model.capabilities.input, ['text', 'image', 'audio']);
   assert.equal(model.compatibility?.reasoningField, 'reasoning_content');
 });
 
 test('selected reasoning bodies reach the SDK wire request and Default clears the override', async () => {
   const row = payload().data[0];
-  const variants = [{id: 'default', body: {}}, ...['low', 'medium', 'high'].map(id => ({id, body: {reasoning_effort: id}})),
-    {id: 'instant', body: {chat_template_kwargs: {enable_thinking: false}}}];
-  const [model] = inventory({data: [{...row, menagerie: {catalog: {...row.menagerie.catalog,
-    model: {...row.menagerie.catalog.model, variants}}}}]});
-  const captured: Record<string, any>[] = [];
+  const variants = [
+    { id: 'default', body: {} },
+    ...['low', 'medium', 'high'].map((id) => ({
+      id,
+      body: { reasoning_effort: id },
+    })),
+    {
+      id: 'instant',
+      body: { chat_template_kwargs: { enable_thinking: false } },
+    },
+  ];
+  const [model] = inventory({
+    data: [
+      {
+        ...row,
+        menagerie: {
+          catalog: {
+            ...row.menagerie.catalog,
+            model: { ...row.menagerie.catalog.model, variants },
+          },
+        },
+      },
+    ],
+  });
+  const captured: Record<string, unknown>[] = [];
   // In-memory transport: no connection to Menagerie, no GPU loading, no API credentials.
-  const layer = Layer.succeed(RequestExecutor.Service, {execute: (request: HttpClientRequest.HttpClientRequest) => Effect.sync(() => {
-    assert(request.body._tag === 'Uint8Array');
-    captured.push(JSON.parse(new TextDecoder().decode(request.body.body)));
-    const chunk = (delta: Record<string, unknown>, finish_reason: string | null) => 'data: ' + JSON.stringify({
-      id: 'fixture', object: 'chat.completion.chunk', created: 0, model: model.modelID,
-      choices: [{index: 0, delta, finish_reason}],
-    }) + '\n\n';
-    return HttpClientResponse.fromWeb(request, new Response(chunk({content: 'ok'}, null) + chunk({}, 'stop') + 'data: [DONE]\n\n', {
-      headers: {'content-type': 'text/event-stream'},
-    }));
-  })});
-  const ai = AI.make({layer});
+  const layer = Layer.succeed(RequestExecutor.Service, {
+    execute: (request: HttpClientRequest.HttpClientRequest) =>
+      Effect.sync(() => {
+        assert(request.body._tag === 'Uint8Array');
+        captured.push(JSON.parse(new TextDecoder().decode(request.body.body)));
+        const chunk = (
+          delta: Record<string, unknown>,
+          finish_reason: string | null,
+        ) =>
+          'data: ' +
+          JSON.stringify({
+            id: 'fixture',
+            object: 'chat.completion.chunk',
+            created: 0,
+            model: model.modelID,
+            choices: [{ index: 0, delta, finish_reason }],
+          }) +
+          '\n\n';
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(
+            chunk({ content: 'ok' }, null) +
+              chunk({}, 'stop') +
+              'data: [DONE]\n\n',
+            {
+              headers: { 'content-type': 'text/event-stream' },
+            },
+          ),
+        );
+      }),
+  });
+  const ai = AI.make({ layer });
   try {
-    for (const id of ['low', 'medium', 'high', 'default', 'instant', 'default']) {
-      const variant = model.variants.find(v => v.id === id);
-      const response = await ai.llm.generate({model: OpenAICompatible.model(model.modelID, {
-        baseURL: 'http://127.0.0.1:1/v1', apiKey: 'fixture-not-sent', body: variant?.body,
-      }), prompt: 'Hello'});
+    for (const id of [
+      'low',
+      'medium',
+      'high',
+      'default',
+      'instant',
+      'default',
+    ]) {
+      const variant = model.variants.find((v) => v.id === id);
+      const response = await ai.llm.generate({
+        model: OpenAICompatible.model(model.modelID, {
+          baseURL: 'http://127.0.0.1:1/v1',
+          apiKey: 'fixture-not-sent',
+          body: variant?.body,
+        }),
+        prompt: 'Hello',
+      });
       assert.equal(response.text, 'ok');
       const body = captured.at(-1)!;
       assert.equal(body.model, model.modelID);
-      if (['low', 'medium', 'high'].includes(id)) assert.equal(body.reasoning_effort, id);
+      if (['low', 'medium', 'high'].includes(id))
+        assert.equal(body.reasoning_effort, id);
       else assert.equal(body.reasoning_effort, undefined);
-      assert.deepEqual(body.chat_template_kwargs, id === 'instant' ? {enable_thinking: false} : undefined);
+      assert.deepEqual(
+        body.chat_template_kwargs,
+        id === 'instant' ? { enable_thinking: false } : undefined,
+      );
     }
-  } finally {await ai.dispose();}
+  } finally {
+    await ai.dispose();
+  }
 });
 
 test('does not discard a legacy named default with actual request overrides', () => {
   const row = payload().data[0];
-  const [model] = inventory({data: [{...row, menagerie: {catalog: {...row.menagerie.catalog,
-    model: {...row.menagerie.catalog.model, variants: [{id: 'default', body: {reasoning_effort: 'medium'}}]}}}}]});
-  assert.deepEqual(model.variants, [{id: 'default', body: {reasoning_effort: 'medium'}}]);
+  const [model] = inventory({
+    data: [
+      {
+        ...row,
+        menagerie: {
+          catalog: {
+            ...row.menagerie.catalog,
+            model: {
+              ...row.menagerie.catalog.model,
+              variants: [
+                { id: 'default', body: { reasoning_effort: 'medium' } },
+              ],
+            },
+          },
+        },
+      },
+    ],
+  });
+  assert.deepEqual(model.variants, [
+    { id: 'default', body: { reasoning_effort: 'medium' } },
+  ]);
 });
 
 test('rejects incomplete, duplicate and malformed inventories atomically', () => {
-  assert.throws(() => inventory({data: [{id: 'plain-openai-model'}]}));
+  assert.throws(() => inventory({ data: [{ id: 'plain-openai-model' }] }));
   const data = payload().data[0];
-  assert.throws(() => inventory({data: [data, data]}));
+  assert.throws(() => inventory({ data: [data, data] }));
   const bad = payload();
   bad.data[0].menagerie.catalog.model.limit.output = 99999;
   assert.throws(() => inventory(bad));
@@ -93,44 +216,139 @@ test('rejects incomplete, duplicate and malformed inventories atomically', () =>
   assert.throws(() => inventory(badCost));
 });
 
+test('unknown nested metadata is validated before reading its fields', () => {
+  for (const menagerie of [
+    null,
+    true,
+    'catalog',
+    [],
+    { catalog: null },
+    { catalog: { model: 'invalid' } },
+  ]) {
+    assert.throws(
+      () => inventory({ data: [{ id: 'model-a', menagerie }] }),
+      /Invalid capability contract/,
+    );
+  }
+  for (const patch of [
+    { capabilities: null },
+    { capabilities: { tools: true, input: ['text'], output: [null] } },
+    { variants: [null] },
+    { variants: [{ id: 'same' }, { id: 'same' }] },
+    { cost: [{ input: 0, output: 0, cache: null }] },
+    {
+      cost: [
+        { input: 0, output: 0, cache: { read: 0, write: 0 } },
+        { input: 0, output: 0, cache: { read: 0, write: 0 }, tier: null },
+      ],
+    },
+  ]) {
+    const row = payload().data[0];
+    assert.throws(() =>
+      inventory({
+        data: [
+          {
+            ...row,
+            menagerie: {
+              catalog: {
+                ...row.menagerie.catalog,
+                model: { ...row.menagerie.catalog.model, ...patch },
+              },
+            },
+          },
+        ],
+      }),
+    );
+  }
+});
+
 test('only loopback discovery; no credentials, redirects, query or remote URL', () => {
-  assert.equal(localEndpoint('http://127.0.0.1:8028/v1/').pathname, '/v1/models');
-  for (const url of ['https://example.com/v1', 'http://127.0.0.1:8001/other', 'http://user:pass@localhost/v1', 'http://localhost/v1?x=1'])
+  assert.equal(
+    localEndpoint('http://127.0.0.1:8028/v1/').pathname,
+    '/v1/models',
+  );
+  for (const url of [
+    'https://example.com/v1',
+    'http://127.0.0.1:8001/other',
+    'http://user:pass@localhost/v1',
+    'http://localhost/v1?x=1',
+  ])
     assert.throws(() => localEndpoint(url));
 });
 
 function harness() {
-  let transform: (editor: any) => void = () => {};
+  let transform: (value: typeof editor) => void = () => {};
   let baseURL = 'http://127.0.0.1:8001/v1';
-  let models: readonly any[] = [];
+  let models: readonly Model.Info[] = [];
   let disposed = false;
   let reloads = 0;
   const logs: string[] = [];
   const editor = {
-    get: () => ({provider: {settings: {baseURL}}}),
-    add: (value: any) => {models = value.models;},
-    models: {set: (_id: string, value: any[]) => {models = value;}},
+    get: () => ({ provider: { settings: { baseURL } } }),
+    add: (value: { models: readonly Model.Info[] }) => {
+      models = value.models;
+    },
+    models: {
+      set: (_id: string, value: readonly Model.Info[]) => {
+        models = value;
+      },
+    },
   };
-  const ctx = {provider: {
-    transform: async (callback: typeof transform) => {transform = callback; transform(editor); return {dispose: async () => {disposed = true;}};},
-    get: async () => ({data: {settings: {baseURL}}}),
-    reload: async () => {reloads++; models = []; transform(editor);},
-  }} as unknown as Context;
-  return {ctx, logs, get models() {return models;}, get disposed() {return disposed;}, get reloads() {return reloads;},
-    endpoint: (url: string) => {baseURL = url;}};
+  const ctx = {
+    provider: {
+      transform: async (callback: typeof transform) => {
+        transform = callback;
+        transform(editor);
+        return {
+          dispose: async () => {
+            disposed = true;
+          },
+        };
+      },
+      get: async () => ({ data: { settings: { baseURL } } }),
+      reload: async () => {
+        reloads++;
+        models = [];
+        transform(editor);
+      },
+    },
+  } as unknown as Context;
+  return {
+    ctx,
+    logs,
+    get models() {
+      return models;
+    },
+    get disposed() {
+      return disposed;
+    },
+    get reloads() {
+      return reloads;
+    },
+    endpoint: (url: string) => {
+      baseURL = url;
+    },
+  };
 }
 
 test('refresh, deduplication, outage retention, empty inventory and disposal', async () => {
   const h = harness();
   let data: unknown = payload();
   let fail = false;
-  const discovery = await startDiscovery(h.ctx, {fetch: async (_url, options) => {
-    assert.equal(options?.redirect, 'error');
-    if (fail) throw new Error('secret remote details');
-    return new Response(JSON.stringify(data));
-  }, log: text => h.logs.push(text)});
+  const discovery = await startDiscovery(h.ctx, {
+    fetch: async (_url, options) => {
+      assert.equal(options?.redirect, 'error');
+      if (fail) throw new Error('secret remote details');
+      return new Response(JSON.stringify(data));
+    },
+    log: (text) => h.logs.push(text),
+  });
   try {
-    assert.equal(h.models[0].id, 'model-a', 'startup must publish models before the first request');
+    assert.equal(
+      h.models[0].id,
+      'model-a',
+      'startup must publish models before the first request',
+    );
     await discovery.refresh();
     assert.equal(h.models[0].id, 'model-a');
     await discovery.refresh();
@@ -143,9 +361,13 @@ test('refresh, deduplication, outage retention, empty inventory and disposal', a
     assert(!h.logs[0].includes('secret'));
     h.endpoint('http://127.0.0.1:8028/v1');
     await discovery.refresh();
-    assert.equal(h.models.length, 0, 'do not retain inventory from another endpoint');
+    assert.equal(
+      h.models.length,
+      0,
+      'do not retain inventory from another endpoint',
+    );
     fail = false;
-    data = {data: []};
+    data = { data: [] };
     await discovery.refresh();
     assert.equal(h.models.length, 0);
   } finally {

@@ -1,0 +1,16 @@
+{
+  "code": "b2v6bT61lS",
+  "fallbacks": [],
+  "values": {
+    "style": "mira",
+    "baseColor": "taupe",
+    "theme": "emerald",
+    "chartColor": "amber",
+    "iconLibrary": "lucide",
+    "font": "public-sans",
+    "fontHeading": "outfit",
+    "radius": "small",
+    "menuAccent": "subtle",
+    "menuColor": "default-translucent"
+  }
+}

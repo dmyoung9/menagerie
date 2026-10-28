@@ -22,6 +22,8 @@ async page => {
     if (path === '/api/events/stream') return route.fulfill({contentType:'text/event-stream',body:': fixture\n\n'});
     if (path === '/api/integration/opencode') return send({endpoint:'http://localhost/v1'});
     if (path.startsWith('/api/history/')) return send([]);
+    if (path.endsWith('/engine-recommendation')) return send({});
+    if (path === '/api/resources/preview') return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Telemetry unavailable in this form fixture'})});
     if (path === '/api/deployment-sets') {
       const v = route.request().postDataJSON(); writes.push(v);
       const members = v.members.map((m,i) => ({...m,id:m.id || 'm'+i,profile_snapshot:m.configuration,state:'STOPPED'}));
@@ -42,11 +44,12 @@ async page => {
   await d.getByText('Memory & GPU',{exact:true}).click();
   await d.getByLabel('GPU layer mode').selectOption('custom');
   await d.getByLabel('GPU layer count').fill('20');
-  await d.getByRole('radio',{name:'Auto',exact:true}).check();
+  await d.getByRole('button',{name:'Auto',exact:true}).click();
   await d.getByText('Performance',{exact:true}).click();
   assert(await d.getByRole('spinbutton',{name:'CPU threads',exact:true}).getAttribute('max') === '12','CPU limit must use host capacity');
   await d.getByRole('spinbutton',{name:'CPU threads',exact:true}).fill('8');
   await d.getByRole('button',{name:'Add model',exact:true}).click();
+  await d.locator('[data-model-index="1"]:not([hidden])').waitFor();
   assert(await d.getByLabel('Model display name',{exact:true}).filter({visible:true}).count() === 1,'Only one model editor should be visible');
   const secondAlias = await d.getByLabel('API model ID',{exact:true}).filter({visible:true}).inputValue();
   const firstAlias = await d.getByLabel('API model ID',{exact:true}).first().inputValue();
@@ -56,10 +59,10 @@ async page => {
   await d.getByLabel('API model ID',{exact:true}).filter({visible:true}).fill(secondAlias);
   await d.getByLabel('Context pool',{exact:true}).filter({visible:true}).fill('16384');
   await d.getByText('Memory & GPU',{exact:true}).filter({visible:true}).click();
-  await d.getByRole('radio',{name:'Off',exact:true}).check();
+  await d.getByRole('button',{name:'Off',exact:true}).click();
   await d.getByRole('button',{name:'Test Model',exact:true}).first().click();
   assert(await d.getByLabel('Context pool',{exact:true}).filter({visible:true}).inputValue() === '24576','Switching models lost draft');
-  assert(await d.getByRole('radio',{name:'Auto',exact:true}).isChecked(),'Model radio groups interfere with one another');
+  assert(await d.getByRole('button',{name:'Auto',exact:true}).getAttribute('aria-pressed')==='true','Model option groups interfere with one another');
   const geometry = await d.evaluate(el => {const input = [...el.querySelectorAll('input')].find(i=>i.getAttribute('aria-label')==='Context pool' && i.offsetWidth); const r=el.getBoundingClientRect(); return {width:r.width,input:input.getBoundingClientRect().width,overflow:el.scrollWidth>r.width};});
   assert(geometry.width === 390 && geometry.input > 100 && !geometry.overflow,'Mobile editing is squeezed or overflowing');
   await d.getByRole('button',{name:'Save deployment',exact:true}).click();
@@ -71,11 +74,11 @@ async page => {
   assert(writes[0].members[1].configuration.config['flash-attn']==='off','Second model radio value was lost');
   await page.getByRole('button',{name:'Edit',exact:true}).click();
   await d.getByLabel('Name',{exact:true}).fill('Unsaved');
-  page.once('dialog', dialog => dialog.dismiss());
   await d.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByRole('alertdialog').getByRole('button',{name:'Keep editing'}).click();
   assert(await d.isVisible(),'Dirty editor closed without consent');
-  page.once('dialog', dialog => dialog.accept());
   await d.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByRole('alertdialog').getByRole('button',{name:'Discard changes'}).click();
   await d.waitFor({state:'hidden'});
   await page.setViewportSize({width:1440,height:1000});
   await page.getByRole('button',{name:'Edit',exact:true}).click();

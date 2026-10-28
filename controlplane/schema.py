@@ -1,6 +1,7 @@
-from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 import re
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Record(BaseModel):
@@ -10,8 +11,12 @@ class Record(BaseModel):
     @field_validator("id")
     @classmethod
     def safe_id(cls, value):
-        if value is not None and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}", value):
-            raise ValueError("Use letters, numbers, dots, hyphens or underscores for IDs")
+        if value is not None and not re.fullmatch(
+            r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}", value
+        ):
+            raise ValueError(
+                "Use letters, numbers, dots, hyphens or underscores for IDs"
+            )
         return value
 
 
@@ -39,7 +44,9 @@ class Runtime(Record):
     fork_url: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     command_template: list[str] = Field(default_factory=list)
-    formats: list[Literal["gguf", "safetensors"]] = Field(default_factory=lambda: ["gguf"])
+    formats: list[Literal["gguf", "safetensors"]] = Field(
+        default_factory=lambda: ["gguf"]
+    )
     trust: bool = False
 
 

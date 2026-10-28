@@ -13,7 +13,8 @@ def visible(deployment, settings):
     """True when the alias is published by /v1/models."""
     return bool(deployment.get("enabled")) and (
         deployment.get("state") == "READY"
-        or bool(settings.get("expose_on_demand", True)) and deployment.get("residency") == "on-demand"
+        or bool(settings.get("expose_on_demand", True))
+        and deployment.get("residency") == "on-demand"
     )
 
 

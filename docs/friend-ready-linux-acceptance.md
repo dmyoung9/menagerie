@@ -99,3 +99,24 @@ Interrupted download test confirms no partial artifact registration, retains the
 completed shard, and successfully registers one complete artifact on retry.
 Existing asynchronous job progress, cancellation, errors and deployment logs are
 reused rather than introducing a parallel provisioning/lifecycle path.
+
+## Integration with the completed Base UI migration
+
+Remote main's UI migration (#4) was integrated before delivery. Onboarding now
+uses its shared shadcn controls, field/card composition, typed registry/telemetry
+contracts and existing validated request transport. No migration work was reverted.
+
+Repeated checks after integration: 94 backend tests, 18 frontend unit tests, all
+23 Playwright browser tests, frontend lint/format/type checks, and backend Ruff
+checks. Three browser tests cover first-response failure/retry without GPU
+telemetry, the empty-install/existing-model path, and preservation of unload
+consent despite advisory memory uncertainty.
+
+Repeated the real **empty-state → engine download → model download → deployment
+creation → reviewed load → streamed dashboard response** journey with the
+integrated UI and **CPU** engine. Upstream discovery selected llama.cpp b11972,
+commit `cf24317be`; the same Qwen revision/quantization used context 8192,
+parallel 1 and GPU layers 0. The browser displayed a nonempty greeting with no
+console errors. This adds CPU serving evidence; the earlier CUDA run remains
+separately recorded above. Isolated state/ports were again used; the installed
+daily-driver application was not upgraded.

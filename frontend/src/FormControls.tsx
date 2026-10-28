@@ -1,48 +1,576 @@
-import {useId} from 'react';
-import {Field, type Row} from './ui';
+import { FieldGroup, FieldSet, FieldLegend } from '@/components/ui/field';
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select';
+import { Input } from '@/components/ui/input';
+import { Slider } from '@/components/ui/slider';
+import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Field } from './ui';
+import type {
+  DeploymentDraft,
+  GpuSnapshot,
+  HostSnapshot,
+  JsonValue,
+  RuntimeField,
+  RuntimeRecommendation,
+} from './types';
 
-export function Placement({value, change, host = {}}: {value: Row; change: (v: Row) => void; host?: Row}) {
-  return <div className="form-grid"><Field label="GPU">{host.gpus?.length ? <select value={value.gpu} onChange={e => change({...value, gpu: Number(e.target.value)})}>{!host.gpus.some((g: Row) => g.index === value.gpu) && <option value={value.gpu}>GPU {value.gpu} (unavailable)</option>}{host.gpus.map((g: Row) => <option key={g.index} value={g.index}>{g.name} · GPU {g.index} · {typeof g.free_mib === 'number' ? (g.free_mib / 1024).toFixed(1) + ' GiB free before reserve' : 'capacity unknown'}</option>)}</select> : <input type="number" required min={0} aria-label="GPU index" value={value.gpu} onChange={e => change({...value, gpu: Number(e.target.value)})}/>}</Field><Field label="Memory reservation"><div className="control-pair"><select aria-label="Memory reservation mode" value={value.reservation_mib === 0 ? 'auto' : 'custom'} onChange={e => change({...value, reservation_mib: e.target.value === 'auto' ? 0 : 1024})}><option value="auto">Automatic estimate</option><option value="custom">Custom GiB</option></select>{value.reservation_mib !== 0 && <input aria-label="Memory reservation in GiB" type="number" required min={1 / 1024} step={1 / 1024} value={value.reservation_mib / 1024} onChange={e => change({...value, reservation_mib: Math.round(Number(e.target.value) * 1024)})}/>}</div></Field><Field label="Private port"><input type="number" required min={1024} max={65535} value={value.port} onChange={e => change({...value, port: Number(e.target.value)})}/></Field></div>;
+type PlacementValue = Pick<DeploymentDraft, 'gpu' | 'reservation_mib' | 'port'>;
+
+export function Placement({
+  value,
+  change,
+  host = {},
+}: {
+  value: PlacementValue;
+  change: (v: PlacementValue) => void;
+  host?: HostSnapshot;
+}) {
+  return (
+    <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+      <Field label="GPU">
+        {host.gpus?.length ? (
+          <NativeSelect
+            value={value.gpu}
+            onChange={(e) => change({ ...value, gpu: Number(e.target.value) })}
+          >
+            {!host.gpus.some((g: GpuSnapshot) => g.index === value.gpu) && (
+              <NativeSelectOption value={value.gpu}>
+                GPU {value.gpu} (unavailable)
+              </NativeSelectOption>
+            )}
+            {host.gpus.map((g: GpuSnapshot) => (
+              <NativeSelectOption key={g.index} value={g.index}>
+                {g.name} · GPU {g.index} ·{' '}
+                {typeof g.free_mib === 'number'
+                  ? (g.free_mib / 1024).toFixed(1) + ' GiB free before reserve'
+                  : 'capacity unknown'}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        ) : (
+          <Input
+            type="number"
+            required
+            min={0}
+            aria-label="GPU index"
+            value={value.gpu}
+            onChange={(e) => change({ ...value, gpu: Number(e.target.value) })}
+          />
+        )}
+      </Field>
+      <Field label="Memory reservation">
+        <div className="control-pair">
+          <NativeSelect
+            aria-label="Memory reservation mode"
+            value={value.reservation_mib === 0 ? 'auto' : 'custom'}
+            onChange={(e) =>
+              change({
+                ...value,
+                reservation_mib: e.target.value === 'auto' ? 0 : 1024,
+              })
+            }
+          >
+            <NativeSelectOption value="auto">
+              Automatic estimate
+            </NativeSelectOption>
+            <NativeSelectOption value="custom">Custom GiB</NativeSelectOption>
+          </NativeSelect>
+          {value.reservation_mib !== 0 && (
+            <Input
+              aria-label="Memory reservation in GiB"
+              type="number"
+              required
+              min={1 / 1024}
+              step={1 / 1024}
+              value={value.reservation_mib / 1024}
+              onChange={(e) =>
+                change({
+                  ...value,
+                  reservation_mib: Math.round(Number(e.target.value) * 1024),
+                })
+              }
+            />
+          )}
+        </div>
+      </Field>
+      <Field label="Private port">
+        <Input
+          type="number"
+          required
+          min={1024}
+          max={65535}
+          value={value.port}
+          onChange={(e) => change({ ...value, port: Number(e.target.value) })}
+        />
+      </Field>
+    </FieldGroup>
+  );
 }
 
-export function Choices({label, value, options, change}: {label: string; value: string; options: {value: string; label: string; disabled?: boolean}[]; change: (value: string) => void}) {
-  const name = useId();
-  return <fieldset className="choice-field"><legend>{label}</legend><div className="segmented">{options.map(o => <label key={o.value} className={value === o.value ? 'selected' : ''}><input type="radio" name={name} checked={value === o.value} disabled={o.disabled} onChange={() => change(o.value)}/>{o.label}</label>)}</div></fieldset>;
+export function Choices({
+  label,
+  value,
+  options,
+  change,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string; disabled?: boolean }[];
+  change: (value: string) => void;
+}) {
+  return (
+    <FieldSet>
+      <FieldLegend variant="label">{label}</FieldLegend>
+      <ToggleGroup
+        variant="outline"
+        className="flex-wrap"
+        aria-label={label}
+        value={[value || 'engine-default']}
+        onValueChange={(values) => {
+          if (values.length)
+            change(values[0] === 'engine-default' ? '' : values[0]);
+        }}
+      >
+        {options.map((o) => (
+          <ToggleGroupItem
+            key={o.value}
+            value={o.value || 'engine-default'}
+            disabled={o.disabled}
+          >
+            {o.label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </FieldSet>
+  );
 }
 
-export function Duration({value, change}: {value: number; change: (value: number) => void}) {
+export function Duration({
+  value,
+  change,
+}: {
+  value: number;
+  change: (value: number) => void;
+}) {
   const presets = [0, 60, 300, 900, 1800];
-  return <Field label="Unload after idle"><div className="control-pair"><select aria-label="Idle duration" value={presets.includes(value) ? value : 'custom'} onChange={e => change(e.target.value === 'custom' ? 600 : Number(e.target.value))}>{presets.map(n => <option key={n} value={n}>{n ? `${n / 60} minutes` : 'Never'}</option>)}<option value="custom">Custom seconds</option></select>{!presets.includes(value) && <input aria-label="Custom idle duration in seconds" type="number" min={1} max={86400} required value={value} onChange={e => change(Number(e.target.value))}/>}</div></Field>;
+  return (
+    <Field label="Unload after idle">
+      <div className="control-pair">
+        <NativeSelect
+          aria-label="Idle duration"
+          value={presets.includes(value) ? value : 'custom'}
+          onChange={(e) =>
+            change(e.target.value === 'custom' ? 600 : Number(e.target.value))
+          }
+        >
+          {presets.map((n) => (
+            <NativeSelectOption key={n} value={n}>
+              {n ? `${n / 60} minutes` : 'Never'}
+            </NativeSelectOption>
+          ))}
+          <NativeSelectOption value="custom">Custom seconds</NativeSelectOption>
+        </NativeSelect>
+        {!presets.includes(value) && (
+          <Input
+            aria-label="Custom idle duration in seconds"
+            type="number"
+            min={1}
+            max={86400}
+            required
+            value={value}
+            onChange={(e) => change(Number(e.target.value))}
+          />
+        )}
+      </div>
+    </Field>
+  );
 }
 
-export function RuntimeSettings({schema, value, change, host = {}, recommendation = {}}: {schema: Row; value: Row; change: (value: Row) => void; host?: Row; recommendation?: Row}) {
-  const update = (key: string, v: any) => {const next = {...value}; if (v === undefined) delete next[key]; else next[key] = v; change(next);};
+export function RuntimeSettings({
+  schema,
+  value,
+  change,
+  host = {},
+  recommendation = {},
+}: {
+  schema: Record<string, RuntimeField>;
+  value: Record<string, JsonValue>;
+  change: (value: Record<string, JsonValue>) => void;
+  host?: HostSnapshot;
+  recommendation?: RuntimeRecommendation;
+}) {
+  const update = (key: string, v: JsonValue | undefined) => {
+    const next = { ...value };
+    if (v === undefined) delete next[key];
+    else next[key] = v;
+    change(next);
+  };
   const groups = [
     ['Context & concurrency', ['ctx-size', 'max-model-len', 'parallel']],
-    ['Memory & GPU', ['gpu-layers', 'cache-type-k', 'cache-type-v', 'flash-attn', 'n-cpu-moe']],
+    [
+      'Memory & GPU',
+      ['gpu-layers', 'cache-type-k', 'cache-type-v', 'flash-attn', 'n-cpu-moe'],
+    ],
     ['Performance', ['threads', 'threads-batch', 'batch-size', 'ubatch-size']],
-    ['Generation', Object.keys(schema).filter(k => !['ctx-size', 'max-model-len', 'parallel', 'gpu-layers', 'cache-type-k', 'cache-type-v', 'flash-attn', 'n-cpu-moe', 'threads', 'threads-batch', 'batch-size', 'ubatch-size'].includes(k))],
+    [
+      'Generation',
+      Object.keys(schema).filter(
+        (k) =>
+          ![
+            'ctx-size',
+            'max-model-len',
+            'parallel',
+            'gpu-layers',
+            'cache-type-k',
+            'cache-type-v',
+            'flash-attn',
+            'n-cpu-moe',
+            'threads',
+            'threads-batch',
+            'batch-size',
+            'ubatch-size',
+          ].includes(k),
+      ),
+    ],
   ] as [string, string[]][];
   function control(key: string) {
-    const f = schema[key], current = value[key], label = f.label || key;
+    const f = schema[key],
+      current = value[key],
+      label = f.label || key;
     const thread = ['threads', 'threads-batch'].includes(key);
     const context = ['ctx-size', 'max-model-len'].includes(key);
-    const recommended = context && recommendation.context_key === key ? recommendation.context_recommended_max : undefined;
-    const capacity = context ? recommended : key === 'parallel' ? recommendation.parallel_recommended_max : undefined;
-    const max = key === 'gpu-memory-utilization' && recommendation.gpu_memory_utilization_max !== undefined ? Math.min(f.max, recommendation.gpu_memory_utilization_max) : context ? f.max : typeof capacity === 'number' ? Math.min(f.max, capacity) : thread && host.cpu_count ? Math.min(f.max || host.cpu_count, host.cpu_count) : key === 'ubatch-size' ? Math.min(f.max, value['batch-size'] ?? schema['batch-size']?.default ?? f.max) : f.max;
-    const numeric = ['integer', 'number'].includes(f.type);
-    const stops = [...new Set([f.min, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, max].filter(n => typeof n === 'number' && n >= f.min && n <= max))].sort((a, b) => a - b);
-    const effective = Number(current ?? f.default ?? f.min);
-    if (key === 'gpu-layers' && f.cpu_only) return <Field key={key} label={label} hint="This engine runs entirely on CPU and system RAM."><span>0 · CPU engine</span></Field>;
-    const exact = <input aria-label={label} type={numeric ? 'number' : 'text'} required={current !== undefined} min={key === 'gpu-memory-utilization' ? recommendation.gpu_memory_utilization_min ?? f.min : f.min} max={max} step={f.type === 'number' ? 'any' : 1} value={current ?? ''} placeholder={`Default: ${f.default ?? 'engine'}`} onChange={e => update(key, e.target.value === '' ? undefined : numeric ? Number(e.target.value) : e.target.value)}/>;
-    if (key === 'parallel' && recommendation.parallel_recommended_max !== undefined) return <Field key={key} label={label} hint={recommendation.parallel_recommended_max === null ? 'Even one request slot exceeds the estimated memory budget at this context.' : `Concurrency limit: ${recommendation.parallel_recommended_max} with the other settings preserved.`}><div className="range-control">{recommendation.parallel_recommended_max > 1 && <input aria-label="Concurrency range" type="range" min={f.min} max={recommendation.parallel_recommended_max} value={Math.min(effective, recommendation.parallel_recommended_max)} onChange={e => update(key, Number(e.target.value))}/>} {exact}</div></Field>;
-    if (key === 'gpu-layers') return <Field key={key} label={label} hint={recommendation.gpu_layers_max ? `${recommendation.gpu_layers_max} model layers. Fewer GPU layers use system RAM and are slower.` : 'Fewer GPU layers use system RAM and are slower; model layer count unavailable.'}><div className="control-pair"><select aria-label="GPU layer mode" value={current === undefined ? 'default' : current === 'all' ? 'all' : 'custom'} onChange={e => update(key, e.target.value === 'default' ? undefined : e.target.value === 'all' ? 'all' : '0')}><option value="default">Engine default</option><option value="all">GPU-resident</option><option value="custom">CPU/RAM offload (slower)</option></select>{current !== undefined && current !== 'all' && <input aria-label="GPU layer count" type="number" required min={0} max={recommendation.gpu_layers_max ?? undefined} step={1} value={current} onChange={e => update(key, e.target.value)}/>}</div></Field>;
-    if (key === 'flash-attn') return <Choices key={key} label={label} value={current ?? ''} options={[{value: '', label: 'Default'}, ...f.choices.map((v: string) => ({value: v, label: v === 'auto' ? 'Auto' : v === 'on' ? 'On' : 'Off', disabled: v === 'off' && (value['cache-type-v'] ?? schema['cache-type-v']?.default ?? 'f16') !== 'f16'}))]} change={v => update(key, v || undefined)}/>;
-    if (f.choices) return <Field key={key} label={label}><select value={current ?? ''} onChange={e => update(key, e.target.value || undefined)}><option value="">Engine default ({f.default})</option>{f.choices.map((v: string) => <option key={v} disabled={key === 'cache-type-v' && value['flash-attn'] === 'off' && v !== 'f16'}>{v}</option>)}</select></Field>;
-    const recommendedStops = typeof recommended === 'number' ? stops.filter(n => n <= recommended) : stops;
+    const min = f.min ?? 0;
+    const fieldMax = f.max ?? Number.MAX_SAFE_INTEGER;
+    const numeric = ['integer', 'number'].includes(f.type || '');
+    const recommended =
+      context && recommendation.context_key === key
+        ? recommendation.context_recommended_max
+        : undefined;
+    const capacity = context
+      ? recommended
+      : key === 'parallel'
+        ? recommendation.parallel_recommended_max
+        : undefined;
+    const max =
+      key === 'gpu-memory-utilization' &&
+      recommendation.gpu_memory_utilization_max !== undefined
+        ? Math.min(fieldMax, recommendation.gpu_memory_utilization_max)
+        : context
+          ? fieldMax
+          : typeof capacity === 'number'
+            ? Math.min(fieldMax, capacity)
+            : thread && host.cpu_count
+              ? Math.min(f.max ?? host.cpu_count, host.cpu_count)
+              : key === 'ubatch-size'
+                ? Math.min(
+                    fieldMax,
+                    typeof value['batch-size'] === 'number'
+                      ? value['batch-size']
+                      : typeof schema['batch-size']?.default === 'number'
+                        ? schema['batch-size'].default
+                        : fieldMax,
+                  )
+                : fieldMax;
+    const inputMax = Number.isFinite(max) ? max : undefined;
+    const stops = [
+      ...(numeric
+        ? new Set(
+            [
+              min,
+              2048,
+              4096,
+              8192,
+              16384,
+              32768,
+              65536,
+              131072,
+              262144,
+              524288,
+              max,
+            ].filter((n): n is number => n >= min && n <= max),
+          )
+        : []),
+    ].sort((a, b) => a - b);
+    const effective = Number(current ?? f.default ?? min);
+    if (key === 'gpu-layers' && f.cpu_only)
+      return (
+        <Field
+          key={key}
+          label={label}
+          hint="This engine runs entirely on CPU and system RAM."
+        >
+          <span>0 · CPU engine</span>
+        </Field>
+      );
+    const exact = (
+      <Input
+        aria-label={label}
+        type={numeric ? 'number' : 'text'}
+        required={current !== undefined}
+        min={
+          key === 'gpu-memory-utilization'
+            ? (recommendation.gpu_memory_utilization_min ?? min)
+            : min
+        }
+        max={inputMax}
+        step={f.type === 'number' ? 'any' : 1}
+        value={
+          typeof current === 'string' || typeof current === 'number'
+            ? current
+            : ''
+        }
+        placeholder={`Default: ${f.default ?? 'engine'}`}
+        onChange={(e) =>
+          update(
+            key,
+            e.target.value === ''
+              ? undefined
+              : numeric
+                ? Number(e.target.value)
+                : e.target.value,
+          )
+        }
+      />
+    );
+    if (
+      key === 'parallel' &&
+      recommendation.parallel_recommended_max !== undefined
+    ) {
+      const parallelMax = recommendation.parallel_recommended_max;
+      return (
+        <Field
+          key={key}
+          label={label}
+          hint={
+            recommendation.parallel_recommended_max === null
+              ? 'Even one request slot exceeds the estimated memory budget at this context.'
+              : `Concurrency limit: ${recommendation.parallel_recommended_max} with the other settings preserved.`
+          }
+        >
+          <div className="range-control">
+            {typeof parallelMax === 'number' && parallelMax > 1 && (
+              <Slider
+                aria-label="Concurrency range"
+                min={min}
+                max={parallelMax}
+                value={[Math.min(effective, parallelMax)]}
+                onValueChange={(range) =>
+                  update(key, Number(Array.isArray(range) ? range[0] : range))
+                }
+              />
+            )}{' '}
+            {exact}
+          </div>
+        </Field>
+      );
+    }
+    if (key === 'gpu-layers')
+      return (
+        <Field
+          key={key}
+          label={label}
+          hint={
+            recommendation.gpu_layers_max
+              ? `${recommendation.gpu_layers_max} model layers. Fewer GPU layers use system RAM and are slower.`
+              : 'Fewer GPU layers use system RAM and are slower; model layer count unavailable.'
+          }
+        >
+          <div className="control-pair">
+            <NativeSelect
+              aria-label="GPU layer mode"
+              value={
+                current === undefined
+                  ? 'default'
+                  : current === 'all'
+                    ? 'all'
+                    : 'custom'
+              }
+              onChange={(e) =>
+                update(
+                  key,
+                  e.target.value === 'default'
+                    ? undefined
+                    : e.target.value === 'all'
+                      ? 'all'
+                      : '0',
+                )
+              }
+            >
+              <NativeSelectOption value="default">
+                Engine default
+              </NativeSelectOption>
+              <NativeSelectOption value="all">GPU-resident</NativeSelectOption>
+              <NativeSelectOption value="custom">
+                CPU/RAM offload (slower)
+              </NativeSelectOption>
+            </NativeSelect>
+            {current !== undefined && current !== 'all' && (
+              <Input
+                aria-label="GPU layer count"
+                type="number"
+                required
+                min={0}
+                max={recommendation.gpu_layers_max ?? undefined}
+                step={1}
+                value={
+                  typeof current === 'string' || typeof current === 'number'
+                    ? current
+                    : ''
+                }
+                onChange={(e) => update(key, e.target.value)}
+              />
+            )}
+          </div>
+        </Field>
+      );
+    if (key === 'flash-attn')
+      return (
+        <Choices
+          key={key}
+          label={label}
+          value={typeof current === 'string' ? current : ''}
+          options={[
+            { value: '', label: 'Default' },
+            ...(f.choices || []).map((v: string) => ({
+              value: v,
+              label: v === 'auto' ? 'Auto' : v === 'on' ? 'On' : 'Off',
+              disabled:
+                v === 'off' &&
+                (value['cache-type-v'] ??
+                  schema['cache-type-v']?.default ??
+                  'f16') !== 'f16',
+            })),
+          ]}
+          change={(v) => update(key, v || undefined)}
+        />
+      );
+    if (f.choices)
+      return (
+        <Field key={key} label={label}>
+          <NativeSelect
+            value={
+              typeof current === 'string' || typeof current === 'number'
+                ? String(current)
+                : ''
+            }
+            onChange={(e) => update(key, e.target.value || undefined)}
+          >
+            <NativeSelectOption value="">
+              Engine default ({String(f.default ?? 'engine')})
+            </NativeSelectOption>
+            {(f.choices || []).map((v: string) => (
+              <NativeSelectOption
+                key={v}
+                disabled={
+                  key === 'cache-type-v' &&
+                  value['flash-attn'] === 'off' &&
+                  v !== 'f16'
+                }
+              >
+                {v}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+      );
+    const recommendedStops =
+      typeof recommended === 'number'
+        ? stops.filter((n) => n <= recommended)
+        : stops;
     const sliderStops = recommendedStops.length > 1 ? recommendedStops : stops;
-    const sliderIndex = sliderStops.reduce((best, n, i) => Math.abs(n - effective) < Math.abs(sliderStops[best] - effective) ? i : best, 0);
-    return <Field key={key} label={label} hint={context && schema.parallel ? `${effective.toLocaleString()} tokens shared across ${value.parallel ?? schema.parallel.default ?? 1} concurrent requests` : thread && host.cpu_count ? `${host.cpu_count} host threads available` : f.units}><div className="range-control">{context && sliderStops.length > 1 ? <input aria-label={`${label} range`} aria-valuetext={`${effective.toLocaleString()} tokens`} type="range" min={0} max={sliderStops.length - 1} step={1} value={sliderIndex} onChange={e => update(key, sliderStops[Number(e.target.value)])}/> : thread && host.cpu_count ? <input aria-label={`${label} range`} type="range" min={f.min} max={max} step={1} value={effective} onChange={e => update(key, Number(e.target.value))}/> : null}{exact}</div>{context && recommendation.context_key === key && <div className={recommended === null || effective > recommended ? 'warning' : 'muted'}>{recommended === null ? 'Even minimum context exceeds the estimated budget. Reduce peers, choose smaller weights, or use CPU/RAM offload.' : <>Context pool limit: {recommended?.toLocaleString()} tokens. <button type="button" onClick={() => update(key, recommendation.context_default)}>Use suggested default</button></>}<small>{recommendation.reason}.</small></div>}</Field>;
+    const sliderIndex = sliderStops.reduce(
+      (best, n, i) =>
+        Math.abs(n - effective) < Math.abs(sliderStops[best] - effective)
+          ? i
+          : best,
+      0,
+    );
+    return (
+      <Field
+        key={key}
+        label={label}
+        hint={
+          context && schema.parallel
+            ? `${effective.toLocaleString()} tokens shared across ${value.parallel ?? schema.parallel.default ?? 1} concurrent requests`
+            : thread && host.cpu_count
+              ? `${host.cpu_count} host threads available`
+              : f.units
+        }
+      >
+        <div className="range-control">
+          {context && sliderStops.length > 1 ? (
+            <Slider
+              aria-label={`${label} range`}
+              aria-valuetext={`${effective.toLocaleString()} tokens`}
+              min={0}
+              max={sliderStops.length - 1}
+              step={1}
+              value={[sliderIndex]}
+              onValueChange={(range) =>
+                update(
+                  key,
+                  sliderStops[Number(Array.isArray(range) ? range[0] : range)],
+                )
+              }
+            />
+          ) : thread && host.cpu_count ? (
+            <Slider
+              aria-label={`${label} range`}
+              min={min}
+              max={inputMax}
+              step={1}
+              value={[effective]}
+              onValueChange={(range) =>
+                update(key, Number(Array.isArray(range) ? range[0] : range))
+              }
+            />
+          ) : null}
+          {exact}
+        </div>
+        {context && recommendation.context_key === key && (
+          <div
+            className={
+              recommended === null ||
+              (typeof recommended === 'number' && effective > recommended)
+                ? 'warning'
+                : 'muted'
+            }
+          >
+            {recommended === null ? (
+              'Even minimum context exceeds the estimated budget. Reduce peers, choose smaller weights, or use CPU/RAM offload.'
+            ) : (
+              <>
+                Context pool limit: {recommended?.toLocaleString()} tokens.{' '}
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => update(key, recommendation.context_default)}
+                >
+                  Use suggested default
+                </Button>
+              </>
+            )}
+            <small>{recommendation.reason}.</small>
+          </div>
+        )}
+      </Field>
+    );
   }
-  return <div className="runtime-settings">{groups.filter(([, keys]) => keys.some(k => schema[k])).map(([title, keys], index) => <details key={title} open={index === 0} className="settings-section"><summary>{title}</summary><div className="form-grid">{keys.filter(k => schema[k]).map(control)}</div></details>)}</div>;
+  return (
+    <div className="runtime-settings">
+      {groups
+        .filter(([, keys]) => keys.some((k) => schema[k]))
+        .map(([title, keys], index) => (
+          <details key={title} open={index === 0} className="settings-section">
+            <summary>{title}</summary>
+            <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+              {keys.filter((k) => schema[k]).map(control)}
+            </FieldGroup>
+          </details>
+        ))}
+    </div>
+  );
 }
