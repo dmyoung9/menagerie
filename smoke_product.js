@@ -55,8 +55,8 @@ async (page) => {
   const readyRow=page.getByRole('row').filter({has:page.getByRole('link',{name:'Example 27B',exact:true})});
   assert(await readyRow.getByRole('button',{name:'Unload',exact:true}).isEnabled(),'Coordinated unload should be available while waiting for requests');
   const idleRow=page.getByRole('row').filter({has:page.getByRole('link',{name:'Example 9B',exact:true})});
-  await idleRow.locator('summary').click();
-  await idleRow.getByRole('button',{name:'Details',exact:true}).click();
+  await idleRow.getByRole('button',{name:'Actions for Example 9B',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Details',exact:true}).click();
   await page.getByRole('heading',{name:'Example 9B',exact:true}).waitFor();
   await page.getByRole('button',{name:'Configuration',exact:true}).click();
   assert(page.url().endsWith('/configuration'),'Details must be linkable');
@@ -105,8 +105,8 @@ async (page) => {
   await dialog.getByRole('button',{name:'Save',exact:true}).click();
   await dialog.getByRole('alert').waitFor();
   assert(await dialog.getByLabel('Executable path',{exact:true}).inputValue()==='/runtime/server','Failed save lost form input');
-  page.once('dialog', d => d.accept());
   await page.keyboard.press('Escape');
+  await page.getByRole('alertdialog').getByRole('button',{name:'Discard changes'}).click();
   assert(await page.getByRole('button',{name:'Profiles',exact:true}).count()===0,'Profiles should not be a product concept');
   await page.getByRole('navigation').getByRole('link',{name:'Deployments'}).click();
   await page.getByRole('link',{name:'Example 9B',exact:true}).click();
@@ -140,6 +140,7 @@ async (page) => {
   registry={models:[],runtimes:[],profiles:[],deployments:[],groups:[],jobs:[]};
   await page.reload();
   await page.getByRole('heading',{name:'Add your first model'}).waitFor();
+  await page.getByRole('button',{name:'Toggle Sidebar'}).click();
   await page.getByRole('navigation').getByRole('link',{name:'Models',exact:true}).click();
   await page.getByRole('heading',{name:'No models yet'}).waitFor();
   await page.getByRole('button',{name:'Add from File',exact:true}).last().click();

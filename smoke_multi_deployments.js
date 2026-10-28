@@ -54,8 +54,8 @@ async page => {
   await dialog.getByRole('button',{name:'Add model',exact:true}).click();
   await dialog.getByRole('combobox',{name:'Add installed model',exact:true}).selectOption('gemma-weights');
   await dialog.getByRole('button',{name:'Add model',exact:true}).click();
-  await dialog.getByLabel('Can unload to make room for another deployment',{exact:true}).check();
-  await dialog.getByLabel('Allow on-demand loading with uncertain memory estimates',{exact:true}).check();
+  await dialog.getByRole('checkbox',{name:'Can unload to make room for another deployment',exact:true}).check();
+  await dialog.getByRole('checkbox',{name:'Allow on-demand loading with uncertain memory estimates',exact:true}).check();
   await dialog.getByRole('button',{name:'Save deployment',exact:true}).click();
   await page.getByRole('heading',{name:'Qwen + Gemma',exact:true}).waitFor();
   assert(writes.filter(w=>w.path==='/api/deployment-sets').length===1 && !writes.some(w=>w.path.endsWith('/start')||w.path.endsWith('/stop')),'Creation unexpectedly loaded or stopped a model');

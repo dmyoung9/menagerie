@@ -1,0 +1,273 @@
+import AxeBuilder from '@axe-core/playwright';
+import {test, expect, navigate} from './fixtures';
+
+test('observed resources, SSE events, polling and exact preset stay integrated', async ({page, fixture}) => {
+  await page.goto('/#/overview');
+  await expect(page.getByText('Example idle unloaded · Idle unload', {exact: true})).toBeVisible();
+  await expect(page.getByRole('cell', {name: '—', exact: true}).first()).toBeVisible();
+  const tile = page.getByRole('button', {name: /^Example ready: 3 GiB/});
+  await tile.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('link', {name: 'Open deployment →'})).toBeVisible();
+  expect(await page.locator('.chart polyline').count()).toBe(1);
+  const tokens = await page.evaluate(() => ({primary: getComputedStyle(document.documentElement).getPropertyValue('--primary').trim(), font: getComputedStyle(document.body).fontFamily}));
+  expect(tokens.primary).toBe('oklch(0.432 0.095 166.913)');
+  expect(tokens.font).toContain('Public Sans');
+  fixture.registry.deployments.push({...fixture.registry.deployments[1], id: 'polled', name: 'Polled deployment'});
+  await expect(page.getByRole('link', {name: 'Polled deployment'})).toBeVisible({timeout: 8000});
+});
+
+test('dialogs trap and restore focus; menus use keyboard navigation and fit the viewport', async ({page, fixture}) => {
+  await page.goto('/#/overview');
+  const connect = page.getByRole('button', {name: 'Connect client'});
+  await connect.click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', {name: 'OpenCode', exact: true}).click();
+  await expect(dialog.getByText('menagerie plugin install', {exact: false})).toBeVisible();
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press('Tab');
+    await expect.poll(() => dialog.evaluate(el => el.contains(document.activeElement))).toBe(true);
+  }
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(connect).toBeFocused();
+  await navigate(page, 'Deployments');
+  const trigger = page.getByRole('button', {name: 'Actions for Example idle', exact: true});
+  await trigger.focus();
+  await page.keyboard.press('ArrowDown');
+  const menu = page.getByRole('menu');
+  await expect(menu.getByRole('menuitem', {name: 'Details', exact: true})).toBeFocused();
+  const box = (await menu.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(1440);
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await menu.getByRole('menuitem', {name: 'Edit', exact: true}).click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await menu.getByRole('menuitem', {name: 'Details', exact: true}).click();
+  await page.getByRole('button', {name: 'Configuration', exact: true}).click();
+  expect(page.url()).toContain('/idle/configuration');
+  await page.goBack();
+  await expect(page.getByRole('button', {name: 'Overview', exact: true})).toHaveAttribute('aria-pressed', 'true');
+  expect(fixture.writes).toEqual([]);
+});
+
+test('unsaved editor dismissal is accessible and busy submissions cannot be dismissed', async ({page, fixture}) => {
+  await page.goto('/#/deployments');
+  const opener = page.getByRole('button', {name: 'New deployment', exact: true});
+  await opener.click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toBeHidden();
+  await expect(opener).toBeFocused();
+  await opener.click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Name', {exact: true}).fill('Unsaved deployment');
+  expect(await page.evaluate(() => {const event = new Event('beforeunload', {cancelable: true}); window.dispatchEvent(event); return event.defaultPrevented;})).toBe(true);
+  await page.keyboard.press('Escape');
+  const confirm = page.getByRole('alertdialog');
+  await expect(confirm.getByRole('heading', {name: 'Discard unsaved changes?'})).toBeVisible();
+  await confirm.getByRole('button', {name: 'Keep editing'}).click();
+  await expect(dialog.getByLabel('Name', {exact: true})).toHaveValue('Unsaved deployment');
+  await dialog.getByRole('button', {name: 'Add model', exact: true}).click();
+  await expect(dialog.getByRole('heading', {name: 'Resource preview', exact: true})).toBeVisible();
+  fixture.holdSave = true;
+  await dialog.getByRole('button', {name: 'Save deployment', exact: true}).click();
+  await expect.poll(() => fixture.writes.some(w => w.path === '/api/deployments')).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', {name: 'Close dialog'})).toBeDisabled();
+  fixture.releaseSave();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('Deployment saved', {exact: true})).toBeVisible();
+});
+
+test('multi-model controls preserve payloads, failed input, invalid JSON and slider semantics', async ({page, fixture}) => {
+  await page.goto('/#/deployments');
+  await page.getByRole('button', {name: 'New deployment', exact: true}).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Name', {exact: true}).fill('Pair');
+  await dialog.getByRole('button', {name: 'Add model', exact: true}).click();
+  const context = dialog.getByLabel('ctx-size', {exact: true});
+  await context.fill('16384');
+  const slider = dialog.getByRole('slider', {name: 'ctx-size range'});
+  await slider.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(context).toHaveValue('32768');
+  await dialog.getByRole('button', {name: 'Tools', exact: true}).click();
+  await dialog.getByRole('button', {name: 'Add model', exact: true}).click();
+  const secondMember = dialog.locator('[data-model-index="1"]');
+  await expect(secondMember).toBeVisible();
+  await secondMember.getByLabel('Model display name', {exact: true}).fill('Second member');
+  fixture.failSave = true;
+  await dialog.getByRole('button', {name: 'Save deployment', exact: true}).click();
+  await expect(dialog.getByRole('alert')).toContainText('Alias already exists');
+  await expect(dialog.getByLabel('Name', {exact: true})).toHaveValue('Pair');
+  await dialog.locator('[data-slot="toggle-group"][aria-label="Models"]').getByRole('button').first().click();
+  await expect(context.filter({visible: true})).toHaveValue('32768');
+  await dialog.locator('summary').filter({hasText: 'Advanced model settings'}).filter({visible: true}).click();
+  await dialog.locator('summary').filter({hasText: 'Runtime options (JSON)'}).filter({visible: true}).click();
+  const json = dialog.getByLabel('Runtime options (JSON)', {exact: true}).filter({visible: true});
+  await json.fill('{invalid');
+  await expect(dialog.getByRole('button', {name: 'Save deployment', exact: true})).toBeDisabled();
+  await json.fill('{"ctx-size":32768,"parallel":1,"gpu-layers":"all"}');
+  fixture.failSave = false;
+  await dialog.getByRole('button', {name: 'Save deployment', exact: true}).click();
+  await expect(dialog).toBeHidden();
+  const saved = fixture.writes.filter(w => w.path === '/api/deployment-sets').at(-1)!.body;
+  expect(saved.members).toHaveLength(2);
+  expect(saved.members[0].configuration.config['ctx-size']).toBe(32768);
+  expect(saved.members[0].configuration.catalog.model.capabilities.tools).toBe(true);
+  expect(saved.members[1].name).toBe('Second member');
+  expect(new Set(saved.members.map((m: any) => m.alias)).size).toBe(2);
+  expect(new Set(saved.members.map((m: any) => m.port)).size).toBe(2);
+});
+
+test('launch review requires consent and submits its plan token; local files use the original endpoint', async ({page, fixture}) => {
+  await page.goto('/#/deployments/idle');
+  await page.getByRole('button', {name: 'Load now', exact: true}).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('button', {name: 'Load', exact: true})).toBeDisabled();
+  await dialog.getByRole('checkbox').check();
+  await dialog.getByRole('button', {name: 'Load', exact: true}).click();
+  await expect(dialog).toBeHidden();
+  expect(fixture.writes.find(w => w.path.endsWith('/start'))!.body).toMatchObject({override: true, plan_token: 'review-token'});
+  await navigate(page, 'Models');
+  await page.getByRole('button', {name: 'Add from File', exact: true}).first().click();
+  await dialog.getByRole('textbox').fill('/models/fixture.gguf');
+  await dialog.getByRole('button', {name: 'Add from File', exact: true}).click();
+  await expect(dialog).toBeHidden();
+  expect(fixture.writes.find(w => w.path === '/api/models/local')!.body.path).toBe('/models/fixture.gguf');
+});
+
+for (const width of [1440, 390]) test(`catalog variant selection preserves pinning and explicit choice at ${width}px`, async ({page, fixture}, testInfo) => {
+  await page.setViewportSize({width, height: width === 390 ? 844 : 1000});
+  await page.goto('/#/models/discover');
+  await page.getByRole('textbox', {name: 'Catalog search'}).fill('fixture');
+  await page.getByRole('button', {name: 'Search catalog'}).click();
+  await page.getByRole('button', {name: 'Choose variant'}).click();
+  const dialog = page.getByRole('dialog');
+  const download = dialog.getByRole('button', {name: 'Download', exact: true});
+  await expect(download).toBeDisabled();
+  await expect(dialog.getByRole('button', {name: 'Q5_K', exact: true})).toBeDisabled();
+  await dialog.getByRole('button', {name: 'Q4_K', exact: true}).click();
+  await expect(download).toBeEnabled();
+  expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect(dialog.getByText('Pinned commit: fixture-commit')).toBeVisible();
+  const result = await new AxeBuilder({page}).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+  expect(result.violations.map(v => ({id: v.id, targets: v.nodes.map(n => n.target)}))).toEqual([]);
+  await page.screenshot({path: testInfo.outputPath('catalog-variant.png'), fullPage: true});
+  await download.click();
+  await expect(dialog).toBeHidden();
+  expect(fixture.writes.find(w => w.path === '/api/downloads')!.body).toMatchObject({repo: 'fixture/model', revision: 'fixture-commit', filename: 'model-7B-Q4_K_M.gguf'});
+  await expect(page.getByText('Download queued', {exact: true})).toBeVisible();
+});
+
+test('mobile action menus remain within the viewport and close on outside clicks', async ({page, fixture}) => {
+  await page.setViewportSize({width: 390, height: 844});
+  await page.goto('/#/deployments');
+  const trigger = page.getByRole('button', {name: 'Actions for Example idle', exact: true});
+  await trigger.click();
+  const menu = page.getByRole('menu');
+  const box = (await menu.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(390);
+  expect(box.y + box.height).toBeLessThanOrEqual(844);
+  await page.mouse.click(1, 1);
+  await expect(menu).toBeHidden();
+});
+
+test('engine-reset confirmation is cancellable and recovery retains its existing API', async ({page, fixture}) => {
+  fixture.registry.runtimes.push({...fixture.registry.runtimes[0], id: 'engine-two', name: 'Second engine'});
+  await page.goto('/#/deployments/idle');
+  await page.getByRole('button', {name: 'Edit', exact: true}).click();
+  const dialog = page.getByRole('dialog');
+  const engine = dialog.getByLabel('Engine', {exact: true});
+  await engine.selectOption('engine-two');
+  const confirm = page.getByRole('alertdialog');
+  await expect(confirm).toContainText('Engine-specific settings');
+  await page.keyboard.press('Escape');
+  await expect(confirm).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await expect(engine).toHaveValue('engine');
+  await engine.selectOption('engine-two');
+  await confirm.getByRole('button', {name: 'Cancel', exact: true}).click();
+  await expect(engine).toHaveValue('engine');
+  await engine.selectOption('engine-two');
+  await confirm.getByRole('button', {name: 'Continue', exact: true}).click();
+  await expect(engine).toHaveValue('engine-two');
+  await dialog.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(dialog).toBeHidden();
+  expect(fixture.writes.find(w => w.path === '/api/deployments?expected=1')!.body.configuration.runtime_id).toBe('engine-two');
+  await navigate(page, 'Settings');
+  await page.getByRole('button', {name: 'Recovery', exact: true}).click();
+  await page.getByRole('button', {name: 'Create backup', exact: true}).click();
+  await dialog.getByRole('button', {name: 'Create backup', exact: true}).click();
+  await expect(dialog.getByRole('status')).toContainText('/fixtures/backup.sqlite');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', {name: 'Host', exact: true}).click();
+  await page.getByRole('button', {name: 'Edit policy'}).click();
+  await expect(dialog.getByRole('heading', {name: 'Host policy'})).toBeVisible();
+});
+
+test('empty installation and connection errors remain actionable', async ({page, fixture}) => {
+  fixture.registry = {models: [], runtimes: [], profiles: [], deployments: [], jobs: []};
+  await page.goto('/#/models');
+  await expect(page.getByRole('heading', {name: 'No models yet'})).toBeVisible();
+  await page.route('**/api/status', route => route.fulfill({status: 503, contentType: 'application/json', body: '{"error":"Fixture disconnect"}'}));
+  await page.reload();
+  await expect(page.getByRole('alert')).toContainText('Connection lost');
+  await page.unroute('**/api/status');
+  await page.getByRole('button', {name: 'Retry', exact: true}).click();
+  await expect(page.getByRole('alert')).toBeHidden();
+  await expect(page.getByRole('heading', {name: 'No models yet'})).toBeVisible();
+});
+
+test('Base UI Select, Switch, outside dismissal and discard actions preserve policy values', async ({page, fixture}) => {
+  await page.goto('/#/overview');
+  await page.getByRole('button', {name: 'Connect client'}).click();
+  await page.mouse.click(1, 1);
+  await expect(page.getByRole('dialog')).toBeHidden();
+  await navigate(page, 'Deployments');
+  await page.getByRole('button', {name: 'New deployment', exact: true}).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', {name: 'Add model', exact: true}).click();
+  const mode = dialog.getByRole('combobox', {name: 'Mode', exact: true});
+  await mode.click();
+  await page.getByRole('option', {name: 'Pinned', exact: true}).click();
+  await expect(mode).toContainText('Pinned');
+  await dialog.locator('summary').filter({hasText: /^Advanced$/}).click();
+  const enabled = dialog.getByRole('switch', {name: 'Enabled for clients', exact: true});
+  await enabled.uncheck();
+  await expect(enabled).not.toBeChecked();
+  await dialog.getByRole('button', {name: 'Close dialog'}).click();
+  await expect(page.getByRole('alertdialog')).toBeVisible();
+  await page.getByRole('button', {name: 'Discard changes', exact: true}).click();
+  await expect(dialog).toBeHidden();
+  expect(fixture.writes.filter(w => w.path !== '/api/resources/preview')).toEqual([]);
+});
+
+for (const width of [1440, 390]) test(`primary surfaces have no page overflow or accessibility violations at ${width}px`, async ({page, fixture}, testInfo) => {
+  await page.setViewportSize({width, height: width === 390 ? 844 : 1000});
+  await page.goto('/#/overview');
+  for (const name of ['Overview', 'Models', 'Deployments', 'Activity', 'Settings']) {
+    await navigate(page, name);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const result = await new AxeBuilder({page}).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+    expect(result.violations, `${name}: ${JSON.stringify(result.violations.map(v => ({id: v.id, nodes: v.nodes.map(n => n.target)})))}`).toEqual([]);
+    await page.screenshot({path: testInfo.outputPath(`${name}-${width}.png`), fullPage: true});
+  }
+  await navigate(page, 'Deployments');
+  await page.getByRole('button', {name: 'New deployment', exact: true}).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', {name: 'Add model', exact: true}).click();
+  await expect(dialog.getByRole('heading', {name: 'Resource preview', exact: true})).toBeVisible();
+  expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const result = await new AxeBuilder({page}).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+  expect(result.violations.map(v => ({id: v.id, nodes: v.nodes.map(n => n.target)}))).toEqual([]);
+  await page.screenshot({path: testInfo.outputPath(`editor-${width}.png`), fullPage: true});
+});
