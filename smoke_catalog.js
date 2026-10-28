@@ -10,16 +10,16 @@ async (page) => {
   // Hugging Face catalog: badges and a supplier link on the model card.
   await catalog.getByLabel('Catalog search').fill('unsloth/Qwen3.8-27B-GGUF');
   await catalog.getByRole('button',{name:'Search catalog',exact:true}).click();
-  const hfCard=catalog.locator('.catalog-card').filter({hasText:'unsloth/Qwen3.8-27B-GGUF'});
+  const hfCard=catalog.locator('[data-slot="card"]').filter({hasText:'unsloth/Qwen3.8-27B-GGUF'});
   await hfCard.waitFor({timeout:45000});
-  const hfChips=await hfCard.locator('.catalog-chip').allInnerTexts();
+  const hfChips=await hfCard.locator('[data-slot="badge"]').allInnerTexts();
   if(!hfChips.includes('GGUF')||!hfChips.includes('27B')) throw new Error('Model card lacks format/parameter chips');
   if(await hfCard.getByRole('link',{name:/Open unsloth\/Qwen3.8-27B-GGUF/}).getAttribute('href')!=='https://huggingface.co/unsloth/Qwen3.8-27B-GGUF') throw new Error('Wrong supplier link');
 
-  // The variant chooser is a native modal, with hierarchical chip selection.
+  // The variant chooser is a Base UI modal, with hierarchical chip selection.
   await hfCard.getByRole('button',{name:'Choose variant'}).click();
   await dialog.locator('.variant-loading').waitFor({state:'detached',timeout:45000});
-  if(!(await dialog.evaluate(d=>d.open))||await page.evaluate(()=>document.body.style.overflow)!=='hidden') throw new Error('Variant dialog is not modal');
+  if(await dialog.getAttribute('aria-modal')!=='true') throw new Error('Variant dialog is not modal');
   const quant=dialog.locator('fieldset').filter({hasText:'Quantization'});
   const suffix=dialog.locator('fieldset').filter({hasText:'Size / quality suffix'});
   if(!(await quant.getByRole('button',{name:'Q5_0',exact:true}).isDisabled())) throw new Error('Unavailable quantization is not disabled');
@@ -50,7 +50,7 @@ async (page) => {
   // A repository with one variant auto-selects it and disables the alternatives.
   await catalog.getByLabel('Catalog search').fill('ggml-org/gemma-3-270m-qat-GGUF');
   await catalog.getByRole('button',{name:'Search catalog',exact:true}).click();
-  const singleCard=catalog.locator('.catalog-card').filter({hasText:'ggml-org/gemma-3-270m-qat-GGUF'});
+  const singleCard=catalog.locator('[data-slot="card"]').filter({hasText:'ggml-org/gemma-3-270m-qat-GGUF'});
   await singleCard.getByRole('button',{name:'Choose variant'}).click();
   await dialog.locator('.variant-loading').waitFor({state:'detached',timeout:45000});
   if(await dialog.locator('fieldset').filter({hasText:'Quantization'}).getByRole('button',{name:'Q4_0',exact:true}).getAttribute('aria-pressed')!=='true') throw new Error('Single variant was not auto-selected');
@@ -62,11 +62,12 @@ async (page) => {
   // Mobile: the modal fits the viewport and does not create page overflow.
   await page.setViewportSize({width:390,height:844});
   await page.reload();
+  await page.getByRole('button',{name:'Toggle Sidebar'}).click();
   await page.locator('nav').getByRole('link',{name:'Models',exact:true}).click();
   await page.getByRole('button',{name:'Discover',exact:true}).click();
   await catalog.getByLabel('Catalog search').fill('ggml-org/gemma-3-270m-qat-GGUF');
   await catalog.getByRole('button',{name:'Search catalog',exact:true}).click();
-  await catalog.locator('.catalog-card').filter({hasText:'ggml-org/gemma-3-270m-qat-GGUF'}).getByRole('button',{name:'Choose variant'}).click();
+  await catalog.locator('[data-slot="card"]').filter({hasText:'ggml-org/gemma-3-270m-qat-GGUF'}).getByRole('button',{name:'Choose variant'}).click();
   await dialog.locator('.variant-loading').waitFor({state:'detached',timeout:45000});
   const box=await dialog.boundingBox();
   if(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth)) throw new Error('Mobile overflow');

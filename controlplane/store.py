@@ -1,4 +1,5 @@
 """Small transactional registry; immutable revisions live beside operational state."""
+
 import hashlib
 import json
 import sqlite3
@@ -69,13 +70,20 @@ class Store:
         if c is None:
             with self.connect() as c:
                 return self.list(kind, c)
-        return [json.loads(r[0]) for r in c.execute("SELECT data FROM objects WHERE kind=? ORDER BY id", (kind,))]
+        return [
+            json.loads(r[0])
+            for r in c.execute(
+                "SELECT data FROM objects WHERE kind=? ORDER BY id", (kind,)
+            )
+        ]
 
     def get(self, kind, ident, c=None):
         if c is None:
             with self.connect() as c:
                 return self.get(kind, ident, c)
-        row = c.execute("SELECT data FROM objects WHERE kind=? AND id=?", (kind, ident)).fetchone()
+        row = c.execute(
+            "SELECT data FROM objects WHERE kind=? AND id=?", (kind, ident)
+        ).fetchone()
         if row is None:
             raise KeyError(f"Unknown {kind}: {ident}")
         return json.loads(row[0])
@@ -86,31 +94,50 @@ class Store:
                 return self.put(kind, data, expected, historical, c)
         data = dict(data)
         ident = data.setdefault("id", uid())
-        row = c.execute("SELECT revision FROM objects WHERE kind=? AND id=?", (kind, ident)).fetchone()
+        row = c.execute(
+            "SELECT revision FROM objects WHERE kind=? AND id=?", (kind, ident)
+        ).fetchone()
         revision = row[0] if row else 0
         if expected is not None and revision != expected:
             raise ValueError("Revision changed; refresh before saving")
         data["revision"] = revision + 1
-        c.execute("INSERT OR REPLACE INTO objects VALUES(?,?,?,?)", (kind, ident, data["revision"], encode(data)))
+        c.execute(
+            "INSERT OR REPLACE INTO objects VALUES(?,?,?,?)",
+            (kind, ident, data["revision"], encode(data)),
+        )
         if historical:
-            c.execute("INSERT INTO revisions VALUES(?,?,?,?,?)", (kind, ident, data["revision"], time.time(), encode(data)))
+            c.execute(
+                "INSERT INTO revisions VALUES(?,?,?,?,?)",
+                (kind, ident, data["revision"], time.time(), encode(data)),
+            )
         return data
 
     def event(self, kind, data, deployment=None, c=None):
         if c is None:
             with self.connect() as c:
                 return self.event(kind, data, deployment, c)
-        cur = c.execute("INSERT INTO events(ts,deployment_id,kind,data) VALUES(?,?,?,?)", (time.time(), deployment, kind, encode(data)))
+        cur = c.execute(
+            "INSERT INTO events(ts,deployment_id,kind,data) VALUES(?,?,?,?)",
+            (time.time(), deployment, kind, encode(data)),
+        )
         return cur.lastrowid
 
     def events(self, after=0, limit=500):
         with self.connect() as c:
-            rows = c.execute("SELECT * FROM events WHERE seq>? ORDER BY seq LIMIT ?", (after, limit)).fetchall()
+            rows = c.execute(
+                "SELECT * FROM events WHERE seq>? ORDER BY seq LIMIT ?", (after, limit)
+            ).fetchall()
         return [dict(r) | {"data": json.loads(r["data"])} for r in rows]
 
     def history(self, kind, ident):
         with self.connect() as c:
-            return [json.loads(r[0]) for r in c.execute("SELECT data FROM revisions WHERE kind=? AND id=? ORDER BY revision DESC", (kind, ident))]
+            return [
+                json.loads(r[0])
+                for r in c.execute(
+                    "SELECT data FROM revisions WHERE kind=? AND id=? ORDER BY revision DESC",
+                    (kind, ident),
+                )
+            ]
 
     def backup(self):
         path = self.root / f"registry-backup-{time.time_ns()}.sqlite3"

@@ -1,15 +1,92 @@
-.catalog-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr));gap:14px}
-.catalog-card-footer{flex-wrap:wrap}.catalog-card-footer .actions{display:flex;gap:6px;flex-wrap:wrap}
-.catalog-card{border:1px solid var(--line);background:#101a14;border-radius:10px;padding:18px;min-width:0;display:flex;flex-direction:column;gap:18px}
-.catalog-card-heading{display:flex;align-items:flex-start;gap:10px}.catalog-card-heading>svg{color:var(--mint);flex-shrink:0;margin-top:4px}.catalog-card-heading h3{margin:0;flex:1;overflow-wrap:anywhere;font-size:14px}.catalog-card-heading a{margin-left:auto;flex-shrink:0;background:transparent;border:0;padding:4px}
-.catalog-chips{display:flex;flex-wrap:wrap;gap:6px}.catalog-chip{display:inline-flex;align-items:center;border:1px solid #354b3c;background:#1c2c21;color:#bed2c4;border-radius:6px;padding:4px 8px;font-size:10px;line-height:1.5;overflow-wrap:anywhere;max-width:100%}
-.catalog-card-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:auto}.catalog-card-footer>span{font-size:10px;color:var(--muted)}.catalog-local{margin-top:24px;border-top:1px solid var(--line);padding-top:10px}
-.variant-dialog{color:#dce5df;background:#152019;border:1px solid #496451;border-radius:14px;padding:0;width:min(760px,calc(100vw - 32px));max-width:none;max-height:min(90dvh,960px);overflow:hidden;box-shadow:0 30px 120px #0009}
-.variant-dialog[open]{display:flex;flex-direction:column}.variant-dialog::backdrop{background:#020906c9;backdrop-filter:blur(6px)}
-.variant-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:24px 26px 20px;border-bottom:1px solid var(--line);flex-shrink:0}.variant-header>div:first-child{min-width:0}.variant-header h2{font-size:23px;margin:10px 0 6px;letter-spacing:-.5px}.variant-header p{margin:0;overflow-wrap:anywhere;font-size:12px}.variant-header-actions{display:flex;gap:8px;flex-shrink:0}.variant-header-actions .icon-button{padding:7px;background:transparent}
-.variant-body{overflow-y:auto;overscroll-behavior:contain;padding:22px 26px;min-height:0}.variant-revision{display:flex;align-items:center;gap:12px;color:var(--muted)}.variant-revision select{margin:0;width:auto;max-width:75%;padding:7px;font-size:11px}
-.variant-loading{display:flex;align-items:center;justify-content:center;gap:12px;min-height:180px;color:var(--muted);font-size:13px}.variant-loading svg{animation:catalog-spin 1.5s linear infinite}@keyframes catalog-spin{to{transform:rotate(360deg)}}
-.variant-field{margin:0 0 22px;padding:0;border:0}.variant-field legend{font-size:12px;font-weight:600;color:#dce5df;margin-bottom:12px}.variant-options{display:flex;flex-wrap:wrap;gap:8px}.variant-chip{min-width:63px;min-height:36px;padding:8px 12px;border-radius:7px;font-size:11px;background:#18271d}.variant-chip:hover:not(:disabled):not(.chosen){background:#1d2d23;border-color:#58745f}.variant-chip.chosen{background:#294a33;color:#c3f8d3;border-color:#94d9aa}.variant-chip:disabled{opacity:1;color:#59675e;background:#131d17;border-color:#26332b}.variant-chip:disabled:hover{background:#131d17;border-color:#26332b}.variant-chip.chosen:disabled{color:#a4cbb0;background:#243e2c}.variant-chip:focus-visible{outline:2px solid var(--mint);outline-offset:3px}
-.variant-summary{background:#0f1912;border:1px solid #354a3b;border-radius:9px;padding:17px;margin-top:4px}.variant-summary .eyebrow{font-size:8px}.variant-summary h3{overflow-wrap:anywhere;font-size:13px;margin-top:10px}.variant-summary p{margin-bottom:0;font-size:12px}.variant-commit{font-family:monospace;font-size:10px!important;overflow-wrap:anywhere;color:#7c9686}.variant-summary details{margin-bottom:0}.variant-summary ul{padding:0;list-style:none;font-size:10px}.variant-summary li{display:flex;gap:12px;padding:7px 0;justify-content:space-between;align-items:baseline}.variant-summary li code{overflow-wrap:anywhere;min-width:0}.variant-summary li span{white-space:nowrap;color:var(--muted)}
-.variant-footer{display:flex;justify-content:flex-end;align-items:center;gap:10px;padding:17px 26px;border-top:1px solid var(--line);background:#17251b;flex-shrink:0}.variant-footer>span{margin-right:auto;font-size:11px;color:var(--muted)}.variant-related{margin-bottom:0}.variant-related-item{display:block;white-space:normal;overflow-wrap:anywhere;text-align:left;width:100%;margin-top:8px;background:transparent}
-@media(max-width:600px){.variant-dialog{width:calc(100vw - 16px);max-height:calc(100dvh - 16px);border-radius:10px}.variant-header{padding:18px 16px;gap:8px}.variant-header h2{font-size:21px}.variant-header-actions{gap:4px}.variant-body{padding:18px 16px}.variant-footer{padding:14px 16px;flex-wrap:wrap}.variant-chip{min-width:56px;padding:8px 10px}.variant-summary li{flex-wrap:wrap;gap:4px}}
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 14px;
+}
+.catalog-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.catalog-local {
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.variant-revision {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted-foreground);
+}
+.variant-revision select {
+  max-width: 100%;
+}
+.variant-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 180px;
+  color: var(--muted-foreground);
+}
+.variant-field {
+  margin-bottom: 22px;
+}
+.variant-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.variant-summary {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 17px;
+  margin-top: 4px;
+}
+.variant-summary .eyebrow {
+  font-size: 10px;
+}
+.variant-summary h3 {
+  overflow-wrap: anywhere;
+  margin: 10px 0;
+}
+.variant-summary p {
+  margin-bottom: 0;
+  font-size: 12px;
+}
+.variant-commit {
+  font-family: monospace;
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+}
+.variant-summary ul {
+  padding: 0;
+  list-style: none;
+  font-size: 10px;
+}
+.variant-summary li {
+  display: flex;
+  gap: 12px;
+  padding: 7px 0;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.variant-summary li code {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.variant-summary li span {
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+.variant-related-item {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  width: 100%;
+  margin-top: 8px;
+  height: auto;
+}

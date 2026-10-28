@@ -25,7 +25,7 @@ async page => {
   await page.goto('http://127.0.0.1:8037/#/models/installed');
   await page.reload();
   await page.getByText('2 installed variants',{exact:true}).waitFor();
-  assert(await page.locator('.catalog-card').count()===1,'Known repository variants should share a card');
+  assert(await page.locator('.catalog-grid > [data-slot="card"]').count()===1,'Known repository variants should share a card');
   await page.getByLabel('Filter model capability').selectOption('audio');
   await page.getByText('No matching models',{exact:true}).waitFor();
   await page.getByLabel('Filter model capability').selectOption('reasoning');
@@ -45,7 +45,7 @@ async page => {
   await page.setViewportSize({width:390,height:844});
   await dialog.locator('.capabilities-panel').scrollIntoViewIfNeeded();
   assert(await dialog.locator('.capabilities-panel').evaluate(el=>el.getBoundingClientRect().height)<480,'Mobile capability section needs too much scrolling');
-  assert(await dialog.locator('.capabilities-panel button.capability-chip').first().evaluate(el=>el.getBoundingClientRect().height)>=44,'Mobile chips need touch-sized targets');
+  assert(await dialog.locator('.capabilities-panel [data-slot="toggle-group-item"]').first().evaluate(el=>el.getBoundingClientRect().height)>=44,'Mobile chips need touch-sized targets');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile editor horizontal overflow');
   await page.screenshot({path:'/tmp/opencode/menagerie-repair-editor-mobile.png'});
   await dialog.getByRole('button',{name:'Save deployment',exact:true}).click();
@@ -92,14 +92,13 @@ async page => {
   await page.waitForURL('**/deployments/saved');
   await page.getByRole('button',{name:'Edit',exact:true}).click();
   await dialog.getByRole('group',{name:'Input capabilities',exact:true}).getByRole('button',{name:'Tools',exact:true}).click();
-  let warned=false;
-  page.once('dialog',async prompt=>{warned=prompt.type()==='confirm'; await prompt.dismiss();});
   await dialog.getByRole('button',{name:'Close dialog',exact:true}).click();
-  assert(warned,'Chip-only edits must trigger unsaved-change protection');
+  await page.getByRole('alertdialog').getByRole('heading',{name:'Discard unsaved changes?'}).waitFor();
+  await page.getByRole('alertdialog').getByRole('button',{name:'Keep editing'}).click();
   assert(await dialog.isVisible(),'Dismissing discard confirmation must keep the editor open');
-  await dialog.locator('summary[aria-label="More deployment actions"]').click();
-  assert(await dialog.getByRole('button',{name:'Remove',exact:true}).isVisible(),'Remove should be accessible from the secondary menu');
-  await dialog.locator('summary[aria-label="More deployment actions"]').click();
+  await dialog.getByRole('button',{name:'More deployment actions'}).click();
+  await page.getByRole('menuitem',{name:'Remove',exact:true}).waitFor();
+  await page.keyboard.press('Escape');
   await dialog.getByRole('button',{name:'Save',exact:true}).click();
   await dialog.waitFor({state:'hidden'});
   assert(!errors.length,errors.join('\n'));
