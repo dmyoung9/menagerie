@@ -45,6 +45,7 @@ test('dialogs trap and restore focus; menus use keyboard navigation and fit the 
   await trigger.click();
   await menu.getByRole('menuitem', {name: 'Edit', exact: true}).click();
   await expect(dialog).toBeVisible();
+  await expect.poll(() => fixture.writes.some(w => w.path === '/api/resources/preview')).toBe(true);
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
@@ -54,7 +55,9 @@ test('dialogs trap and restore focus; menus use keyboard navigation and fit the 
   expect(page.url()).toContain('/idle/configuration');
   await page.goBack();
   await expect(page.getByRole('button', {name: 'Overview', exact: true})).toHaveAttribute('aria-pressed', 'true');
-  expect(fixture.writes).toEqual([]);
+  // A slower runner can finish the editor's debounced read-only POST preview
+  // before Escape. Navigation must not cause any persistent mutation.
+  expect(fixture.writes.filter(w => w.path !== '/api/resources/preview')).toEqual([]);
 });
 
 test('unsaved editor dismissal is accessible and busy submissions cannot be dismissed', async ({page, fixture}) => {
