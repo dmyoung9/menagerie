@@ -19,6 +19,23 @@ import psutil
 from scripts.check_support import isolated_environment
 
 
+def require_disposable_account():
+    import winreg
+
+    key = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{B420E046-AF92-4534-B165-059AD27C3E42}_is1"
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+            try:
+                existing = winreg.OpenKey(hive, key, 0, winreg.KEY_READ | view)
+            except FileNotFoundError:
+                continue
+            else:
+                existing.Close()
+                raise RuntimeError(
+                    "An existing Menagerie installation is registered. Use a fresh disposable Windows account; this check will not replace it."
+                )
+
+
 def free_port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -28,6 +45,7 @@ def free_port():
 def check(installer, worker, baseline=None):
     if os.name != "nt":
         raise RuntimeError("This check requires native Windows")
+    require_disposable_account()
     with tempfile.TemporaryDirectory(
         prefix="menagerie-windows-", ignore_cleanup_errors=True
     ) as temporary:
@@ -45,6 +63,10 @@ def check(installer, worker, baseline=None):
 
         def execute(argv, success=True):
             started = time.time()
+            offsets = {
+                log: log.stat().st_size if log.exists() else 0
+                for log in (state / "daemon.log", state / "launcher.log")
+            }
             result = subprocess.run(
                 [str(a) for a in argv],
                 cwd=root,
@@ -71,19 +93,15 @@ def check(installer, worker, baseline=None):
             if success:
                 if result.returncode:
                     categories = []
-                    for log in (state / "daemon.log", state / "launcher.log"):
+                    for log, offset in offsets.items():
                         if log.is_file():
-                            text = log.read_text(encoding="utf-8", errors="replace")[
-                                -8192:
-                            ]
-                            categories.extend(
-                                re.findall(
-                                    r"(?:ModuleNotFoundError: No module named '[\w.]+'|[A-Za-z]+Error:)",
-                                    text,
-                                )
+                            text = log.read_bytes()[offset:][-8192:].decode(
+                                "utf-8", errors="replace"
                             )
                             for line in text.splitlines():
-                                if line.startswith("Menagerie:"):
+                                if line.startswith("Menagerie:") or re.match(
+                                    r"^[A-Za-z]+Error:", line
+                                ):
                                     categories.append(
                                         re.sub(
                                             r"[A-Za-z]:[\\/][^\r\n]+",
