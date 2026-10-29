@@ -24,6 +24,7 @@ parser.add_argument("--no-ui", action="store_true")
 parser.add_argument("--metrics", action="store_true")
 parser.add_argument("--fail", action="store_true")
 parser.add_argument("--spawn-child", action="store_true")
+parser.add_argument("--gpu-layers", type=int, default=0)
 args = parser.parse_args()
 if args.fail:
     raise SystemExit(42)

@@ -184,6 +184,9 @@ def check(installer, worker, baseline=None):
             ]
             assert all(p.wait(timeout=60) == 0 for p in duplicates)
             assert request("/api/status")["instance_id"] == first
+            retained_engine = state / "engines/retained-fixture/keep.bin"
+            retained_engine.parent.mkdir(parents=True)
+            retained_engine.write_bytes(b"synthetic retained engine data")
             html = request("/").decode()
             asset = re.search(r'src="(/assets/[^\"]+\.js)"', html)
             assert asset and len(request(asset[1])) > 100
@@ -220,7 +223,7 @@ def check(installer, worker, baseline=None):
                     "name": "Synthetic fixture",
                     "artifact_id": artifact["id"],
                     "runtime_id": runtime["id"],
-                    "config": {},
+                    "config": {"gpu-layers": 0},
                     "raw_args": ["--spawn-child"],
                 },
             )
@@ -238,11 +241,22 @@ def check(installer, worker, baseline=None):
             )
             ident = deployment["id"]
             validation = request(f"/api/serving-deployments/{ident}/validate", {})
-            request(
+            assert not validation["errors"], "Synthetic CPU worker plan was rejected"
+            loading = request(
                 f"/api/serving-deployments/{ident}/start",
                 {"plan_token": validation["plan_token"], "override": True},
             )
             for _ in range(100):
+                loading_state = next(
+                    j for j in request("/api/registry/jobs") if j["id"] == loading["id"]
+                )
+                if loading_state["state"] == "FAILED":
+                    detail = re.sub(
+                        r"[A-Za-z]:[\\/][^\r\n]+",
+                        "[path withheld]",
+                        loading_state.get("error", ""),
+                    )[:300]
+                    raise AssertionError(f"Synthetic worker launch failed: {detail}")
                 rows = request("/api/status")["deployments"]
                 row = next(d for d in rows if d["id"] == ident)
                 if row["state"] == "READY":
@@ -320,6 +334,7 @@ def check(installer, worker, baseline=None):
             )
             installed = False
             assert (state / "registry.sqlite3").is_file()
+            assert retained_engine.read_bytes() == b"synthetic retained engine data"
             assert hashlib.sha256(model.read_bytes()).hexdigest() == before
             install(installer)
             installed = True

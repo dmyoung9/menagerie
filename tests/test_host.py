@@ -109,7 +109,9 @@ def test_windows_loader_failure_message():
 async def test_owned_tree_cleanup_and_stale_identity(tmp_path):
     script = tmp_path / "tree.py"
     script.write_text(
-        "import subprocess,sys,time\n"
+        "import subprocess,sys,time,signal\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "if hasattr(signal, 'SIGBREAK'): signal.signal(signal.SIGBREAK, signal.SIG_IGN)\n"
         "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(90)'])\n"
         "print(p.pid,flush=True)\ntime.sleep(90)\n",
         encoding="utf-8",
