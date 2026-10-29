@@ -1,11 +1,13 @@
 """Download-and-launch entrypoint. No model lifecycle outside the daemon."""
 
 import argparse
+import http.client
 import json
 import os
 import subprocess
 import sys
 import time
+import urllib.error
 import webbrowser
 from pathlib import Path
 
@@ -67,7 +69,15 @@ def run(action="open", state=None, port=8017, gateway_port=8001, browser=True):
                 probe.close()
                 return
             saved = json.loads((root / "instance.json").read_text(encoding="utf-8"))
-            client.request("/api/daemon/shutdown", {})
+            try:
+                client.request("/api/daemon/shutdown", {})
+            except urllib.error.HTTPError:
+                raise
+            except (OSError, http.client.HTTPException):
+                # A Windows socket may close during shutdown before its final
+                # acknowledgement. Success still requires verified process exit
+                # and release of the state lock below; never kill on this path.
+                pass
             try:
                 daemon = psutil.Process(saved["pid"])
                 if abs(daemon.create_time() - saved["pid_started"]) < 0.01:
@@ -158,8 +168,7 @@ def main():
             "--gateway-port",
             str(args.gateway_port),
         ]
-        cli()
-        return
+        raise SystemExit(cli())
     try:
         run(args.action, args.state, args.port, args.gateway_port, not args.no_browser)
     except Exception as exc:

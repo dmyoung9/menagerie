@@ -82,6 +82,15 @@ def check(installer, worker, baseline=None):
                                     text,
                                 )
                             )
+                            for line in text.splitlines():
+                                if line.startswith("Menagerie:"):
+                                    categories.append(
+                                        re.sub(
+                                            r"[A-Za-z]:[\\/][^\r\n]+",
+                                            "[path withheld]",
+                                            line,
+                                        )[:300]
+                                    )
                     raise AssertionError(
                         f"Installed command failed ({result.returncode}); categories: {categories[-5:]}; raw diagnostics withheld"
                     )
@@ -141,6 +150,9 @@ def check(installer, worker, baseline=None):
             install(baseline or installer)
             old_build = (app / "build.json").read_bytes()
             installed = True
+            assert (
+                b"Menagerie" in execute([app / "menagerie-cli.exe", "--version"]).stdout
+            )
             # A bound unrelated listener must not be reused or killed.
             with socket.socket() as occupied:
                 occupied.bind(("127.0.0.1", gateway))

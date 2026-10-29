@@ -16,6 +16,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from . import adapters, deployment_sets, host, lifecycle
 from .catalog import apply_reasoning, export_config, normalize
@@ -239,8 +240,15 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         if callback is None:
             raise HTTPException(409, "This server does not support launcher shutdown")
         manager.stopping = True
-        callback()
-        return {"stopping": True}
+
+        async def after_response():
+            # Let Windows flush the response before Uvicorn closes listeners.
+            await asyncio.sleep(0.1)
+            callback()
+
+        return JSONResponse(
+            {"stopping": True}, background=BackgroundTask(after_response)
+        )
 
     @app.get("/health")
     async def health():
