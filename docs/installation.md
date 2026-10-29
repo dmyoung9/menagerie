@@ -21,6 +21,8 @@ bash install.sh
 ```
 
 The installer downloads the versioned wheel and verifies its published checksum.
+Starting with 2.1, release installation also verifies and applies the matching
+locked dependency constraints; local-wheel installs can pass `--constraints PATH`.
 Checksums detect corruption, not publisher identity. Internet is required for
 managed Python, dependencies, engines, and model downloads. Never supply personal
 repository credentials to an installer.
@@ -33,7 +35,7 @@ the dashboard. For unattended use, `--yes` skips prompts; optional actions requi
 To install a downloaded wheel:
 
 ```sh
-bash install.sh --wheel ./menagerie-2.0.0-py3-none-any.whl
+bash install.sh --wheel ./menagerie-2.1.0-py3-none-any.whl --constraints ./menagerie-2.1.0-requirements.txt
 ```
 
 Release downloads must be publicly accessible. A 404 can mean unavailable assets;

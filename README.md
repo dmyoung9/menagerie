@@ -65,6 +65,9 @@ capabilities without replacing unrelated client configuration. See
 
 ## Operations and support
 
+For a persistent container deployment, see [Unraid and containers](docs/unraid.md).
+The initial image is Linux x86_64; target-host hardware acceptance is separate.
+
 `menagerie doctor`, `status`, `backup`, and `--help` provide diagnostics and
 operations. Re-running the installer upgrades in place and retains the previous
 release; `bash install.sh --rollback` switches back to it. Engine updates install

@@ -16,7 +16,8 @@ that a particular host, engine, or release has passed them.
 5. If installer code changed, run the opt-in container check with explicit local
    baseline and candidate artifacts; see [testing](testing.md).
 
-CI checks and uploads build artifacts; it does not publish releases. Old local
+Ordinary branch/PR CI checks and uploads build artifacts; explicitly pushed version
+tags invoke the gated [release workflow](releasing.md). Old local
 builds, uploaded CI artifacts, and distributed archives do not change when source
 files are corrected. Rebuild candidates and review existing copies separately.
 

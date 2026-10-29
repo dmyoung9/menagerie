@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Container version="2">
+  <Name>menagerie</Name>
+  <Repository>ghcr.io/dmyoung9/menagerie:2.1.0</Repository>
+  <Registry>https://github.com/dmyoung9/menagerie/pkgs/container/menagerie</Registry>
+  <Network>host</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/dmyoung9/menagerie/issues</Support>
+  <Project>https://github.com/dmyoung9/menagerie</Project>
+  <Overview>Local model management and inference. Set the dashboard address to this server's trusted private IPv4 address. The dashboard has no login or TLS. Inference remains loopback-only; host-network clients can use the local gateway. Persistent models, engines and configuration belong in /data. CPU works without GPU passthrough. NVIDIA acceleration requires the host NVIDIA driver/container integration and explicit GPU passthrough. This version is privately distributed; registry access is required. Actual Unraid hardware acceptance is pending.</Overview>
+  <Category>Tools:</Category>
+  <WebUI>http://[IP]:8017/</WebUI>
+  <ExtraParams>--user=99:100 --cap-drop=ALL --security-opt=no-new-privileges</ExtraParams>
+  <Config Name="Persistent application data" Target="/data" Default="/mnt/user/appdata/menagerie" Mode="rw" Description="Configuration, downloaded models, engines and cache. Must be writable by UID 99 / GID 100. Existing external model libraries can be mapped read-only separately." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Dashboard private IPv4 address" Target="MENAGERIE_DASHBOARD_ADDRESS" Default="" Mode="" Description="Enter this server's private LAN IPv4 address. Trusted LAN administration only; no login or TLS. Leaving empty binds only loopback." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="NVIDIA driver capabilities" Target="NVIDIA_DRIVER_CAPABILITIES" Default="compute,utility" Mode="" Description="Used only with NVIDIA GPU passthrough. Includes nvidia-smi telemetry when supplied by the host runtime." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+</Container>

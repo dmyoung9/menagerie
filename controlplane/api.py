@@ -30,6 +30,7 @@ from .schema import (
     Settings,
 )
 from .store import Store, encode, identity, uid
+from .version import VERSION
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -64,7 +65,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         yield
         await manager.close()
 
-    app = FastAPI(title="Menagerie Control Plane", version="2.0.0", lifespan=lifespan)
+    app = FastAPI(title="Menagerie Control Plane", version=VERSION, lifespan=lifespan)
     app.state.manager, app.state.store = manager, store
 
     def deployment_rows():
@@ -205,7 +206,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.get("/api/status")
     async def status():
         return {
-            "version": "2.0.0",
+            "version": VERSION,
             "csrf_token": csrf,
             "host": manager.host,
             "deployments": [
