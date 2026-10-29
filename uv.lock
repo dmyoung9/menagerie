@@ -256,7 +256,7 @@ wheels = [
 
 [[package]]
 name = "menagerie"
-version = "2.1.2"
+version = "2.1.3"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
