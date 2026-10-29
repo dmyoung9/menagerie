@@ -83,11 +83,9 @@ begin
       SuppressibleMsgBox('Data removal requires /CONFIRMDATAREMOVAL=1. No data was removed.', mbError, MB_OK, IDOK);
     Exit;
   end;
-  Form := CreateCustomForm();
+  Form := CreateCustomForm(600, 448, True, True);
   try
     Form.Caption := 'Menagerie data removal';
-    Form.ClientWidth := ScaleX(600);
-    Form.ClientHeight := ScaleY(448);
     Form.Position := poScreenCenter;
     Description := TNewStaticText.Create(Form);
     Description.Parent := Form;

@@ -119,7 +119,7 @@ in [releasing](releasing.md). Container deployment is documented in [Unraid](unr
 
 ## Native Windows packaging (contributors)
 
-Build on Windows x64, with Node 22+, uv/Python 3.12, and Inno Setup 6 available.
+Build on Windows x64, with Node 22+, uv/Python 3.12, and Inno Setup 6.6+ available.
 `uv build` produces the wheel with dashboard/plugin assets. Install that wheel and
 the locked `windows-build` dependency group in an external packaging environment,
 then run `scripts/build_windows.py` with that environment's Python. The script
