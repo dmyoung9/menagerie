@@ -46,6 +46,8 @@ def instance(root):
 
 def run(action="open", state=None, port=8017, gateway_port=8001, browser=True):
     root = state_path(state)
+    if action == "stop" and not root.exists():
+        return
     root.mkdir(parents=True, exist_ok=True)
     # Serialize open/stop/upgrade actions, including their readiness wait.
     deadline = time.monotonic() + 45

@@ -23,6 +23,10 @@ must not silently use external services.
   and verifies launch, duplicate starts, occupied ports, dashboard assets, fake
   inference/streaming, clean tree shutdown, upgrade and retained state. It is not
   a clean Windows 11 or GPU acceptance claim.
+- Optional uninstaller cleanup is tested with synthetic data only: independent
+  categories/all, explicit confirmation, default retention, interactive Cancel,
+  external-file retention, busy-state refusal and directory-link/junction guards.
+  Never exercise those options against a daily-driver installation for a test.
 
 Run commands from [development](development.md). Screenshots/traces from the
 maintained browser suite contain fixtures only and stay under ignored

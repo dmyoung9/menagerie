@@ -76,8 +76,34 @@ process. Configuration, existing managed engines, and model references remain
 outside the application directory. Back up state before updating; retain the
 previous installer for recovery. Automatic rollback is not provided.
 
-Remove Menagerie through Windows **Installed apps**. Removal stops the default
-instance and removes application files and shortcuts, but **retains user data and
-model files**. Reinstalling in the same account reuses retained state. Instances
-started with custom state overrides must be stopped using those overrides first.
-Do not manually delete the state directory as an uninstall step.
+Remove Menagerie through Windows **Installed apps**. Application files and
+shortcuts are removed. The data-removal dialog offers five independent options,
+**all unchecked by default**:
+
+| Option | Removed only when selected |
+| --- | --- |
+| Settings/history | Registry, saved model/engine references, history, registry backups and the generated client export in the state directory |
+| Managed engines | Menagerie engine installations and source-build installations in `engines` and `runtimes` |
+| Downloaded models | Only Menagerie's `models\hf` download cache, not imported files in other locations |
+| Application caches | Runtime/application files under `cache`, separate from Menagerie's model downloads |
+| Logs | Known application logs and each deployment's runtime log files |
+
+Leave everything unchecked to retain existing data for reinstallation. Selected
+files are **permanently deleted**, not moved to the Recycle Bin. Deleting settings
+loses saved references even if the model/engine files remain. Conversely, deleting
+files while keeping settings leaves missing-file references that you must repair
+by reinstalling/re-registering the relevant engine or model.
+
+The dialog shows the affected state directory. The `MENAGERIE_STATE` environment
+override is honored for that uninstall process; other custom `--state` directories
+are not searched. Stop custom instances using their overrides before uninstalling.
+The helper refuses cleanup while the state is in use or when directory links or
+junctions would redirect deletion. It never follows model/runtime paths from the
+registry into external locations. Unknown files, small ownership/lock files and
+empty directories may remain even when all options are selected.
+
+Cancelling the dialog does not remove data or stop the application. Upgrading
+never selects cleanup options. Silent uninstall also retains all data unless
+specific deletion categories and an additional confirmation are supplied. If
+cleanup fails, application removal can continue with some data retained; review
+the private report named in the error dialog before closing the uninstaller.

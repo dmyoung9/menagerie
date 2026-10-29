@@ -4,18 +4,15 @@ import os
 from pathlib import Path
 
 
-def state_path(value=None):
+def state_path(value=None, *, resolve=True):
     default = (
         Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
         / "Menagerie"
         if os.name == "nt"
         else Path.home() / ".local/state/menagerie"
     )
-    return (
-        Path(value or os.environ.get("MENAGERIE_STATE") or default)
-        .expanduser()
-        .resolve()
-    )
+    path = Path(value or os.environ.get("MENAGERIE_STATE") or default).expanduser()
+    return path.resolve() if resolve else path.absolute()
 
 
 def lock_file(path):
