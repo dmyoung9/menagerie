@@ -106,7 +106,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: uv sync --locked --no-install-project --group windows-build
       - name: Native host and fake-subprocess checks
-        run: uv run --no-sync python -m pytest -q tests/test_host.py tests/test_windows_engines.py tests/test_windows_launcher.py
+        run: uv run --no-sync python -m pytest -q tests/test_host.py tests/test_windows_engines.py tests/test_windows_launcher.py tests/test_uninstall.py
       - run: uv build
       - name: Inspect wheel and corresponding source
         shell: pwsh

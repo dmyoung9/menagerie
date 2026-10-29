@@ -119,7 +119,7 @@ in [releasing](releasing.md). Container deployment is documented in [Unraid](unr
 
 ## Native Windows packaging (contributors)
 
-Build on Windows x64, with Node 22+, uv/Python 3.12, and Inno Setup 6 available.
+Build on Windows x64, with Node 22+, uv/Python 3.12, and Inno Setup 6.6+ available.
 `uv build` produces the wheel with dashboard/plugin assets. Install that wheel and
 the locked `windows-build` dependency group in an external packaging environment,
 then run `scripts/build_windows.py` with that environment's Python. The script
@@ -139,3 +139,27 @@ compatibility with a historical Windows release. For a real baseline use
 local inputs. The worker is a frozen `tests/fake_runtime.py`, never an inference
 engine. Run this only in a disposable Windows test account: installer checks create
 Start Menu/uninstall entries before cleaning them up.
+
+### Optional uninstaller data removal
+
+Inno Setup collects independent choices and invokes the bundled CLI only after
+final uninstall confirmation, before application executables are removed. The
+offline `remove-data` helper requires explicit categories and `--confirm`, verifies
+state ownership, holds both launcher/daemon locks, preflights all selected paths,
+and never obtains deletion targets from registry model/runtime records. Settings
+are removed last, so an earlier file-removal failure retains recovery metadata.
+
+Silent uninstaller flags are `/REMOVESETTINGS=1`, `/REMOVEENGINES=1`,
+`/REMOVEMODELS=1`, `/REMOVECACHE=1` and `/REMOVELOGS=1`. Any such selection also
+requires `/CONFIRMDATAREMOVAL=1`. Without those flags, silent uninstall retains
+data. The CLI equivalent is `menagerie-cli.exe remove-data --state PATH --remove
+CATEGORY --confirm`; repeat `--remove` for multiple categories. Valid categories
+are `settings`, `engines`, `models`, `cache` and `logs`. Do not run these commands
+against personal state as a verification shortcut.
+
+Native installed checks verify unchecked interactive defaults/cancellation,
+silent confirmation, each category and all categories together, retained external
+models/unknown files, and refusal to follow a synthetic Windows junction. Unit
+tests use isolated synthetic registries and cover consent, lock exclusion,
+link handling, partial-failure recovery and category isolation. No real user data
+is removed in ordinary verification.

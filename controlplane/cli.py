@@ -1,6 +1,7 @@
 """Menagerie command line. The daemon owns all model lifecycle operations."""
 
 import argparse
+import contextlib
 import json
 import math
 import os
@@ -167,6 +168,25 @@ def parser():
         help="OpenCode config directory (default: OPENCODE_CONFIG_DIR or XDG_CONFIG_HOME/opencode)",
     )
     plugin.add_argument("--gateway-port", type=int, default=8001)
+    cleanup = commands.add_parser(
+        "remove-data",
+        parents=[common],
+        help="Irreversibly remove selected application data; stop the daemon first",
+    )
+    cleanup.add_argument(
+        "--remove",
+        action="append",
+        choices=("engines", "models", "cache", "logs", "settings"),
+        required=True,
+    )
+    cleanup.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Confirm irreversible deletion of the selected categories",
+    )
+    cleanup.add_argument(
+        "--report", type=Path, help="Write a private cleanup result/error report"
+    )
     return p
 
 
@@ -181,6 +201,14 @@ def main(argv=None):
         p.error("port must be 1..65535 and timeout must be positive")
     code = 0
     try:
+        if args.action == "remove-data":
+            from .uninstall import remove_data
+
+            result = remove_data(args.state, args.remove, confirm=args.confirm)
+            if args.report:
+                args.report.write_text(json.dumps(result, indent=2), encoding="utf-8")
+            print(json.dumps(result, indent=2))
+            return 0
         if args.action == "serve":
             import asyncio
 
@@ -242,6 +270,9 @@ def main(argv=None):
             message = f"HTTP {exc.code}: {detail}"
         else:
             message = str(exc)
+        if args.action == "remove-data" and args.report:
+            with contextlib.suppress(OSError):
+                args.report.write_text(message, encoding="utf-8")
         if args.json:
             print(json.dumps({"error": message}), file=sys.stderr)
         else:

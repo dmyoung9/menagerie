@@ -349,6 +349,11 @@ def check(installer, worker, baseline=None):
                 for m in request("/api/models")
             )
             execute(launch("stop"))
+            from scripts.windows_uninstall_checks import check_removal_options
+
+            check_removal_options(
+                app, state, root, env, lambda: install(installer), execute
+            )
             print(
                 "PASS: native installer, isolated launch/duplicate/conflict, bundled dashboard, fake inference/streaming, process tree shutdown, restart/upgrade/uninstall/reinstall preservation"
             )
