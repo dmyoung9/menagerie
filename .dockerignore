@@ -1,0 +1,8 @@
+**
+!dist/
+!dist/*.whl
+!dist/menagerie-*-requirements.txt
+!dist/menagerie-*.tar.gz
+!deploy/
+!deploy/entrypoint.sh
+!LICENSE

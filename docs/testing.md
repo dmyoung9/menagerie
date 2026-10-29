@@ -33,6 +33,7 @@ These are not ordinary test-suite prerequisites and are never run implicitly:
 | --- | --- |
 | `python -m scripts.check_opencode` | Installed OpenCode V2; temporary config and fake loopback catalog; no inference. SDK dependency resolution may need internet. |
 | `bash scripts/check_linux_install.sh BASELINE_WHEEL CANDIDATE_WHEEL` | Docker and network downloads into a disposable container; no host install, repository authentication, GPU, or inference. Baseline and candidate must have different content. |
+| `python -m scripts.check_container IMAGE` | Explicit locally built Docker image; disposable network/volume and synthetic state; verifies non-root operation, restart/replacement, shutdown and network boundaries. No GPU or inference. Also runs in CI. |
 | `python -m scripts.smoke_opencode --approve` | Downloads a CPU engine and small model; performs real inference with temporary application/client state. |
 | `python -m scripts.smoke_vllm --approve` | Downloads a GPU runtime/model and uses GPU capacity with temporary state. |
 | `python tests/live_acceptance.py --gateway-port PORT --alias ALIAS --approve` | Targets an existing gateway. Requests may load models and evict eligible deployments under saved policy. Does not edit configuration. |

@@ -5,7 +5,7 @@ umask 077
 
 prefix="${XDG_DATA_HOME:-$HOME/.local/share}/menagerie/app"
 bin_dir="$HOME/.local/bin"
-version=2.0.0
+version=2.1.0
 wheel='' constraints=''
 service=ask plugin=ask open=ask
 unattended=false rollback=false
@@ -14,7 +14,7 @@ usage() {
 Usage: bash install.sh [options]
   --wheel PATH          Install a locally built wheel (before publication)
   --constraints PATH    Use release dependency constraints
-  --version VERSION     Release version (default: 2.0.0)
+  --version VERSION     Release version (default: 2.1.0)
   --prefix PATH         Application directory
   --bin-dir PATH        CLI launcher directory
   --service | --no-service   Enable/start the systemd user service
@@ -40,7 +40,7 @@ while (($#)); do
   esac
 done
 [[ "$(uname -s)" == Linux ]] || { echo 'This installer currently supports Linux.' >&2; exit 1; }
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Use a release version such as 2.0.0.' >&2; exit 2; }
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Use a release version such as 2.1.0.' >&2; exit 2; }
 if [[ -n "$constraints" ]]; then
   [[ -f "$constraints" ]] || { echo 'Dependency constraints file not found.' >&2; exit 1; }
   constraints="$(realpath "$constraints")"
@@ -117,6 +117,17 @@ if [[ -z "$wheel" ]]; then
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid release checksum.' >&2; exit 1; }
   wheel="$work/menagerie-$version-py3-none-any.whl"
   [[ "$(sha256sum "$wheel" | cut -d ' ' -f 1)" == "$digest" ]] || { echo 'Release checksum mismatch.' >&2; exit 1; }
+  if [[ -z "$constraints" ]]; then
+    constraints="$work/menagerie-$version-requirements.txt"
+    requirements_url="${url%/*}/menagerie-$version-requirements.txt"
+    curl -fLSs "$requirements_url" -o "$constraints" || {
+      echo 'Release dependency constraints unavailable; use matching release assets or --wheel with explicit local inputs.' >&2; exit 1;
+    }
+    curl -fLSs "$requirements_url.sha256" -o "$work/requirements.sha256"
+    digest="$(cut -d ' ' -f 1 "$work/requirements.sha256")"
+    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid dependency checksum.' >&2; exit 1; }
+    [[ "$(sha256sum "$constraints" | cut -d ' ' -f 1)" == "$digest" ]] || { echo 'Dependency checksum mismatch.' >&2; exit 1; }
+  fi
 else
   [[ -f "$wheel" ]] || { echo "Wheel not found: $wheel" >&2; exit 1; }
   wheel="$(realpath "$wheel")"

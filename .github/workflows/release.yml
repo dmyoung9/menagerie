@@ -1,0 +1,83 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: menagerie-python-3.12
+          path: dist
+      - name: Confirm tag and preserve private distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, tomllib, urllib.error, urllib.request
+          version=tomllib.load(open('pyproject.toml','rb'))['project']['version']
+          assert os.environ['GITHUB_REF_NAME']=='v'+version, 'Tag/version mismatch'
+          def api(path):
+              request=urllib.request.Request('https://api.github.com/'+path,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              try:
+                  with urllib.request.urlopen(request) as response: return json.load(response)
+              except urllib.error.HTTPError as error:
+                  if error.code==404: return None
+                  raise
+          repo=api('repos/'+os.environ['GITHUB_REPOSITORY'])
+          assert api('repos/'+os.environ['GITHUB_REPOSITORY']+'/releases/tags/'+os.environ['GITHUB_REF_NAME']) is None, 'Release already exists; refusing to overwrite it'
+          owner,name=os.environ['GITHUB_REPOSITORY'].split('/')
+          kind='orgs' if repo['owner']['type']=='Organization' else 'users'
+          package_path=kind+'/'+owner+'/packages/container/'+name
+          package=api(package_path)
+          if package:
+              assert not (repo['private'] and package['visibility']=='public'), 'Refusing to publish private-repository artifacts into a public package'
+              tags=subprocess.check_output(['gh','api',package_path+'/versions?per_page=100','--paginate','--jq','.[] | .metadata.container.tags[]'],text=True).splitlines()
+              assert version not in tags, 'Image version already exists; refusing to overwrite it'
+          with open(os.environ['GITHUB_ENV'],'a') as output:
+              output.write('VERSION='+version+'\nIMAGE=ghcr.io/'+os.environ['GITHUB_REPOSITORY'].lower()+'\nPACKAGE_API='+package_path+'\n')
+          PY
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@v6
+        id: image
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            REVISION=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:latest
+      - name: Publish matching release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true ]; then
+            test "$(gh api "$PACKAGE_API" --jq .visibility)" = private
+          fi
+          printf '%s@%s\n' "$IMAGE" "$IMAGE_DIGEST" > dist/container-image.txt
+          sha256sum dist/container-image.txt | sed 's|dist/||' >> dist/SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Menagerie $GITHUB_REF_NAME" --notes-file "docs/releases/$VERSION.md" dist/menagerie-* dist/install.sh dist/install.sh.sha256 dist/SHA256SUMS dist/container-image.txt
+          gh release edit "$GITHUB_REF_NAME" --draft=false

@@ -904,17 +904,15 @@ class Manager:
                             if d.get("runtime_pid")
                             else "native process tree"
                         )
-                        data["gpu_mib"] = sum(
-                            p["gpu_mib"] or 0
-                            for p in self.host["processes"]
-                            if p["pid"] in data["pids"]
+                        data["gpu_mib"] = telemetry.gpu_process_usage(
+                            self.host, data["pids"]
                         )
                         self.host.setdefault("deployments", {})[d["id"]] = data
                         if d.get("session_id"):
                             session = self.store.get("session", d["session_id"])
                             session.update(
                                 peak_gpu_mib=max(
-                                    session.get("peak_gpu_mib", 0), data["gpu_mib"]
+                                    session.get("peak_gpu_mib", 0), data["gpu_mib"] or 0
                                 ),
                                 peak_ram_mib=max(
                                     session.get("peak_ram_mib", 0), data["rss_mib"] or 0

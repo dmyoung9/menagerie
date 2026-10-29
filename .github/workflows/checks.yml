@@ -1,7 +1,9 @@
 name: Checks
 on:
   push:
+    branches: ['**']
   pull_request:
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -55,6 +57,13 @@ jobs:
       - run: npm run lint && npm run format:check
         working-directory: plugins/opencode
       - run: uv build
+      - name: Prepare version-aligned release inputs
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            uv run --no-sync python -m scripts.prepare_release --tag "$GITHUB_REF_NAME"
+          else
+            uv run --no-sync python -m scripts.prepare_release
+          fi
       - run: uv run --no-sync python -m scripts.check_distribution dist/*.whl dist/*.tar.gz
       - run: npm test
         working-directory: frontend
@@ -65,3 +74,21 @@ jobs:
         with:
           name: menagerie-python-${{ matrix.python }}
           path: dist/*
+  container:
+    runs-on: ubuntu-latest
+    needs: test-and-package
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: menagerie-python-3.12
+          path: dist
+      - uses: docker/setup-buildx-action@v3
+      - name: Build container from inspected artifacts
+        run: |
+          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          docker build --build-arg VERSION="$version" --build-arg REVISION="$GITHUB_SHA" -f deploy/Dockerfile -t menagerie-check .
+      - run: python -m scripts.check_container menagerie-check --user 99:100

@@ -8,6 +8,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from .version import VERSION
+
 FILES = ("index.ts", "discovery.ts", "package.json")
 MANIFEST = ".menagerie-managed.json"
 
@@ -109,7 +111,7 @@ def manage(operation, directory=None, gateway_port=8001):
             )
             manifest = {
                 "owner": "menagerie",
-                "version": "2.0.0",
+                "version": VERSION,
                 "files": {
                     name: digest(stage / name) for name in (*FILES, "settings.json")
                 },

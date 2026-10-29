@@ -13,6 +13,8 @@ import urllib.request
 from copy import deepcopy
 from pathlib import Path
 
+from .version import VERSION
+
 
 def state_path(value=None):
     return (
@@ -124,7 +126,7 @@ def parser():
     )
     p = argparse.ArgumentParser(description=__doc__, parents=[deepcopy(common)])
     p.set_defaults(port=8017, state=None, timeout=10, json=False)
-    p.add_argument("--version", action="version", version="Menagerie 2.0.0")
+    p.add_argument("--version", action="version", version=f"Menagerie {VERSION}")
     commands = p.add_subparsers(dest="action")
     serve = commands.add_parser(
         "serve", parents=[common], help="Run the daemon in the foreground"

@@ -28,6 +28,9 @@ def sample():
         "gpus": [],
         "processes": [],
         "errors": [],
+        # NVML reports host PIDs, which cannot safely be matched to this image's
+        # isolated PID namespace. Keep global GPU metrics, not false per-model 0s.
+        "gpu_process_attribution": os.environ.get("MENAGERIE_CONTAINER") != "1",
     }
 
     def query(kind, fields):
@@ -76,7 +79,15 @@ def sample():
             )
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         result["errors"].append(str(exc))
+        result["gpu_process_attribution"] = False
     return result
+
+
+def gpu_process_usage(host, pids):
+    if not host.get("gpus") or host.get("gpu_process_attribution") is False:
+        return None
+    values = [p["gpu_mib"] for p in host.get("processes", []) if p["pid"] in pids]
+    return None if any(v is None for v in values) else sum(values)
 
 
 def process_sample(pid):

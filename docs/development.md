@@ -100,7 +100,7 @@ the wheel needs no Node. Create a fresh environment outside the checkout:
 uv build
 check_dir="$(mktemp -d)"
 uv venv "$check_dir/venv"
-uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-2.0.0-py3-none-any.whl
+uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-2.1.0-py3-none-any.whl
 "$check_dir/venv/bin/python" scripts/check_wheel.py
 ```
 
@@ -113,3 +113,6 @@ Check the source archive as well as the wheel. See [testing](testing.md)
 before any installed-client, container, or live-inference check. Backend/plugin
 catalog contracts must remain compatible; a plugin disk update does not reload
 a running client server.
+
+Version alignment, release artifacts and tag-triggered publication are described
+in [releasing](releasing.md). Container deployment is documented in [Unraid](unraid.md).

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "menagerie"
-version = "2.0.0"
+version = "2.1.0"
 description = "Single-host inference control plane"
 requires-python = ">=3.12"
 dependencies = ["fastapi>=0.115", "uvicorn>=0.30", "httpx>=0.28", "psutil>=6", "huggingface-hub>=0.28", "tqdm>=4.66"]
@@ -18,7 +18,7 @@ menagerie = "controlplane.cli:main"
 packages = ["controlplane"]
 
 [tool.hatch.build.targets.sdist]
-include = ["controlplane/", "frontend/src/", "frontend/public/", "frontend/index.html", "frontend/package.json", "frontend/package-lock.json", "frontend/tsconfig.json", "frontend/tsconfig.tests.json", "frontend/eslint.config.js", "frontend/vite.config.ts", "frontend/components.json", "frontend/preset.json", "frontend/playwright.config.ts", "frontend/tests/", "plugins/opencode/*.ts", "plugins/opencode/*.json", "plugins/opencode/eslint.config.js", ".prettierrc.json", ".prettierignore", "scripts/", "install.sh", "hatch_build.py", "README.md", "LICENSE", "uv.lock", "SECURITY.md", "AGENTS.md", "docs/", "tests/", "smoke_*.js", "menagerie.service"]
+include = ["controlplane/", "frontend/src/", "frontend/public/", "frontend/index.html", "frontend/package.json", "frontend/package-lock.json", "frontend/tsconfig.json", "frontend/tsconfig.tests.json", "frontend/eslint.config.js", "frontend/vite.config.ts", "frontend/components.json", "frontend/preset.json", "frontend/playwright.config.ts", "frontend/tests/", "plugins/opencode/*.ts", "plugins/opencode/*.json", "plugins/opencode/eslint.config.js", ".prettierrc.json", ".prettierignore", ".dockerignore", ".github/workflows/", "deploy/", "scripts/", "install.sh", "hatch_build.py", "README.md", "LICENSE", "uv.lock", "SECURITY.md", "AGENTS.md", "docs/", "tests/", "smoke_*.js", "menagerie.service"]
 
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
