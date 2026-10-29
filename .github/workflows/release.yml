@@ -84,6 +84,8 @@ jobs:
           printf '%s@%s\n' "$IMAGE" "$IMAGE_DIGEST" > dist/container-image.txt
           sha256sum dist/container-image.txt | sed 's|dist/||' >> dist/SHA256SUMS
           cp dist/windows/* dist/
+          test -s "dist/menagerie-$VERSION-windows-x64-setup.exe"
+          test -s "dist/menagerie-$VERSION-windows-x64-setup.exe.sha256"
           cat dist/windows/*.sha256 >> dist/SHA256SUMS
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Menagerie $GITHUB_REF_NAME" --notes-file "docs/releases/$VERSION.md" dist/menagerie-* dist/install.sh dist/install.sh.sha256 dist/SHA256SUMS dist/container-image.txt
           gh release edit "$GITHUB_REF_NAME" --draft=false
