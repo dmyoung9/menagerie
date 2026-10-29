@@ -151,6 +151,22 @@ def test_failed_file_removal_preserves_registry_for_recovery(tmp_path, monkeypat
     assert (root / "models/hf").exists()
 
 
+@pytest.mark.parametrize("name", ["cache", "engines", "registry-backup-123.sqlite3"])
+def test_unexpected_file_types_reject_entire_plan(tmp_path, name):
+    root = tmp_path / "state"
+    Store(root)
+    unexpected = root / name
+    if name.endswith(".sqlite3"):
+        unexpected.mkdir()
+        (unexpected / "user-data.txt").write_text("unfamiliar data")
+    else:
+        unexpected.write_text("unfamiliar data")
+    with pytest.raises(ValueError, match="unexpected type"):
+        remove_data(root, CATEGORIES, confirm=True)
+    assert unexpected.exists()
+    assert (root / "registry.sqlite3").exists()
+
+
 @pytest.mark.skipif(
     os.name == "nt",
     reason="Windows directory junction coverage lives in installed checks",

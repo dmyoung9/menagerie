@@ -126,6 +126,18 @@ def validate_target(root, path):
                 )
     if not path.exists():
         return
+    directory_targets = {
+        root / name for name in ("engines", "runtimes", "models/hf", "cache")
+    }
+    if path in directory_targets:
+        if not path.is_dir():
+            raise ValueError(
+                "Selected application directory has an unexpected type; nothing was removed"
+            )
+    elif not path.is_file():
+        raise ValueError(
+            "Selected application file has an unexpected type; nothing was removed"
+        )
     if path.is_dir():
         for directory, dirs, files in os.walk(path, followlinks=False):
             for name in dirs + files:
