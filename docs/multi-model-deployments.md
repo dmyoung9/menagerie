@@ -31,7 +31,8 @@ permission belong to the deployment.
 
 For automatic switching in both directions, both deployments must permit eviction,
 have compatible priorities, and not be pinned. On-demand starts are admitted against
-the reviewed memory estimate; there is no separate uncertainty approval. A start can
+the reviewed memory estimate; uncertain estimates require the saved on-demand
+permission. Manual launch review supplies an explicit override. A start can
 still fail if external memory use changes after admission, and that failure stays
 visible. Group membership does not bypass these safeguards.
 
@@ -61,47 +62,13 @@ the current shared policies. It also requires an unloaded deployment. Membership
 cannot overlap or nest at the runtime-instance level: an instance has one lifecycle
 owner, but its installed model artifact is reusable across deployments.
 
-## Storage and API
+## History and recovery
 
-`deployment` records hold per-model process/history identities. A standalone model
-is a one-member serving deployment. A `deployment_set` record owns member IDs and
-their shared policy.
+Restoring launch history creates an inactive deployment with new aliases and ports
+for review; it does not restart the historical workload automatically. Backups
+retain configuration snapshots, not model weights. See
+[installation and recovery](installation.md#restore-a-registry-backup).
 
-- `GET /api/serving-deployments` and `status.serving_deployments`: unified views.
-- `POST /api/deployment-sets`: create/edit shared policy and `members`, an array of
-  model declarations with `name`, `alias`, `port` and inline `configuration`
-  (`artifact_id`, `runtime_id`, `name`, `config`, `raw_args`, `catalog`). Existing
-  members include their instance `id`; new occurrences omit it. `?expected=REV`
-  guards edits. The older `member_ids` input remains supported for internal callers
-  but cannot be mixed with inline members.
-- `POST /api/serving-deployments/{id}/validate`, `/start`, `/stop`, `/enabled`:
-  whole-deployment control. Starting requires a reviewed plan token.
-- `POST /api/deployment-sets/{id}/dissolve?expected=REV`: separate unloaded members.
-
-Member start/stop operations expand to complete membership; they cannot split
-the deployment. Per-member policy or enabled changes are rejected for owned
-members. Individual model settings can still be revised while the whole deployment
-is unloaded. Launch-review tokens include membership and policy revisions.
-
-Launch-history restoration creates an inactive deployment with new aliases and ports.
-Historical records and backups retain the original snapshots.
-
-## Verification
-
-`tests/test_deployment_sets.py` runs isolated fake runtimes to cover coordinated
-requests, concurrency, idle unload, bidirectional switching, nested requests while
-waiting, launch rollback/restoration, pinned protection and restart, pressure
-eviction, creation, policy ownership, and public API behavior.
-
-`tests/test_multi_configuration.py` verifies independent settings for reused weights,
-atomic rollback, active-state protection, member removal, and separate serving
-lifecycles through fake runtimes. Real repeated-model GPU memory use is not verified.
-
-`smoke_multi_deployments.js` runs against the frontend on `:8038` with all APIs
-intercepted. It covers direct creation, the unified list, member expansion, shared policy,
-combined launch review, aggregate memory, model logs, degraded state, and mobile
-layout. Neither check changes the installed serving registry or runs real inference.
-
-`smoke_multi_configuration.js` additionally covers creation from an empty deployment
-list, the same weights in two deployments, unique aliases/ports, direct member edits,
-and mobile form layout, with all API traffic intercepted.
+Contributors: API and storage invariants are described in
+[development](development.md#serving-deployment-contracts); test requirements are
+in [testing](testing.md).

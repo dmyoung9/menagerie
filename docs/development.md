@@ -1,112 +1,115 @@
-# Development and release checks
+# Contributor guide
+
+For installation and daily use, start with the [README](../README.md).
+This page describes source development; [testing](testing.md) defines isolation
+and opt-in checks, and [release validation](release-validation.md) defines release gates.
 
 ## Architecture
 
-Python/FastAPI, asynchronous HTTP streaming, SQLite WAL, React/TypeScript.
+Menagerie contains a FastAPI daemon (`controlplane/`), a bundled React/Vite
+dashboard (`frontend/`), and an OpenCode discovery plugin (`plugins/opencode/`).
+The CLI is an HTTP client; the daemon owns model lifecycle. `Manager` serializes
+admission and process ownership. `Store` uses SQLite WAL, revision checks, and
+history. Serving deployments own shared loading/eviction policy; model instances
+retain their engine configuration snapshots and stable aliases.
 
-| Module | Responsibility |
-| --- | --- |
-| `controlplane/store.py` | Registry, revisions, sessions, backups |
-| `controlplane/schema.py` | Typed API records and host policy |
-| `controlplane/adapters.py` | Probing, metadata, argv, compatibility |
-| `controlplane/manager.py` | Admission, lifecycle, process identity, recovery |
-| `controlplane/api.py` | CRUD/actions, gateway, SSE, accounting, client integration |
-| `controlplane/jobs.py` | Reviewed builds, pinned downloads, image pulls |
-| `controlplane/catalog.py` | Explicit capability metadata and OpenCode configuration |
-| `controlplane/telemetry.py` | NVIDIA, host/process memory, CPU, swap |
-| `controlplane/cli.py`, `service.py` | Operator CLI and optional user-service registration |
-| `frontend/` | Bundled UI without CDN dependencies |
+Backend API contracts are in `controlplane/schema.py`. Frontend wire decoders
+are in `frontend/src/contracts.ts`; domain types are in `frontend/src/types/`.
+Use the [frontend contributor reference](frontend-design-system.md) when changing
+components, styling, contracts, or accessibility behavior.
 
-## Local checks
+### Serving deployment contracts
+
+`deployment` records retain per-model process/history identities; `deployment_set`
+owns membership and shared policy. Installed model artifacts are reusable; runtime
+instances have a single lifecycle owner.
+
+- `GET /api/serving-deployments` provides the unified serving view.
+- `POST /api/deployment-sets` saves shared policy and inline `members`, with
+  `name`, `alias`, `port`, and `configuration`. Existing members include their
+  instance `id`; new members omit it. `?expected=REV` guards updates.
+- `/api/serving-deployments/{id}/validate`, `/start`, `/stop`, and `/enabled`
+  operate on complete serving units. User starts require the reviewed `plan_token`.
+- `/api/deployment-sets/{id}/dissolve?expected=REV` separates unloaded members.
+
+Member lifecycle actions expand to complete membership. Policy/enablement changes
+on owned members are rejected; settings edits require the whole unit unloaded.
+Review tokens include membership and policy revisions. Preserve atomic rollback,
+independent aliases/ports for reused weights, and inactive history restoration.
+See `tests/test_deployment_sets.py` and `tests/test_multi_configuration.py` for
+fake-runtime regression coverage, not live GPU acceptance.
+
+## Checks
+
+Prerequisites: Python 3.12+, uv, Node.js 22+, npm, and Git. Install dependencies
+through trusted channels. From the repository root:
 
 ```sh
-uv sync --locked
+uv sync --locked --no-install-project
+uv run --no-sync ruff check .
+uv run --no-sync ruff format --check .
 uv run --no-sync python -m pytest -q
-uv build
-uv venv /tmp/opencode/menagerie-wheel-check
-uv pip install --python /tmp/opencode/menagerie-wheel-check/bin/python dist/menagerie-2.0.0-py3-none-any.whl
-/tmp/opencode/menagerie-wheel-check/bin/python scripts/check_wheel.py
 ```
 
-Use a fresh path for the wheel-check environment; don't overwrite an unrelated
-environment. The artifact check runs outside the source checkout with temporary
-state and ephemeral loopback ports. It checks the installed CLI, assets, API,
-catalog export, diagnostics, and graceful shutdown, with no real model runtimes.
-
-For frontend iteration:
+From `frontend/`:
 
 ```sh
-cd frontend
 npm ci
-npm run dev -- --port 8037
+npm run check
+npm run lint
+npm run format:check
+npm run build
+npm test
+npm run test:ui
 ```
 
-Run `npm run build`, `npm test`, and `npm run test:ui` from `frontend/`.
-The automated browser suite starts its own isolated Vite server on :8049 and
-intercepts every API request; it never changes live serving processes. See the
-[design-system guide](frontend-design-system.md) for the exact shadcn preset,
-component ownership, regeneration policy, and desktop/mobile accessibility checks.
-The ad-hoc fixture runners (`smoke_product.js`, forms, capabilities, resources,
-and multi-model flows) can also be run with
-`playwright-cli run-code --filename=/absolute/path/to/smoke_product.js` against
-their documented fixture-server ports.
-`smoke_first_run.js` checks first-response onboarding with missing telemetry,
-streaming, failure/retry and mobile layout on :8037 (intercepts API and gateway).
-For opt-in clean Linux trial installation, build wheel + sdist with `uv build`,
-then run `bash scripts/check_linux_install.sh dist/menagerie-2.0.0-py3-none-any.whl`.
-This uses a disposable Docker container and maintainer `gh` access to release
-assets; it never installs into the host HOME and performs no inference.
-`smoke_controlplane.js` is a read-only installed-dashboard check; do not run it
-against an arbitrary deployment without reviewing its target.
+The browser suite requires Playwright Chromium; provision it separately with
+`npx playwright install chromium`. It starts its own loopback Vite server and
+refuses an occupied port. No installed Menagerie daemon is needed.
 
-The OpenCode plugin has separate SDK/type/behavior checks:
+From `plugins/opencode/`:
 
 ```sh
-cd plugins/opencode
 npm ci --ignore-scripts
 npm run check
+npm run lint
+npm run format:check
 npm test
 ```
 
-With OpenCode V2 installed, run `uv run --no-sync python -m scripts.check_opencode`
-from the repository root for fresh-runtime acceptance. It installs the plugin in
-temporary config, starts an isolated OpenCode server with separate HOME/XDG state,
-and checks discovery against a fake local catalog. No real model request or user
-configuration change is made. CI runs the SDK tests; this runtime check is opt-in.
+Use Ruff/Prettier to format only files changed for the task. The package scripts
+and `.github/workflows/checks.yml` are authoritative for the current check set.
 
-## Support boundaries
+## Dashboard iteration
 
-Linux is the supported installation target. NVIDIA telemetry and native
-Prism/Bonsai serving have historical development-host evidence. Native upstream
-llama.cpp has its own probed adapter identity. vLLM, SGLang, custom templates,
-Docker, and Podman have configuration/specification support; this is **not** a
-claim of live acceptance for every engine, image, model family, or quantization.
-Non-NVIDIA GPU serving and other operating systems are not certified.
+From `frontend/`, run `npm run dev`. Vite has no API proxy. Use the browser
+fixtures for UI-only work; do not point development tests at a personal daemon.
+A checkout daemon serves `frontend/dist/`; build it before expecting the dashboard
+to be available. An installed wheel contains its own dashboard assets.
 
-Automated tests use fake runtimes and intercepted APIs. They cannot prove GPU
-compatibility, thermal behavior, actual memory fit, or inference quality.
+From a checkout use `.venv/bin/menagerie` or `bin/menagerie` rather than an unrelated
+global executable. Starting a daemon against real saved state is an operational
+action, not a test prerequisite. Use temporary state and non-conflicting ports.
 
-Explicit live inference check (never CI):
+## Installed-artifact check
+
+`uv build` builds the frontend and produces a wheel and source archive. Running
+the wheel needs no Node. Create a fresh environment outside the checkout:
 
 ```sh
-uv run --no-sync python tests/live_acceptance.py --alias MODEL_A --alias MODEL_B
+uv build
+check_dir="$(mktemp -d)"
+uv venv "$check_dir/venv"
+uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-2.0.0-py3-none-any.whl
+"$check_dir/venv/bin/python" scripts/check_wheel.py
 ```
 
-This sends real requests and may trigger saved on-demand loading. It never revises
-configuration. It only checks short concurrent responses; separately verify tools,
-streaming, cancellation, long contexts, crash recovery, and engine-specific behavior
-before claiming those combinations are supported.
+The checker uses temporary HOME/XDG/state and ephemeral ports. It verifies the
+CLI, assets, API, plugin installation, export, diagnostics, backup, and shutdown
+with synthetic telemetry and without loading models. Remove only the check
+environment you created when done.
 
-## Release gate
-
-- Backend tests and TypeScript/frontend build pass.
-- Build sdist and wheel; verify assets and installed operation outside the checkout.
-- Review changes to API metadata/client references and state compatibility.
-- Test service registration/removal and upgrade/backup/restore on a disposable host
-  before advertising unattended deployment. Existing service files are never overwritten.
-- Record engine/model-specific live acceptance separately; do not run inference in CI.
-- License is AGPL-3.0-or-later; review dependency/artwork distribution terms for each release.
-- Publish reviewed versioned artifacts deliberately; CI does not publish automatically.
-
-The version is currently `2.0.0`; keep Python, API, CLI, and frontend version strings
-aligned when preparing a release.
+Check the source archive as well as the wheel. See [testing](testing.md)
+before any installed-client, container, or live-inference check. Backend/plugin
+catalog contracts must remain compatible; a plugin disk update does not reload
+a running client server.

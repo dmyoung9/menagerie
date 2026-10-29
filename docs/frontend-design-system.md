@@ -1,9 +1,11 @@
 # Frontend design system
 
+Contributor reference for components, styling, and accessibility. For daily use,
+start with the [user guide](../README.md).
+
 Menagerie uses **Tailwind CSS v4** (`@tailwindcss/vite`) and the **Base UI**
-variant of shadcn/ui. This is a component migration, not a new router or API.
-Hash routes, registry polling, SSE, launch-review tokens, and domain calculations
-remain in the existing product modules.
+variant of shadcn/ui. UI changes must preserve routing, polling, streaming,
+launch-review consent, and domain calculations.
 
 ## Reproduce the foundation
 
@@ -18,7 +20,7 @@ and the matching official registry. The CLI reports the derived `base` as
 `"base"`. `frontend/preset.json` captures its exact resolved preset (no
 fallbacks), and `frontend/src/theme.css` contains the CLI's
 unaltered light/dark tokens and Tailwind mappings. The dashboard opens in dark
-mode, as before; this change does not introduce a theme-switching workflow.
+mode; there is no theme-switching workflow.
 
 From `frontend/`:
 
@@ -107,9 +109,9 @@ npx playwright install chromium  # once, if Chromium is not already available
 npm run test:ui
 ```
 
-The browser suite starts its own loopback Vite server on **8049**, refuses to
-reuse an occupied port, and intercepts every API call. It never contacts the
-live registry or launches a runtime. Checks cover desktop/mobile primary pages,
+The browser suite starts its own loopback Vite server, refuses to reuse an
+occupied port, and intercepts API calls. Its network guard blocks requests to
+other origins. See [testing](testing.md). Checks cover desktop/mobile primary pages,
 catalog/download selection, keyboard menus, focus trapping/restoration, dirty
 and busy dialogs, engine-reset confirmation, launch consent/tokens, form
 validation, multi-model settings, sliders, Select/Switch, polling, SSE, and

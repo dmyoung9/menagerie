@@ -59,12 +59,9 @@ Restart the owning server with `opencode service restart`, then reconnect client
 and check `/models`. If your OpenChamber runs a separate server, restart that owner
 instead. Successful installation is not proof the runtime loaded the plugin.
 
-OpenCode V2 versions exposing `POST /api/location/reload` can rebuild all loaded
-plugin/configuration contexts without restarting the process. Use the **owning
-server's** API or configuration-reload action; running chats continue at their
-next step boundary, while pending permissions/forms are cancelled. This is useful
-for an OpenChamber-managed server when the separate CLI service is stopped.
-Verify the resulting model catalog, not just the reload response.
+If your client offers configuration reload, consult that client's documentation
+for its scope and effect on running work. Verify the resulting model catalog,
+not just a successful reload notification.
 
 Activate matching backend and plugin versions together. The plugin reads
 `menagerie.catalog`; a catalog from a different backend version is not a compatible

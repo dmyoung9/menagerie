@@ -1,5 +1,6 @@
 // Isolated frontend at :8038; all API traffic is intercepted. No live mutations.
 async page => {
+  await page.context().route('**/*', route => new URL(route.request().url()).origin === 'http://127.0.0.1:8038' ? route.continue() : route.abort());
   await page.unroute('**/api/**');
   const assert = (value, text) => {if (!value) throw new Error(text);};
   const errors = [], writes = [];
@@ -8,7 +9,7 @@ async page => {
   const policy = {residency:'on-demand',priority:50,idle_timeout:300,allow_eviction:true,allow_uncertain:true,enabled:true,queue_timeout:300};
   const profile = {id:'profile',name:'Model settings',revision:1,config:{'ctx-size':32768,parallel:1},catalog:{model:{limit:{context:32768}}},artifact_id:'weights',runtime_id:'engine',raw_args:[]};
   const member = (id,name,state) => ({...policy,id,name,state,alias:id,port:8120,profile_id:'profile',profile_snapshot:profile,revision:1,reservation_mib:0,gpu:0,lifecycle:{serving:true}});
-  let members=[member('large','Bonsai 27B','READY')];
+  let members=[member('large','Example 27B','READY')];
   let sets=[];
   const host={ts:1700000000,gpus:[{index:0,total_mib:16384,free_mib:5000,used_mib:11384}],ram_total_mib:32000,ram_available_mib:24000,deployments:{large:{gpu_mib:11000},qwen:{gpu_mib:4000},gemma:{gpu_mib:2000}}};
   const serving=()=>{
@@ -46,7 +47,7 @@ async page => {
   await page.setViewportSize({width:1440,height:1000});
   await page.goto('http://127.0.0.1:8038/#/deployments');
   await page.reload();
-  await page.getByRole('link',{name:'Bonsai 27B',exact:true}).waitFor();
+  await page.getByRole('link',{name:'Example 27B',exact:true}).waitFor();
   await page.getByRole('button',{name:'New deployment',exact:true}).click();
   const dialog=page.getByRole('dialog');
   await dialog.getByRole('textbox',{name:'Name',exact:true}).fill('Qwen + Gemma');
@@ -90,7 +91,6 @@ async page => {
   await page.getByRole('heading',{name:'Deployments',exact:true}).waitFor();
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Unified deployments overflow on mobile');
-  await page.screenshot({path:'/tmp/opencode/menagerie-multi-mobile.png',fullPage:true});
   members=members.map(m=>m.id==='gemma'?{...m,state:'FAILED'}:m);
   await page.reload();
   await page.getByText('Degraded',{exact:true}).waitFor();

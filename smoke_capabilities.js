@@ -1,5 +1,6 @@
 // Isolated Vite frontend at :8037; all API calls are mocked, no live state changes.
 async page => {
+  await page.context().route('**/*', route => new URL(route.request().url()).origin === 'http://127.0.0.1:8037' ? route.continue() : route.abort());
   await page.unroute('**/api/**');
   const assert = (condition, text) => {if (!condition) throw new Error(text);};
   const errors = [], writes = [];
@@ -47,7 +48,6 @@ async page => {
   assert(await dialog.locator('.capabilities-panel').evaluate(el=>el.getBoundingClientRect().height)<480,'Mobile capability section needs too much scrolling');
   assert(await dialog.locator('.capabilities-panel [data-slot="toggle-group-item"]').first().evaluate(el=>el.getBoundingClientRect().height)>=44,'Mobile chips need touch-sized targets');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile editor horizontal overflow');
-  await page.screenshot({path:'/tmp/opencode/menagerie-repair-editor-mobile.png'});
   await dialog.getByRole('button',{name:'Save deployment',exact:true}).click();
   await dialog.waitFor({state:'hidden'});
   await page.waitForURL('**/deployments/saved');

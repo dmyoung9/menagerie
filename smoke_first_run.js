@@ -1,5 +1,6 @@
 // Fixture-only acceptance. Run with Vite on :8037; never contacts a live daemon.
 async page => {
+  await page.context().route('**/*', route => new URL(route.request().url()).origin === 'http://127.0.0.1:8037' ? route.continue() : route.abort());
   await page.unroute('**/api/**');
   await page.unroute('**/v1/chat/completions');
   const assert = (condition, text) => {if (!condition) throw Error(text);};

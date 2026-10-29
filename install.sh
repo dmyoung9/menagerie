@@ -13,7 +13,7 @@ usage() {
   cat <<'EOF'
 Usage: bash install.sh [options]
   --wheel PATH          Install a locally built wheel (before publication)
-  --constraints PATH    Use release dependency constraints (trial bundle)
+  --constraints PATH    Use release dependency constraints
   --version VERSION     Release version (default: 2.0.0)
   --prefix PATH         Application directory
   --bin-dir PATH        CLI launcher directory

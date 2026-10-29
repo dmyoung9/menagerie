@@ -37,26 +37,26 @@ need broader measurement. Launch review rechecks actual admission.
 
 ## Admission and lifecycle
 
-- A host registry lock and serialized admission prevent competing reservations
-  bypassing capacity checks. Reservations above physical capacity plus desktop
+- Capacity checks account for competing deployment reservations. Reservations
+  above physical capacity plus desktop
   reserve are errors. Memory estimates never require an approval checkbox.
 - Reservations are **not physical GPU isolation**. External processes can consume
   memory; estimates and observed session peaks are workload-dependent.
 - Default startup gates require 2 GiB free VRAM and 4 GiB available RAM. Newly
   loading runtimes roll back if observed headroom/temperature crosses the gate.
+- Client-triggered on-demand loading with uncertain estimates requires its saved
+  permission. Manual launch review can explicitly proceed despite estimate warnings.
 - Pinned deployments are never automatically evicted. Idle, explicitly authorized
   evictable deployments can be stopped for pressure/higher-priority demand.
   Pinned pressure is visible, not a guarantee against OOM.
 - On-demand requests use bounded queues/timeouts. Multi-model deployments load,
   idle, and make room as a unit. Busy members protect the unit from unloading.
   Full queues return 429; unavailable/loading failures return structured 503 errors.
-- Readiness requires `/health` success and the expected alias from `/v1/models`.
-  A PID is not readiness. Crashes and degraded health are distinct states.
+- Ready means the runtime responds successfully and advertises the expected model.
+  A running process alone is not readiness. Crashes and degraded health are distinct states.
 - Failed starts stop new processes, release reservations, and attempt to restore
   explicitly stopped predecessors. Failed restoration is recorded, not hidden.
   Active requests block ordinary stops/evictions.
-- Native identity includes PID, creation time, and process group. OCI cleanup checks
-  the ownership label before controlling a container.
 - Streaming stays streamed; cancellation closes the upstream connection. Request
   records retain correlation ID, deployment, latency, observable TTFT/output tokens,
   and errors—not prompt bodies.
@@ -90,11 +90,14 @@ Default private state: `~/.local/state/menagerie/` (override with `--state` or
 | Path | Contents |
 | --- | --- |
 | `registry.sqlite3` | Registry, revisions, operations, sessions, requests, hardware samples |
-| `deployments/<id>/runtime.log` | Redacted timestamped runtime logs; 4 MiB rotation plus one previous file |
+| `deployments/<id>/runtime.log` | Timestamped runtime logs with limited credential filtering; 4 MiB rotation plus one previous file |
 | `models/` | Managed Hugging Face cache with resume support |
 | `runtimes/` | Isolated reviewed source builds |
 | `registry-backup-*.sqlite3` | Explicit consistent online registry backups |
 | `opencode-managed.json` | Generated client provider fragment |
+
+Credential filtering does not make logs safe to publish: paths, host details, or
+unrecognized secret formats may remain. Review any excerpt privately before sharing.
 
 The UI tails the last 64 KiB of runtime logs every two seconds while open. Hardware
 defaults to two-second sampling, seven days high resolution, and 90 days retention,

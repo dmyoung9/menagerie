@@ -1,7 +1,8 @@
 """Opt-in real inference check. Never collected by pytest or run by CI.
 
 Uses explicit aliases; on-demand requests may load models under saved policies.
-Does not revise configuration or restart deployments.
+Does not revise configuration. Requests may evict eligible deployments under
+saved policies. Requires explicit approval and an explicit gateway port.
 """
 
 import argparse
@@ -32,9 +33,8 @@ async def run(args):
             response.raise_for_status()
             message = response.json()["choices"][0]["message"]
             if "READY" not in (message.get("content") or ""):
-                raise RuntimeError(f"{alias}: expected READY in response")
+                raise RuntimeError("Expected READY in inference response")
             return {
-                "alias": alias,
                 "latency_s": time.monotonic() - started,
                 "usage": response.json().get("usage"),
             }
@@ -60,6 +60,19 @@ if __name__ == "__main__":
         required=True,
         help="API alias; repeat for concurrent requests",
     )
-    parser.add_argument("--gateway-port", type=int, default=8001)
+    parser.add_argument("--gateway-port", type=int, required=True)
+    parser.add_argument(
+        "--approve",
+        action="store_true",
+        required=True,
+        help="Approve real inference and saved loading/eviction policies",
+    )
     args = parser.parse_args()
-    asyncio.run(run(args))
+    if not 1 <= args.gateway_port <= 65535:
+        parser.error("Gateway port must be between 1 and 65535")
+    try:
+        asyncio.run(run(args))
+    except Exception:
+        raise SystemExit(
+            "Live acceptance failed; private response details withheld"
+        ) from None

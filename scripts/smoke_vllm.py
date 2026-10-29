@@ -1,6 +1,5 @@
 """Opt-in managed vLLM GPU smoke; downloads several GB into temporary storage."""
 
-import asyncio
 import json
 import os
 import socket
@@ -13,6 +12,8 @@ from controlplane import telemetry
 from controlplane.api import create_app
 from controlplane.jobs import Jobs
 from controlplane.managed_engines import catalog, install
+
+from .check_support import run_live_check
 
 
 async def main():
@@ -99,14 +100,9 @@ async def main():
                     flush=True,
                 )
                 await manager.stop(ident)
-        except BaseException:
-            for path in (Path(temporary) / "state").rglob("runtime.log"):
-                print(path.read_text(errors="replace")[-6000:], flush=True)
-            raise
         finally:
             await manager.close()
-    print("Final GPU state:", telemetry.sample().get("gpus"), flush=True)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_live_check(main, "scripts.smoke_vllm")

@@ -55,13 +55,9 @@ jobs:
       - run: npm run lint && npm run format:check
         working-directory: plugins/opencode
       - run: uv build
+      - run: uv run --no-sync python -m scripts.check_distribution dist/*.whl dist/*.tar.gz
       - run: npm test
         working-directory: frontend
-      - name: Build shareable Linux trial bundle
-        run: |
-          for wheel in dist/*.whl; do
-            uv run --no-sync python scripts/build_trial_bundle.py "$wheel" --source "${wheel%-py3-none-any.whl}.tar.gz"
-          done
       - run: uv venv /tmp/menagerie-wheel-check
       - run: uv pip install --python /tmp/menagerie-wheel-check/bin/python dist/*.whl
       - run: /tmp/menagerie-wheel-check/bin/python scripts/check_wheel.py

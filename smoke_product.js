@@ -1,6 +1,7 @@
-// Run with: playwright-cli -s=menagerie-polish run-code --filename=smoke_product.js
+// Fixture callback: use a fresh browser context, never a personal browser session.
 // Uses an isolated frontend at :8037 and intercepts every API call. No live state changes.
 async (page) => {
+  await page.context().route('**/*', route => new URL(route.request().url()).origin === 'http://127.0.0.1:8037' ? route.continue() : route.abort());
   await page.unroute('**/api/**');
   const assert = (condition, text) => {if (!condition) throw new Error(text);};
   const errors = [];
@@ -134,9 +135,7 @@ async (page) => {
   }
   await page.getByRole('navigation').getByRole('link',{name:'Overview',exact:true}).click();
   await page.getByRole('heading',{name:'Overview',exact:true}).waitFor();
-  await page.screenshot({path:'/tmp/opencode/menagerie-polish-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
-  await page.screenshot({path:'/tmp/opencode/menagerie-polish-mobile.png',fullPage:true});
   registry={models:[],runtimes:[],profiles:[],deployments:[],groups:[],jobs:[]};
   await page.reload();
   await page.getByRole('heading',{name:'Add your first model'}).waitFor();

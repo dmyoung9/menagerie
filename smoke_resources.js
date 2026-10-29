@@ -1,5 +1,6 @@
 // Isolated static frontend at :8038. All APIs intercepted; no live runtime changes.
 async page => {
+  await page.context().route('**/*', route => new URL(route.request().url()).origin === 'http://127.0.0.1:8038' ? route.continue() : route.abort());
   await page.unroute('**/api/**');
   const assert = (ok, text) => {if (!ok) throw new Error(text);};
   const errors = [], drafts = [], writes = [];
@@ -34,7 +35,6 @@ async page => {
   await page.getByRole('heading',{name:'Where your resources go'}).waitFor();
   await page.getByRole('button',{name:'Loaded model: 3 GiB',exact:false}).click();
   assert(await page.getByRole('link',{name:'Open deployment →'}).count()===1,'Observed tile cannot drill into deployment');
-  await page.screenshot({path:'/tmp/opencode/menagerie-resources-overview.png',fullPage:true});
   await page.getByRole('navigation').getByRole('link',{name:'Deployments',exact:true}).click();
   await page.getByRole('button',{name:'New deployment',exact:true}).click();
   const dialog=page.getByRole('dialog');
@@ -56,11 +56,9 @@ async page => {
   assert(await dialog.getByLabel('GPU layer count',{exact:true}).filter({visible:true}).getAttribute('max')==='32','Layer control ignores model bound');
   const previewRect = await dialog.locator('.draft-resources').boundingBox();
   assert(previewRect.x > 900 && previewRect.y >= 70 && previewRect.y < 300,'Preview is not visible beside the scrolled editor');
-  await page.screenshot({path:'/tmp/opencode/menagerie-resources-editor.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Page overflows mobile viewport');
   assert(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth),'Dialog overflows mobile viewport');
-  await page.screenshot({path:'/tmp/opencode/menagerie-resources-mobile.png',fullPage:true});
   assert(!writes.length,'Preview caused persistent writes: '+writes);
   assert(!errors.length,errors.join('\n'));
   return {result:'passed',checks:['observed GPU/RAM maps','deployment drill-down','host-aware defaults','context-driven preview','whole-deployment budget','over-budget feedback','model layer bound','mobile layout','no persistent writes']};
