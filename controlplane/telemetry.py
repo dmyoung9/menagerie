@@ -107,12 +107,17 @@ def process_sample(pid):
         root = psutil.Process(pid)
         procs = [root] + root.children(recursive=True)
         rss = swap = cpu = 0
+        swap_available = True
         pids = []
         for p in procs:
             try:
                 pids.append(p.pid)
                 rss += p.memory_info().rss
-                swap += getattr(p.memory_full_info(), "swap", 0)
+                memory = p.memory_full_info()
+                if hasattr(memory, "swap"):
+                    swap += memory.swap
+                else:
+                    swap_available = False
                 now = time.monotonic()
                 times = p.cpu_times()
                 elapsed, total = _cpu_previous.get(
@@ -122,10 +127,11 @@ def process_sample(pid):
                     cpu += 100 * (times.user + times.system - total) / (now - elapsed)
                 _cpu_previous[p.pid] = (now, times.user + times.system)
             except (psutil.Error, OSError):
+                swap_available = False
                 pass
         return {
             "rss_mib": rss / 1048576,
-            "swap_mib": swap / 1048576,
+            "swap_mib": swap / 1048576 if swap_available else None,
             "cpu_percent": cpu,
             "pids": pids,
         }

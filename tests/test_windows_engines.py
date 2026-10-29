@@ -68,6 +68,8 @@ def bundle(entries):
         ["folder./escape"],
         ["file:stream"],
         ["a.dll", "A.dll"],
+        ["a//b.dll", "a/b.dll"],
+        ["invalid?.dll"],
     ],
 )
 def test_zip_rejects_unsafe_windows_paths(tmp_path, names):

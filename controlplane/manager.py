@@ -626,8 +626,6 @@ class Manager:
                 "started_at": time.time(),
                 "ended_at": None,
                 "outcome": "running",
-                "peak_gpu_mib": 0,
-                "peak_ram_mib": 0,
             },
         )
         self.transition(
@@ -887,14 +885,14 @@ class Manager:
                         self.host.setdefault("deployments", {})[d["id"]] = data
                         if d.get("session_id"):
                             session = self.store.get("session", d["session_id"])
-                            session.update(
-                                peak_gpu_mib=max(
-                                    session.get("peak_gpu_mib", 0), data["gpu_mib"] or 0
-                                ),
-                                peak_ram_mib=max(
-                                    session.get("peak_ram_mib", 0), data["rss_mib"] or 0
-                                ),
-                            )
+                            for field, measurement in (
+                                ("peak_gpu_mib", data["gpu_mib"]),
+                                ("peak_ram_mib", data["rss_mib"]),
+                            ):
+                                if measurement is not None:
+                                    session[field] = max(
+                                        session.get(field, 0), measurement
+                                    )
                             self.store.put("session", session, historical=False)
                     if d["state"] in {"READY", "DEGRADED"} and not self.lock.locked():
                         async with self.lock:

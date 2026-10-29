@@ -116,6 +116,8 @@ async def test_two_processes_independent_stop_and_failure_rollback(store, tmp_pa
     try:
         await m.activate(["a", "b"], override=True)
         assert {d["state"] for d in store.list("deployment")} == {"READY"}
+        assert all("peak_gpu_mib" not in s for s in store.list("session"))
+        assert all("peak_ram_mib" not in s for s in store.list("session"))
         pid_b = store.get("deployment", "b")["pid"]
         await m.stop("a")
         assert store.get("deployment", "b")["pid"] == pid_b

@@ -166,12 +166,15 @@ def unpack(archive, destination):
                 raise ValueError("Engine archive exceeds extraction limits")
             seen = set()
             for member in members:
-                name = member.filename
+                # ZipInfo.filename is normalized/truncated by Python on some
+                # hosts. Validate the original archive spelling, including NULs.
+                name = member.orig_filename
                 parts = PurePosixPath(name).parts
                 if (
                     not parts
                     or name.startswith("/")
                     or "\\" in name
+                    or re.search(r'[\x00-\x1f<>"|?*]', name)
                     or any(
                         p in {".", ".."}
                         or ":" in p
@@ -184,7 +187,7 @@ def unpack(archive, destination):
                     or (member.external_attr >> 16) & 0o170000 == 0o120000
                 ):
                     raise ValueError("Unsafe Windows engine archive member")
-                key = name.rstrip("/").casefold()
+                key = "/".join(parts).casefold()
                 target = destination.joinpath(*parts)
                 if key in seen or (
                     target.exists() and not (member.is_dir() and target.is_dir())
