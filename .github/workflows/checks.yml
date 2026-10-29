@@ -68,7 +68,7 @@ jobs:
       - run: npm test
         working-directory: frontend
       - run: uv venv /tmp/menagerie-wheel-check
-      - run: uv pip install --python /tmp/menagerie-wheel-check/bin/python dist/*.whl
+      - run: uv pip install --python /tmp/menagerie-wheel-check/bin/python --constraint dist/menagerie-*-requirements.txt dist/*.whl
       - run: /tmp/menagerie-wheel-check/bin/python scripts/check_wheel.py
       - uses: actions/upload-artifact@v4
         with:
