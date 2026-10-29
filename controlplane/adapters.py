@@ -140,9 +140,17 @@ ENV_KEYS = {
 async def command(argv, env=None, timeout=30):
     from . import processes
 
-    process = await processes.spawn(
-        *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
-    )
+    try:
+        process = await processes.spawn(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+    except OSError as exc:
+        raise ValueError(
+            f"Cannot execute engine; check its path, architecture and prerequisites: {exc}"
+        ) from exc
     try:
         output, _ = await asyncio.wait_for(process.communicate(), timeout)
     except BaseException:
@@ -160,7 +168,9 @@ async def command(argv, env=None, timeout=30):
         processes.release(process.pid)
     text = output.decode(errors="replace")
     if process.returncode:
-        raise ValueError(f"Command failed ({process.returncode}): {text[-2000:]}")
+        raise ValueError(
+            f"Command failed ({processes.exit_reason(process.returncode)}): {text[-2000:]}"
+        )
     return text
 
 

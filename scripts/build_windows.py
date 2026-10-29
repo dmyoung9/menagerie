@@ -109,7 +109,15 @@ def main():
             check=True,
         )
     manifest.write_text(
-        json.dumps({"version": version, "kind": "release"}), encoding="utf-8"
+        json.dumps(
+            {
+                "version": version,
+                "kind": "release",
+                "revision": os.environ.get("GITHUB_SHA"),
+                "python": platform.python_version(),
+            }
+        ),
+        encoding="utf-8",
     )
     subprocess.run(
         [

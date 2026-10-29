@@ -28,7 +28,9 @@ def free_port():
 def check(installer, worker, baseline=None):
     if os.name != "nt":
         raise RuntimeError("This check requires native Windows")
-    with tempfile.TemporaryDirectory(prefix="menagerie-windows-") as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix="menagerie-windows-", ignore_cleanup_errors=True
+    ) as temporary:
         root = Path(temporary)
         app = root / "Programs space \u00e9/Menagerie"
         state = root / "state \u96ea"
@@ -42,6 +44,7 @@ def check(installer, worker, baseline=None):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
         def execute(argv, success=True):
+            started = time.time()
             result = subprocess.run(
                 [str(a) for a in argv],
                 cwd=root,
@@ -49,10 +52,39 @@ def check(installer, worker, baseline=None):
                 capture_output=True,
                 timeout=120,
             )
+            if str(argv[0]).lower().endswith("setup.exe") or Path(
+                argv[0]
+            ).name.lower().startswith("unins"):
+                # Inno's final self-removal helper can briefly outlive the
+                # original uninstaller. Wait only for helpers in our temp root.
+                for process in psutil.process_iter(["exe", "create_time"]):
+                    try:
+                        executable = process.info["exe"]
+                        if (
+                            executable
+                            and process.info["create_time"] >= started
+                            and Path(executable).is_relative_to(Path(env["TEMP"]))
+                        ):
+                            process.wait(timeout=30)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
             if success:
-                assert result.returncode == 0, (
-                    "Installed command failed; raw diagnostics withheld"
-                )
+                if result.returncode:
+                    categories = []
+                    for log in (state / "daemon.log", state / "launcher.log"):
+                        if log.is_file():
+                            text = log.read_text(encoding="utf-8", errors="replace")[
+                                -8192:
+                            ]
+                            categories.extend(
+                                re.findall(
+                                    r"(?:ModuleNotFoundError: No module named '[\w.]+'|[A-Za-z]+Error:)",
+                                    text,
+                                )
+                            )
+                    raise AssertionError(
+                        f"Installed command failed ({result.returncode}); categories: {categories[-5:]}; raw diagnostics withheld"
+                    )
             return result
 
         def install(path):

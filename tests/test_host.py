@@ -54,6 +54,18 @@ async def test_argv_unicode_and_environment(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_missing_executable_has_actionable_error(tmp_path):
+    with pytest.raises(ValueError, match="path, architecture and prerequisites"):
+        await adapters.command([str(tmp_path / "missing-engine.exe")])
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows loader error reporting")
+def test_windows_loader_failure_message():
+    assert "required DLL missing" in processes.exit_reason(0xC0000135)
+    assert "architecture" in processes.exit_reason(-1073741701)
+
+
+@pytest.mark.asyncio
 async def test_owned_tree_cleanup_and_stale_identity(tmp_path):
     script = tmp_path / "tree.py"
     script.write_text(
@@ -131,6 +143,33 @@ async def test_probe_timeout_cleans_up(tmp_path):
             break
         await asyncio.sleep(0.1)
     assert not alive
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_process_creation_recovers_handle(monkeypatch):
+    original = asyncio.create_subprocess_exec
+    created = asyncio.Event()
+    finish = asyncio.Event()
+    children = []
+
+    async def delayed(*args, **kwargs):
+        child = await original(*args, **kwargs)
+        children.append(child)
+        created.set()
+        await finish.wait()
+        return child
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", delayed)
+    task = asyncio.create_task(
+        processes.spawn(sys.executable, "-c", "import time; time.sleep(90)")
+    )
+    await asyncio.wait_for(created.wait(), 10)
+    task.cancel()
+    finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 10)
+    assert children[0].returncode is not None
+    assert children[0].pid not in processes._jobs
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows kill-on-close Job Object contract")

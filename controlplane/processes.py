@@ -12,6 +12,20 @@ import psutil
 _jobs = {}
 
 
+def exit_reason(code):
+    if os.name == "nt":
+        reasons = {
+            0xC0000135: "required DLL missing; reinstall the verified engine and check its prerequisites",
+            0xC000007B: "incompatible executable/DLL architecture; use a matching Windows x64 build",
+            0xC0000142: "DLL initialization failed; check engine and driver compatibility",
+            0xC000001D: "CPU instruction unavailable; choose a compatible engine build",
+        }
+        unsigned = code & 0xFFFFFFFF
+        if unsigned in reasons:
+            return f"0x{unsigned:08X}: {reasons[unsigned]}"
+    return str(code)
+
+
 class WindowsJob:
     def __init__(self):
         import ctypes
@@ -119,10 +133,28 @@ async def spawn(*argv, **kwargs):
             import sys
 
             dll = ctypes.WinDLL("kernel32", use_last_error=True)
+            # Inherited by children; never let a missing DLL or crash dialog
+            # turn a bounded capability probe into an invisible modal prompt.
+            dll.SetErrorMode(0x0001 | 0x0002 | 0x8000)
             dll.SetDllDirectoryW.argtypes = [ctypes.c_wchar_p]
             dll.SetDllDirectoryW(None)
         try:
-            proc = await asyncio.create_subprocess_exec(*argv, **kwargs, **options)
+            creation = asyncio.create_task(
+                asyncio.create_subprocess_exec(*argv, **kwargs, **options)
+            )
+            try:
+                proc = await asyncio.shield(creation)
+            except asyncio.CancelledError:
+                # Recover the handle before propagating cancellation. Otherwise
+                # Windows can leave an unassigned suspended worker behind.
+                proc = await creation
+                if job:
+                    proc.kill()
+                else:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(proc.pid, signal.SIGKILL)
+                await proc.wait()
+                raise
         finally:
             if job and getattr(sys, "frozen", False):
                 dll.SetDllDirectoryW(sys._MEIPASS)

@@ -653,7 +653,7 @@ class Manager:
         while time.monotonic() < deadline:
             if proc.returncode is not None:
                 raise RuntimeError(
-                    f"Runtime exited {proc.returncode}; inspect deployment logs"
+                    f"Runtime exited {processes.exit_reason(proc.returncode)}; inspect deployment logs"
                 )
             settings = self.settings()
             gpu = next(
