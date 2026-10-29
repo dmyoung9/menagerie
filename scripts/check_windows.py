@@ -206,6 +206,7 @@ def check(installer, worker, baseline=None):
             else:
                 raise AssertionError("Synthetic model import timed out")
             artifact = completed["result"]
+            assert Path(artifact["local_path"]).samefile(model)
             # Runtime registration probes the real frozen fake worker executable.
             runtime = request(
                 "/api/runtimes",
@@ -328,7 +329,10 @@ def check(installer, worker, baseline=None):
                 )
             execute(launch())
             assert any(d["id"] == ident for d in request("/api/status")["deployments"])
-            assert any(m["local_path"] == str(model) for m in request("/api/models"))
+            assert any(
+                m["id"] == artifact["id"] and m["local_path"] == artifact["local_path"]
+                for m in request("/api/models")
+            )
             execute(
                 [app / "unins000.exe", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
             )
@@ -340,7 +344,10 @@ def check(installer, worker, baseline=None):
             installed = True
             execute(launch())
             assert any(d["id"] == ident for d in request("/api/status")["deployments"])
-            assert any(m["local_path"] == str(model) for m in request("/api/models"))
+            assert any(
+                m["id"] == artifact["id"] and m["local_path"] == artifact["local_path"]
+                for m in request("/api/models")
+            )
             execute(launch("stop"))
             print(
                 "PASS: native installer, isolated launch/duplicate/conflict, bundled dashboard, fake inference/streaming, process tree shutdown, restart/upgrade/uninstall/reinstall preservation"
