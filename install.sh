@@ -5,7 +5,7 @@ umask 077
 
 prefix="${XDG_DATA_HOME:-$HOME/.local/share}/menagerie/app"
 bin_dir="$HOME/.local/bin"
-version=2.1.0
+version=2.1.1
 wheel='' constraints=''
 service=ask plugin=ask open=ask
 unattended=false rollback=false
@@ -14,7 +14,7 @@ usage() {
 Usage: bash install.sh [options]
   --wheel PATH          Install a locally built wheel (before publication)
   --constraints PATH    Use release dependency constraints
-  --version VERSION     Release version (default: 2.1.0)
+  --version VERSION     Release version (default: 2.1.1)
   --prefix PATH         Application directory
   --bin-dir PATH        CLI launcher directory
   --service | --no-service   Enable/start the systemd user service
@@ -40,7 +40,7 @@ while (($#)); do
   esac
 done
 [[ "$(uname -s)" == Linux ]] || { echo 'This installer currently supports Linux.' >&2; exit 1; }
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Use a release version such as 2.1.0.' >&2; exit 2; }
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Use a release version such as 2.1.1.' >&2; exit 2; }
 if [[ -n "$constraints" ]]; then
   [[ -f "$constraints" ]] || { echo 'Dependency constraints file not found.' >&2; exit 1; }
   constraints="$(realpath "$constraints")"
