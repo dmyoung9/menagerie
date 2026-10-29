@@ -1,56 +1,35 @@
 import { test, expect } from './fixtures';
 
-test('first response works without GPU telemetry and recovers from a gateway error', async ({
+test('overview puts deployments before summary tiles without a first-response tour', async ({
   page,
-  fixture,
 }) => {
-  fixture.host.gpus = [];
-  fixture.host.ram_available_mib = null;
-  let failed = false;
-  await page.route('**/v1/chat/completions', (route) => {
-    const body: unknown = route.request().postDataJSON();
-    expect(body).toMatchObject({
-      model: 'ready',
-      stream: true,
-      max_tokens: 128,
-    });
-    return failed
-      ? route.fulfill({
-          status: 503,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            error: { message: 'Runtime ran out of memory' },
-          }),
-        })
-      : route.fulfill({
-          contentType: 'text/event-stream',
-          body: 'data: {"choices":[{"delta":{"content":"Hello friend"}}]}\n\ndata: [DONE]\n\n',
-        });
-  });
   await page.goto('/');
-  await page.getByText('Get your first response', { exact: true }).click();
   await expect(
-    page.getByText('GPU telemetry unavailable. A CPU engine', { exact: false }),
+    page.getByRole('heading', { name: 'Deployments', exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Send test prompt' }).click();
-  await expect(page.getByLabel('Test response')).toHaveText('Hello friend');
-  failed = true;
-  await page.getByRole('button', { name: 'Send test prompt' }).click();
   await expect(
-    page.getByRole('alert').filter({ hasText: 'Runtime ran out of memory' }),
-  ).toBeVisible();
-  failed = false;
-  await page.getByRole('button', { name: 'Send test prompt' }).click();
-  await expect(page.getByLabel('Test response')).toHaveText('Hello friend');
-  await page.setViewportSize({ width: 390, height: 844 });
+    page.getByText('Get your first response', { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Send test prompt' }),
+  ).toHaveCount(0);
   expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
+    await page.locator('main').evaluate((main) => {
+      const heading = [...main.querySelectorAll('h2')].find(
+        (node) => node.textContent === 'Deployments',
+      );
+      const stats = main.querySelector('.stats');
+      return Boolean(
+        heading &&
+        stats &&
+        heading.compareDocumentPosition(stats) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    }),
   ).toBe(true);
 });
 
-test('empty installation keeps an existing-model route and disables requests before readiness', async ({
+test('empty installation retains discover and local-model actions', async ({
   page,
   fixture,
 }) => {
@@ -59,14 +38,18 @@ test('empty installation keeps an existing-model route and disables requests bef
   fixture.registry.deployments = [];
   await page.goto('/');
   await expect(
-    page.getByRole('button', { name: 'Choose starter variant' }),
+    page.getByRole('button', { name: 'Discover models', exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Send test prompt' }),
-  ).toBeDisabled();
+    page.getByRole('button', { name: 'Add from File', exact: true }),
+  ).toBeVisible();
   await expect(
-    page.getByRole('link', { name: 'Use an existing model / Add from File' }),
-  ).toHaveAttribute('href', '#/models');
+    page.getByText('Get your first response', { exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole('button', { name: 'Discover models', exact: true })
+    .click();
+  await expect(page).toHaveURL(/#\/models\/discover$/);
 });
 
 test('unloading another deployment still requires consent', async ({

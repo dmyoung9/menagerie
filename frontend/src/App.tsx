@@ -68,7 +68,6 @@ import {
   Tabs,
 } from './ui';
 import brandLogo from './assets/logo-mono.png';
-import { FirstRun } from './FirstRun';
 import type {
   AppStatus,
   EditableSource,
@@ -582,16 +581,58 @@ export default function App() {
               )}
               {page === 'overview' && (
                 <>
-                  <FirstRun
-                    data={data}
-                    host={host}
-                    api={api}
-                    queued={() => {
-                      setNotice('Download queued — see Activity for progress');
-                      void reload();
-                    }}
-                    create={newDeployment}
-                  />
+                  <div className="section-heading">
+                    <h2>Deployments</h2>
+                    <a href="#/deployments">
+                      View all <ArrowUpRight size={14} />
+                    </a>
+                  </div>
+                  <Card className="mb-5 min-w-0 gap-0 p-0">
+                    <CardContent className="p-0">
+                      {enabled.length ? (
+                        <ServingTable
+                          rows={enabled}
+                          host={host}
+                          actions={actions}
+                          compact
+                        />
+                      ) : (
+                        <Empty
+                          title={
+                            data.models?.length
+                              ? 'No enabled deployments'
+                              : 'Add your first model'
+                          }
+                        >
+                          <Button
+                            variant="default"
+                            type="button"
+                            onClick={() =>
+                              data.models?.length
+                                ? newDeployment()
+                                : go('models/discover')
+                            }
+                          >
+                            {data.models?.length
+                              ? 'Create deployment'
+                              : 'Discover models'}
+                          </Button>
+                          {!data.models?.length && (
+                            <Button
+                              variant="outline"
+                              type="button"
+                              onClick={() =>
+                                open({ type: 'local-model', path: '' })
+                              }
+                            >
+                              <Plus size={16} />
+                              Add from File
+                            </Button>
+                          )}
+                        </Empty>
+                      )}
+                    </CardContent>
+                  </Card>
                   <div className="stats">
                     {(host.gpus || []).map((g, index: number) => (
                       <Card
@@ -657,58 +698,6 @@ export default function App() {
                     deployments={deployments}
                     settings={status?.settings || {}}
                   />
-                  <div className="section-heading">
-                    <h2>Deployments</h2>
-                    <a href="#/deployments">
-                      View all <ArrowUpRight size={14} />
-                    </a>
-                  </div>
-                  <Card className="mb-5 min-w-0 gap-0 p-0">
-                    <CardContent className="p-0">
-                      {enabled.length ? (
-                        <ServingTable
-                          rows={enabled}
-                          host={host}
-                          actions={actions}
-                          compact
-                        />
-                      ) : (
-                        <Empty
-                          title={
-                            data.models?.length
-                              ? 'No enabled deployments'
-                              : 'Add your first model'
-                          }
-                        >
-                          <Button
-                            variant="default"
-                            type="button"
-                            onClick={() =>
-                              data.models?.length
-                                ? newDeployment()
-                                : go('models/discover')
-                            }
-                          >
-                            {data.models?.length
-                              ? 'Create deployment'
-                              : 'Discover models'}
-                          </Button>
-                          {!data.models?.length && (
-                            <Button
-                              variant="outline"
-                              type="button"
-                              onClick={() =>
-                                open({ type: 'local-model', path: '' })
-                              }
-                            >
-                              <Plus size={16} />
-                              Add from File
-                            </Button>
-                          )}
-                        </Empty>
-                      )}
-                    </CardContent>
-                  </Card>
                   <div className="section-heading">
                     <h2>Activity</h2>
                     <a href="#/activity">
