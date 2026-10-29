@@ -10,25 +10,17 @@ streaming gateway or the bundled OpenCode discovery plugin.
 
 ## Install
 
-Linux is the initial target. While the GitHub repository is private, ask for a
-**Linux trial archive**, extract it, then run `bash ./install` from the extracted
-folder. It includes the application and installer, not models or user data;
-internet is still needed for managed dependencies and model/engine downloads.
-
-Once the repository is public, the anonymous release installer will be:
+Linux is the installation target. Download and inspect the release installer,
+then run it to install the application in your user account:
 
 ```sh
-curl -sSL https://raw.githubusercontent.com/dmyoung9/menagerie/main/install.sh | bash
+curl -fLSs https://raw.githubusercontent.com/dmyoung9/menagerie/main/install.sh -o install.sh
+bash install.sh
 ```
 
-Alternatively, to install from a local checkout or build a wheel:
-
-```sh
-git clone https://github.com/dmyoung9/menagerie.git
-cd menagerie
-uv build --wheel
-bash install.sh --wheel dist/menagerie-2.0.0-py3-none-any.whl
-```
+This requires publicly accessible release assets and internet access. To install
+a downloaded wheel, use `bash install.sh --wheel /path/to/menagerie.whl` instead.
+See [installation and recovery](docs/installation.md) for prerequisites and options.
 
 The installer supplies an isolated Python environment and dependencies, then
 offers a background user service, OpenCode plugin installation, and opening the
@@ -83,37 +75,15 @@ This is a single-user local application. NVIDIA is the GPU telemetry path;
 drivers remain a host prerequisite. Windows/WSL and cross-distribution acceptance
 are pending. See [installation and recovery](docs/installation.md),
 [operations](docs/operations.md), and [release validation](docs/release-validation.md)
-for verified coverage and remaining release gates.
+for safety boundaries and release requirements.
 
-## Linting and formatting
+## Documentation
 
-Run these checks before opening a pull request (CI runs them too):
-
-```sh
-# Python, from the repository root
-uv sync --locked --no-install-project
-uv run --no-sync ruff check .
-uv run --no-sync ruff format --check .
-
-# Run in each of frontend/ and plugins/opencode/
-npm ci
-npm run check
-npm run lint
-npm run format:check
-```
-
-To apply fixes, use `uv run --no-sync ruff check . --fix` and
-`uv run --no-sync ruff format .` for Python, or `npm run lint:fix` and
-`npm run format` in either JavaScript package. Prettier shares the root
-configuration and skips generated output and lockfiles. Hook dependencies and
-fast-refresh boundaries are enforced as errors. The shadcn primitives retain
-their intentional public variant/helper exports. Both TypeScript packages reject
-explicit `any`; frontend lint runs with a zero-warning budget. Domain contracts
-live in `frontend/src/types/`, with runtime wire/JSON decoders in
-`frontend/src/contracts.ts`. The frontend `check` command also type-checks tests,
-build/test configuration, and compile-only negative type assertions. A Python
-test checks the frontend decoders against real offline ASGI responses when
-Node.js 22+ is available (as it is in CI).
+- [Model capabilities and reasoning](docs/model-capabilities.md)
+- [Multi-model deployments](docs/multi-model-deployments.md)
+- [Editing deployments](docs/forms.md)
+- [Contributor guide](docs/development.md), [testing policy](docs/testing.md),
+  and [release checklist](docs/release-validation.md)
 
 ## License
 

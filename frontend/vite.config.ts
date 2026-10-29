@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+  // Fixture runs must not load an untracked developer .env file.
+  envDir: process.env.MENAGERIE_FIXTURE_ENV_DIR,
   plugins: [tailwindcss()],
   resolve: { alias: { '@': new URL('./src', import.meta.url).pathname } },
   build: {

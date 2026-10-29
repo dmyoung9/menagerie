@@ -1,5 +1,6 @@
 // Isolated frontend at :8038; every API call intercepted, no live changes.
 async page => {
+  await page.context().route('**/*', route => new URL(route.request().url()).origin === 'http://127.0.0.1:8038' ? route.continue() : route.abort());
   await page.unroute('**/api/**');
   const assert = (ok, message) => {if (!ok) throw new Error(message);};
   const errors = [], writes = [];

@@ -11,6 +11,11 @@ import time
 import urllib.request
 from pathlib import Path
 
+if __package__:
+    from .check_support import isolated_environment
+else:
+    from check_support import isolated_environment
+
 
 def free_port():
     with socket.socket() as sock:
@@ -25,6 +30,7 @@ def main():
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with tempfile.TemporaryDirectory(prefix="menagerie-artifact-") as directory:
         root = Path(directory)
+        env = isolated_environment(root / "environment")
         command = [sys.executable, "-m", "controlplane.cli"]
 
         def cli(*args):
@@ -34,8 +40,11 @@ def main():
                 text=True,
                 capture_output=True,
                 timeout=30,
+                env=env,
             )
-            assert result.returncode == 0, result.stderr or result.stdout
+            assert result.returncode == 0, (
+                "Installed CLI check failed; raw output withheld"
+            )
             return result.stdout
 
         assert "Menagerie" in cli("--version")
@@ -49,7 +58,14 @@ def main():
         cli("plugin", "remove", "--config-dir", str(root / "opencode"))
         with (root / "daemon.log").open("w+") as log:
             daemon = subprocess.Popen(
-                command
+                [
+                    sys.executable,
+                    "-c",
+                    "import time; from controlplane import cli, telemetry; "
+                    "telemetry.sample = lambda: {'ts': time.time(), 'cpu_count': 8, "
+                    "'ram_total_mib': 32768, 'ram_available_mib': 24000, "
+                    "'gpus': [], 'processes': [], 'errors': []}; cli.main()",
+                ]
                 + [
                     "serve",
                     "--state",
@@ -62,6 +78,7 @@ def main():
                 cwd=root,
                 stdout=log,
                 stderr=log,
+                env=env,
             )
             try:
 
@@ -73,8 +90,9 @@ def main():
 
                 for attempt in range(100):
                     if daemon.poll() is not None:
-                        log.seek(0)
-                        raise AssertionError(log.read())
+                        raise AssertionError(
+                            "Isolated daemon exited; raw logs withheld"
+                        )
                     try:
                         assert json.loads(get("/health"))["ok"]
                         break

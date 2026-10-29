@@ -1,6 +1,7 @@
-// Run via playwright-cli run-code --filename=smoke_forms.js against Vite :8042.
+// Fixture callback for a fresh browser context against Vite :8042.
 // All APIs mocked; never changes live inference or registry state.
 async page => {
+  await page.context().route('**/*', route => new URL(route.request().url()).origin === 'http://127.0.0.1:8042' ? route.continue() : route.abort());
   await page.unroute('**/api/**');
   const assert = (ok, text) => {if (!ok) throw new Error(text);};
   const errors = [], writes = [];

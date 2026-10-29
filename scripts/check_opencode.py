@@ -21,6 +21,8 @@ from pathlib import Path
 
 from controlplane.plugin_install import manage
 
+from .check_support import isolated_environment
+
 
 def main():
     binary = shutil.which("opencode")
@@ -78,19 +80,8 @@ def main():
             manage("install", config, gateway.server_port)
             home = root / "home"
             home.mkdir()
-            env = {
-                key: value
-                for key, value in os.environ.items()
-                if not key.startswith("OPENCODE_")
-            }
-            env.update(
-                HOME=str(home),
-                XDG_CONFIG_HOME=str(root / "config"),
-                XDG_DATA_HOME=str(root / "data"),
-                XDG_STATE_HOME=str(root / "state"),
-                XDG_CACHE_HOME=str(root / "cache"),
-                OPENCODE_CONFIG_DIR=str(config),
-            )
+            env = isolated_environment(root)
+            env["OPENCODE_CONFIG_DIR"] = str(config)
             with socket.socket() as sock:
                 sock.bind(("127.0.0.1", 0))
                 port = sock.getsockname()[1]
@@ -158,9 +149,8 @@ def main():
                                     json.dumps(
                                         {
                                             "result": "passed",
-                                            "model": found,
-                                            "plugin": plugin["id"],
-                                            "state": plugin["state"],
+                                            "catalog_discovered": True,
+                                            "plugin_active": True,
                                         },
                                         indent=2,
                                     )
@@ -169,14 +159,8 @@ def main():
                         except OSError:
                             pass
                         time.sleep(1)
-                    log.seek(0)
-                    safe_log = re.sub(
-                        r"server password \S+",
-                        "server password [REDACTED]",
-                        log.read()[-12000:],
-                    )
                     raise RuntimeError(
-                        "Plugin not observed in fresh OpenCode runtime:\n" + safe_log
+                        "Plugin not observed in fresh OpenCode runtime; raw logs withheld"
                     )
                 finally:
                     os.killpg(process.pid, signal.SIGTERM)

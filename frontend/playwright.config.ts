@@ -9,9 +9,10 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:8049',
     viewport: { width: 1440, height: 1000 },
     trace: 'retain-on-failure',
+    serviceWorkers: 'block',
   },
   webServer: {
-    command: 'npm run dev -- --port 8049 --strictPort',
+    command: 'node tests/serve-fixtures.mjs',
     url: 'http://127.0.0.1:8049',
     reuseExistingServer: false,
   },

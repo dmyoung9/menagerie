@@ -1,6 +1,6 @@
 """Opt-in real inference check. Downloads CPU engine + small model into temp storage.
 
-Run with an installed Menagerie interpreter: python -I scripts/smoke_opencode.py
+Run with the intended interpreter: python -m scripts.smoke_opencode --approve
 Requires OpenCode V2 on PATH. Uses private state/config and a standalone client.
 """
 
@@ -20,6 +20,8 @@ from controlplane.api import create_app
 from controlplane.jobs import Jobs
 from controlplane.managed_engines import catalog, install
 from controlplane.plugin_install import manage
+
+from .check_support import run_live_check
 
 
 def free_port():
@@ -155,7 +157,6 @@ async def main():
             )
             output, _ = await asyncio.wait_for(process.communicate(), 180)
             text = output.decode(errors="replace")
-            print(text, flush=True)
             events = [
                 json.loads(line) for line in text.splitlines() if line.startswith("{")
             ]
@@ -198,4 +199,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_live_check(main, "scripts.smoke_opencode")
