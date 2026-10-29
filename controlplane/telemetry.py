@@ -14,7 +14,7 @@ _cpu_previous = {}
 
 def sample():
     mem, swap = psutil.virtual_memory(), psutil.swap_memory()
-    disk = psutil.disk_usage(Path.home())
+    disk = psutil.disk_usage(str(Path.home()))
     result = {
         "ts": time.time(),
         "cpu_count": len(psutil.Process().cpu_affinity())

@@ -6,11 +6,14 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import psutil
 import pytest
 
-from controlplane import adapters, host, processes
+from controlplane import adapters, host, processes, telemetry
+
+sample_host = telemetry.sample
 
 
 def test_state_precedence(tmp_path, monkeypatch):
@@ -23,6 +26,43 @@ def test_state_precedence(tmp_path, monkeypatch):
         assert host.state_path() == tmp_path / "Menagerie"
     else:
         assert host.state_path() == Path.home() / ".local/state/menagerie"
+
+
+def test_telemetry_windows_path_and_unavailable_load_average(monkeypatch):
+    def disk_usage(path):
+        assert isinstance(path, str)
+        return SimpleNamespace(free=10 * 1024**3, total=20 * 1024**3)
+
+    monkeypatch.setattr(telemetry.psutil, "disk_usage", disk_usage)
+    monkeypatch.setattr(
+        telemetry.psutil,
+        "virtual_memory",
+        lambda: SimpleNamespace(total=32768 * 1048576, available=24000 * 1048576),
+    )
+    monkeypatch.setattr(
+        telemetry.psutil, "swap_memory", lambda: SimpleNamespace(used=0)
+    )
+    monkeypatch.setattr(
+        telemetry.psutil,
+        "Process",
+        lambda: SimpleNamespace(cpu_affinity=lambda: [0, 1]),
+    )
+    monkeypatch.setattr(telemetry.psutil, "cpu_percent", lambda: 0)
+    monkeypatch.delattr(telemetry.os, "getloadavg", raising=False)
+    monkeypatch.setattr(telemetry, "executable", lambda name: "synthetic-nvidia-smi")
+    monkeypatch.setattr(
+        telemetry.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=1, stderr="Synthetic telemetry unavailable"
+        ),
+    )
+    result = sample_host()
+    assert "load_average" not in result
+    assert result["disk_free_gib"] == 10
+    assert result["gpus"] == []
+    assert result["gpu_process_attribution"] is False
+    assert result["errors"] == ["Synthetic telemetry unavailable"]
 
 
 def test_lock_excludes_other_process_and_recovers(tmp_path):
