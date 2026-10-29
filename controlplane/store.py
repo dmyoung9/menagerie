@@ -100,7 +100,17 @@ class Store:
         revision = row[0] if row else 0
         if expected is not None and revision != expected:
             raise ValueError("Revision changed; refresh before saving")
-        data["revision"] = revision + 1
+        # Recreating a removed identity (for example a managed engine recipe)
+        # must extend retained history, not collide with its first revision.
+        historical_revision = (
+            c.execute(
+                "SELECT COALESCE(MAX(revision),0) FROM revisions WHERE kind=? AND id=?",
+                (kind, ident),
+            ).fetchone()[0]
+            if row is None and historical
+            else revision
+        )
+        data["revision"] = max(revision, historical_revision) + 1
         c.execute(
             "INSERT OR REPLACE INTO objects VALUES(?,?,?,?)",
             (kind, ident, data["revision"], encode(data)),

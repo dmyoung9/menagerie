@@ -5,9 +5,11 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 
@@ -47,11 +49,19 @@ def main():
     payload = work / "payload/Menagerie"
     shutil.copyfile(root / "LICENSE", payload / "LICENSE.txt")
     python_license = Path(sys.base_prefix) / "LICENSE.txt"
-    if not python_license.is_file():
-        raise RuntimeError(
-            "Python distribution license is missing; cannot distribute the runtime"
-        )
-    shutil.copyfile(python_license, payload / "PYTHON-LICENSE.txt")
+    if python_license.is_file():
+        shutil.copyfile(python_license, payload / "PYTHON-LICENSE.txt")
+    else:
+        # Some uv-managed Python distributions omit this text. Acquire only
+        # the license, from the exact CPython release, not a moving branch.
+        url = f"https://raw.githubusercontent.com/python/cpython/v{platform.python_version()}/LICENSE"
+        with urllib.request.urlopen(url, timeout=60) as response:
+            text = response.read(128 * 1024 + 1)
+        if len(text) > 128 * 1024 or b"PYTHON SOFTWARE FOUNDATION" not in text:
+            raise RuntimeError(
+                "Cannot verify the Python license text; refusing to distribute"
+            )
+        (payload / "PYTHON-LICENSE.txt").write_bytes(text)
     notices = []
     for distribution in importlib.metadata.distributions():
         if distribution.metadata["Name"].lower() in {

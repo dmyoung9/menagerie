@@ -212,6 +212,29 @@ def check(installer, worker, baseline=None):
                 gateway,
             )
             assert b"[DONE]" in streamed
+            cancel = urllib.request.Request(
+                f"http://127.0.0.1:{gateway}/v1/chat/completions",
+                data=json.dumps(
+                    {
+                        "model": "fixture",
+                        "messages": [
+                            {"role": "user", "content": "synthetic cancellation"}
+                        ],
+                        "stream": True,
+                    }
+                ).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with opener.open(cancel, timeout=30) as response:
+                assert response.readline().startswith(b"data:")
+            for _ in range(100):
+                if not any(request("/health")["inflight"].values()):
+                    break
+                time.sleep(0.1)
+            else:
+                raise AssertionError(
+                    "Disconnected fake stream retained an in-flight request"
+                )
             # Authenticated, loopback shutdown runs Manager.close and kills descendants.
             execute(launch("stop"))
             wait_dead(parent)
@@ -229,6 +252,7 @@ def check(installer, worker, baseline=None):
                 )
             execute(launch())
             assert any(d["id"] == ident for d in request("/api/status")["deployments"])
+            assert any(m["local_path"] == str(model) for m in request("/api/models"))
             execute(
                 [app / "unins000.exe", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
             )
@@ -239,6 +263,7 @@ def check(installer, worker, baseline=None):
             installed = True
             execute(launch())
             assert any(d["id"] == ident for d in request("/api/status")["deployments"])
+            assert any(m["local_path"] == str(model) for m in request("/api/models"))
             execute(launch("stop"))
             print(
                 "PASS: native installer, isolated launch/duplicate/conflict, bundled dashboard, fake inference/streaming, process tree shutdown, restart/upgrade/uninstall/reinstall preservation"

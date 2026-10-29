@@ -211,6 +211,7 @@ async def install(jobs, ident, recipe_id):
     root.parent.mkdir(parents=True, exist_ok=True)
     install_lock = host.lock_file(root.parent / (recipe_id + ".lock"))
     pending = root / ".menagerie-install"
+    fingerprint = identity({k: v for k, v in recipe.items() if k != "revision"})
     try:
         # Only a provably incomplete, unregistered install may be retried in
         # place. Completed installations and unfamiliar directories are retained.
@@ -218,7 +219,7 @@ async def install(jobs, ident, recipe_id):
             root.is_dir()
             and not root.is_symlink()
             and pending.is_file()
-            and pending.read_text(encoding="utf-8") == identity(recipe)
+            and pending.read_text(encoding="utf-8") == fingerprint
             and not any(
                 r.get("managed", {}).get("root") == str(root)
                 for r in jobs.store.list("runtime")
@@ -230,7 +231,7 @@ async def install(jobs, ident, recipe_id):
         install_lock.close()
         raise
     try:
-        pending.write_text(identity(recipe), encoding="utf-8")
+        pending.write_text(fingerprint, encoding="utf-8")
         if recipe["kind"] == "archive":
             for index, asset in enumerate(recipe["assets"]):
                 archive = (

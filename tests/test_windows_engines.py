@@ -45,7 +45,14 @@ def bundle(entries):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
         for name, value in entries:
-            archive.writestr(name, value)
+            if isinstance(name, str):
+                # ZipInfo normalizes backslashes when constructed on Windows.
+                # Preserve the actual unsafe archive name for this fixture.
+                entry = zipfile.ZipInfo("fixture")
+                entry.filename = entry.orig_filename = name
+            else:
+                entry = name
+            archive.writestr(entry, value)
     return output.getvalue()
 
 
@@ -142,6 +149,23 @@ async def test_windows_zip_install_probe_and_failed_download_cleanup(
         with pytest.raises(ValueError, match="verification"):
             await engines.install(jobs, "job", "fixture")
         assert not (store.root / "engines/fixture").exists()
+        # A marked interrupted install may be retried; an unfamiliar directory
+        # or a registered installation is never overwritten.
+        recipe["assets"][0]["sha256"] = hashlib.sha256(content).hexdigest()
+        store.put("engine_recipe", recipe)
+        with store.connect() as connection:
+            connection.execute("DELETE FROM objects WHERE kind='runtime'")
+        interrupted = store.root / "engines/fixture"
+        interrupted.mkdir()
+        (interrupted / ".menagerie-install").write_text(
+            engines.identity(recipe), encoding="utf-8"
+        )
+        (interrupted / "partial-download").write_bytes(b"synthetic interrupted data")
+        runtime = await engines.install(jobs, "job", "fixture")
+        assert not (interrupted / "partial-download").exists()
+        assert runtime["executable"].endswith("llama-server.exe")
+        assert runtime["revision"] == 2
+        assert len(store.history("runtime", runtime["id"])) == 2
 
 
 @pytest.mark.asyncio

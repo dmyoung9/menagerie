@@ -118,6 +118,12 @@ def run(action="open", state=None, port=8017, gateway_port=8001, browser=True):
                         "Menagerie could not start. Check dashboard/gateway port conflicts and daemon.log in the state directory."
                     )
                 if time.monotonic() >= deadline:
+                    child.terminate()
+                    try:
+                        child.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        child.kill()
+                        child.wait(timeout=10)
                     raise RuntimeError(
                         "Menagerie startup timed out; inspect daemon.log before retrying"
                     )
