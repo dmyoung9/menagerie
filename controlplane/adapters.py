@@ -1,12 +1,15 @@
 """Version-probed runtime adapters. No shell interpolation or downloaded code execution."""
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
 import re
 import struct
 from pathlib import Path
+
+import psutil
 
 FIELDS = {
     "mmproj": {"type": "string", "label": "Multimodal projector path"},
@@ -135,15 +138,26 @@ ENV_KEYS = {
 
 
 async def command(argv, env=None, timeout=30):
-    process = await asyncio.create_subprocess_exec(
+    from . import processes
+
+    process = await processes.spawn(
         *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
     )
     try:
         output, _ = await asyncio.wait_for(process.communicate(), timeout)
     except BaseException:
-        process.kill()
+        with contextlib.suppress(psutil.NoSuchProcess):
+            await processes.terminate(
+                {
+                    "pid": process.pid,
+                    "pid_started": psutil.Process(process.pid).create_time(),
+                },
+                grace=0,
+            )
         await process.wait()
         raise
+    finally:
+        processes.release(process.pid)
     text = output.decode(errors="replace")
     if process.returncode:
         raise ValueError(f"Command failed ({process.returncode}): {text[-2000:]}")
@@ -157,9 +171,32 @@ def environment(runtime):
     env = {
         k: v
         for k, v in os.environ.items()
-        if k in {"PATH", "HOME", "LANG", "XDG_RUNTIME_DIR"}
+        if k.upper()
+        in {
+            "PATH",
+            "HOME",
+            "LANG",
+            "XDG_RUNTIME_DIR",
+            "SYSTEMROOT",
+            "WINDIR",
+            "TEMP",
+            "TMP",
+            "USERPROFILE",
+            "LOCALAPPDATA",
+            "APPDATA",
+            "PATHEXT",
+        }
     }
     env.update(runtime.get("env", {}))
+    if os.name == "nt" and runtime.get("managed", {}).get("dll_dirs"):
+        root = Path(runtime["managed"]["root"]).resolve()
+        directories = [Path(p).resolve() for p in runtime["managed"]["dll_dirs"]]
+        if any(not p.is_relative_to(root) for p in directories):
+            raise ValueError("Managed DLL directory escapes the engine installation")
+        path_key = next((k for k in env if k.upper() == "PATH"), "PATH")
+        env[path_key] = os.pathsep.join(
+            [*(str(p) for p in directories), env.get(path_key, "")]
+        )
     return env
 
 

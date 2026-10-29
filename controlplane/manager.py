@@ -1,12 +1,9 @@
 import asyncio
 import contextlib
-import fcntl
 import json
 import math
-import os
 import re
 import shutil
-import signal
 import socket
 import time
 from pathlib import Path
@@ -14,7 +11,7 @@ from pathlib import Path
 import httpx
 import psutil
 
-from . import adapters, deployment_sets, telemetry
+from . import adapters, deployment_sets, host, processes, telemetry
 from .schema import Settings
 from .store import encode, identity, uid
 
@@ -181,23 +178,10 @@ class Manager:
         return d
 
     def owned(self, d):
-        try:
-            p = psutil.Process(d["pid"])
-            return (
-                p.is_running()
-                and p.status() != psutil.STATUS_ZOMBIE
-                and abs(p.create_time() - d["pid_started"]) < 0.01
-                and os.getpgid(p.pid) == p.pid
-            )
-        except (KeyError, TypeError, psutil.Error, ProcessLookupError):
-            return False
+        return processes.owned(d)
 
     async def start(self):
-        self.file_lock = open(self.store.root / "daemon.lock", "a")
-        try:
-            fcntl.flock(self.file_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            raise RuntimeError("Another daemon owns this registry")
+        self.file_lock = host.lock_file(self.store.root / "daemon.lock")
         self.host = await asyncio.to_thread(telemetry.sample)
         for d in self.store.list("deployment"):
             if d["state"] in ACTIVE | {"VALIDATING"}:
@@ -652,11 +636,10 @@ class Manager:
             session_id=session["id"],
             log_path=str(folder / "runtime.log"),
         )
-        proc = await asyncio.create_subprocess_exec(
+        proc = await processes.spawn(
             *spec["argv"],
             cwd=folder,
             env=spec["env"],
-            start_new_session=True,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -725,7 +708,7 @@ class Manager:
     def write_log(self, path, line):
         if path.exists() and path.stat().st_size > 4 * 1024 * 1024:
             path.replace(path.with_suffix(".previous.log"))
-        with path.open("a") as f:
+        with path.open("a", encoding="utf-8") as f:
             f.write(f"{time.time():.3f} {line}\n")
 
     async def ready(self, d):
@@ -776,13 +759,7 @@ class Manager:
             except ValueError as exc:
                 if "No such" not in str(exc) and "no such" not in str(exc):
                     raise
-        if self.owned(d):
-            os.killpg(d["pid"], signal.SIGTERM)
-            deadline = time.monotonic() + 20
-            while self.owned(d) and time.monotonic() < deadline:
-                await asyncio.sleep(0.1)
-            if self.owned(d):
-                os.killpg(d["pid"], signal.SIGKILL)
+        await processes.terminate(d)
         proc = self.processes.pop(d["id"], None)
         if proc:
             with contextlib.suppress(asyncio.TimeoutError):
@@ -925,6 +902,7 @@ class Manager:
                             if d["state"] not in {"READY", "DEGRADED"}:
                                 continue
                             if not self.owned(d):
+                                processes.release(d.get("pid"))
                                 self.transition(
                                     d["id"],
                                     "FAILED",

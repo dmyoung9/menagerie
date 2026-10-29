@@ -1,8 +1,10 @@
 import argparse
 import asyncio
 import os
+import secrets
 import socket
 
+import psutil
 import uvicorn
 
 from .api import create_app
@@ -17,6 +19,13 @@ async def serve(args):
         dashboard_address=args.dashboard_address,
         gateway_port=args.gateway_port,
     )
+    app.state.instance_metadata = {
+        "pid": os.getpid(),
+        "pid_started": psutil.Process().create_time(),
+        "instance_id": secrets.token_urlsafe(32),
+        "port": args.port,
+        "gateway_port": args.gateway_port,
+    }
     sockets = []
     # Keep existing local listeners; optionally add a dashboard-only LAN socket.
     listeners = [
@@ -35,7 +44,10 @@ async def serve(args):
         for address, port in listeners:
             sock = socket.socket()
             sockets.append(sock)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if os.name == "nt":
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind((address, port))
             sock.listen(128)
 
@@ -44,11 +56,13 @@ async def serve(args):
                 app.state.manager.stopping = True
                 super().handle_exit(sig, frame)
 
-        await Server(
+        server = Server(
             uvicorn.Config(
                 app, log_level="info", access_log=False, timeout_graceful_shutdown=30
             )
-        ).serve(sockets=sockets)
+        )
+        app.state.request_shutdown = lambda: setattr(server, "should_exit", True)
+        await server.serve(sockets=sockets)
     finally:
         for sock in sockets:
             sock.close()

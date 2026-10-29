@@ -116,3 +116,26 @@ a running client server.
 
 Version alignment, release artifacts and tag-triggered publication are described
 in [releasing](releasing.md). Container deployment is documented in [Unraid](unraid.md).
+
+## Native Windows packaging (contributors)
+
+Build on Windows x64, with Node 22+, uv/Python 3.12, and Inno Setup 6 available.
+`uv build` produces the wheel with dashboard/plugin assets. Install that wheel and
+the locked `windows-build` dependency group in an external packaging environment,
+then run `scripts/build_windows.py` with that environment's Python. The script
+freezes the installed package, not checkout imports. See the Windows job in
+`.github/workflows/checks.yml` for the exact build contract.
+
+The ordinary installer is emitted under `dist/windows/`; temporary PyInstaller
+output belongs in ignored `build/windows/`. The GUI and CLI share a payload.
+`scripts.check_windows_distribution` inspects text, nested archives and embedded
+Menagerie code; human review of dependencies, licenses and binary provenance is
+still required. Python and distribution license metadata travel with the payload.
+
+CI also builds a private synthetic `0.0.0` installer with a distinct build manifest
+to test in-place replacement. It is never a release asset and is not evidence of
+compatibility with a historical Windows release. For a real baseline use
+`scripts.check_windows --baseline PATH --installer PATH --worker PATH` with explicit
+local inputs. The worker is a frozen `tests/fake_runtime.py`, never an inference
+engine. Run this only in a disposable Windows test account: installer checks create
+Start Menu/uninstall entries before cleaning them up.

@@ -17,7 +17,7 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 
-from . import adapters, deployment_sets, lifecycle
+from . import adapters, deployment_sets, host, lifecycle
 from .catalog import apply_reasoning, export_config, normalize
 from .jobs import Jobs
 from .manager import ACTIVE, Conflict, Manager, redact
@@ -36,12 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def create_app(state=None, dashboard_address=None, gateway_port=8001):
-    store = Store(
-        state
-        or os.environ.get(
-            "MENAGERIE_STATE", str(Path.home() / ".local/state/menagerie")
-        )
-    )
+    store = Store(host.state_path(state))
     manager = Manager(store)
     gateway_url = f"http://127.0.0.1:{gateway_port}/v1"
     jobs = Jobs(manager)
@@ -50,6 +45,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @asynccontextmanager
     async def lifespan(app):
         os.umask(0o077)
+        await manager.start()
         for job in store.list("job"):
             if job["state"] in {"RUNNING", "QUEUED"}:
                 store.put(
@@ -61,9 +57,18 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     },
                     historical=False,
                 )
-        await manager.start()
-        yield
-        await manager.close()
+        metadata = getattr(app.state, "instance_metadata", None)
+        instance_file = store.root / "instance.json"
+        try:
+            if metadata:
+                temporary = instance_file.with_suffix(".tmp")
+                temporary.write_text(json.dumps(metadata), encoding="utf-8")
+                temporary.replace(instance_file)
+            yield
+        finally:
+            await manager.close()
+            if metadata:
+                instance_file.unlink(missing_ok=True)
 
     app = FastAPI(title="Menagerie Control Plane", version=VERSION, lifespan=lifespan)
     app.state.manager, app.state.store = manager, store
@@ -207,6 +212,9 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     async def status():
         return {
             "version": VERSION,
+            "instance_id": getattr(app.state, "instance_metadata", {}).get(
+                "instance_id"
+            ),
             "csrf_token": csrf,
             "host": manager.host,
             "deployments": [
@@ -220,6 +228,19 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             "gateway_url": gateway_url,
             "state_path": str(store.root),
         }
+
+    @app.post("/api/daemon/shutdown")
+    async def shutdown(request: Request):
+        # A private-LAN dashboard must not stop the local desktop application.
+        local = (request.scope.get("server") or (None, None))[0]
+        if local not in {"127.0.0.1", "testserver"}:
+            raise HTTPException(403, "Daemon shutdown is loopback-only")
+        callback = getattr(app.state, "request_shutdown", None)
+        if callback is None:
+            raise HTTPException(409, "This server does not support launcher shutdown")
+        manager.stopping = True
+        callback()
+        return {"stopping": True}
 
     @app.get("/health")
     async def health():

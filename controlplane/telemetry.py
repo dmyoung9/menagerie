@@ -7,6 +7,8 @@ from pathlib import Path
 
 import psutil
 
+from .host import executable
+
 _cpu_previous = {}
 
 
@@ -22,7 +24,6 @@ def sample():
         "ram_total_mib": mem.total / 1048576,
         "ram_available_mib": mem.available / 1048576,
         "swap_used_mib": swap.used / 1048576,
-        "load_average": list(os.getloadavg()),
         "disk_free_gib": disk.free / 1024**3,
         "disk_total_gib": disk.total / 1024**3,
         "gpus": [],
@@ -32,13 +33,24 @@ def sample():
         # isolated PID namespace. Keep global GPU metrics, not false per-model 0s.
         "gpu_process_attribution": os.environ.get("MENAGERIE_CONTAINER") != "1",
     }
+    if hasattr(os, "getloadavg"):
+        result["load_average"] = list(os.getloadavg())
 
     def query(kind, fields):
         p = subprocess.run(
-            ["nvidia-smi", f"--query-{kind}={fields}", "--format=csv,noheader,nounits"],
+            [
+                executable("nvidia-smi") or "nvidia-smi",
+                f"--query-{kind}={fields}",
+                "--format=csv,noheader,nounits",
+            ],
             capture_output=True,
             text=True,
             timeout=4,
+            **(
+                {"creationflags": subprocess.CREATE_NO_WINDOW}
+                if os.name == "nt"
+                else {}
+            ),
         )
         if p.returncode:
             raise ValueError(p.stderr.strip()[:200])

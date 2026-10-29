@@ -15,6 +15,14 @@ must not silently use external services.
 - `frontend/tests/browser/`: a fresh browser context and dedicated Vite server;
   mocked API responses and a network allowlist. Unexpected API requests fail.
 - `plugins/opencode/discovery.test.ts`: in-memory SDK/transport behavior.
+- Native Windows CI runs host locking, Unicode argv, Job Object tree ownership,
+  probe timeout/crash cleanup, launcher identity/recovery, and Windows engine ZIP
+  tests. These use synthetic telemetry/fixtures and no inference.
+- The Windows installed-installer check runs in an isolated disposable runner
+  account, uses a frozen fake worker, removes developer tools from child `PATH`,
+  and verifies launch, duplicate starts, occupied ports, dashboard assets, fake
+  inference/streaming, clean tree shutdown, upgrade and retained state. It is not
+  a clean Windows 11 or GPU acceptance claim.
 
 Run commands from [development](development.md). Screenshots/traces from the
 maintained browser suite contain fixtures only and stay under ignored
@@ -34,6 +42,7 @@ These are not ordinary test-suite prerequisites and are never run implicitly:
 | `python -m scripts.check_opencode` | Installed OpenCode V2; temporary config and fake loopback catalog; no inference. SDK dependency resolution may need internet. |
 | `bash scripts/check_linux_install.sh BASELINE_WHEEL CANDIDATE_WHEEL` | Docker and network downloads into a disposable container; no host install, repository authentication, GPU, or inference. Baseline and candidate must have different content. |
 | `python -m scripts.check_container IMAGE` | Explicit locally built Docker image; disposable network/volume and synthetic state; verifies non-root operation, restart/replacement, shutdown and network boundaries. No GPU or inference. Also runs in CI. |
+| `python -m scripts.check_windows --installer PATH --worker PATH [--baseline PATH]` | Native Windows disposable account; local installer and frozen fake worker. Creates/removes installation entries and shortcuts; temporary state/model fixtures. No runtime/model downloads or real inference. Also runs in Windows CI. |
 | `python -m scripts.smoke_opencode --approve` | Downloads a CPU engine and small model; performs real inference with temporary application/client state. |
 | `python -m scripts.smoke_vllm --approve` | Downloads a GPU runtime/model and uses GPU capacity with temporary state. |
 | `python tests/live_acceptance.py --gateway-port PORT --alias ALIAS --approve` | Targets an existing gateway. Requests may load models and evict eligible deployments under saved policy. Does not edit configuration. |

@@ -10,7 +10,10 @@ streaming gateway or the bundled OpenCode discovery plugin.
 
 ## Install
 
-Linux is the installation target. Download and inspect the release installer,
+For native Windows 11 x64, use the [Windows installer](docs/windows.md).
+Windows hardware acceptance is separate from the automated packaging checks.
+
+On Linux, download and inspect the release installer,
 then run it to install the application in your user account:
 
 ```sh
@@ -75,7 +78,7 @@ alongside existing versions; choose the new version in a deployment before
 removing its predecessor.
 
 This is a single-user local application. NVIDIA is the GPU telemetry path;
-drivers remain a host prerequisite. Windows/WSL and cross-distribution acceptance
+drivers remain a host prerequisite. Windows hardware, WSL, and cross-distribution acceptance
 are pending. See [installation and recovery](docs/installation.md),
 [operations](docs/operations.md), and [release validation](docs/release-validation.md)
 for safety boundaries and release requirements.

@@ -13,7 +13,16 @@ def isolated_environment(root: Path) -> dict[str, str]:
     """Pass tool discovery/locale only, never the caller's credentials or config."""
     env = {
         key: os.environ[key]
-        for key in ("PATH", "LANG", "LC_ALL", "TZ")
+        for key in (
+            "PATH",
+            "LANG",
+            "LC_ALL",
+            "TZ",
+            "SYSTEMROOT",
+            "SystemRoot",
+            "WINDIR",
+            "PATHEXT",
+        )
         if key in os.environ
     }
     paths = {
@@ -26,6 +35,11 @@ def isolated_environment(root: Path) -> dict[str, str]:
         "HF_HOME": "cache/huggingface",
         "UV_CACHE_DIR": "cache/uv",
         "UV_PYTHON_INSTALL_DIR": "data/python",
+        "USERPROFILE": "home",
+        "LOCALAPPDATA": "local",
+        "APPDATA": "roaming",
+        "TEMP": "tmp",
+        "TMP": "tmp",
     }
     for key, relative in paths.items():
         path = root / relative

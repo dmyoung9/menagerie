@@ -40,6 +40,7 @@ After image publication succeeds, the workflow creates a draft GitHub release,
 uploads exact matching artifacts, then publishes it. Published assets include:
 
 - versioned wheel and corresponding source archive;
+- native Windows x64 installer and its checksum, built and checked on Windows;
 - `install.sh` and `menagerie-unraid.xml`;
 - versioned runtime dependency constraints;
 - individual `.sha256` files and aggregate `SHA256SUMS`;
@@ -58,3 +59,12 @@ and source/license availability. Test pull/install using authorized access. Keep
 Unraid hardware acceptance open until target-host results are supplied, with CPU,
 acceleration and telemetry distinguished. An image build and synthetic network/
 persistence checks are not evidence of actual GPU serving.
+
+Windows build success likewise does not establish native GPU support. Before
+claiming Windows 11 / RTX 5060 acceptance, record first-model onboarding,
+inference, streaming, cancellation, clean shutdown and upgrade/state preservation
+on that target. Record actual browser/SmartScreen/Defender/firewall prompts from
+a fresh download, not assumed prompts from CI. Keep application, runtime, CUDA
+acceleration and telemetry evidence separate. No signing credentials are required
+to build; signing/reputation and any execution-policy blockers require explicit
+delivery review.

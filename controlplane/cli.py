@@ -13,20 +13,8 @@ import urllib.request
 from copy import deepcopy
 from pathlib import Path
 
+from .host import executable, state_path
 from .version import VERSION
-
-
-def state_path(value=None):
-    return (
-        Path(
-            value
-            or os.environ.get(
-                "MENAGERIE_STATE", str(Path.home() / ".local/state/menagerie")
-            )
-        )
-        .expanduser()
-        .resolve()
-    )
 
 
 class Client:
@@ -68,7 +56,7 @@ def doctor(args, client):
         "state_writable": os.access(root if root.exists() else ancestor, os.W_OK),
         "disk_free_bytes": shutil.disk_usage(ancestor).free,
         "dashboard_assets": assets.is_file() or source_assets.is_file(),
-        "nvidia_smi_available": shutil.which("nvidia-smi") is not None,
+        "nvidia_smi_available": executable("nvidia-smi") is not None,
         "endpoint": client.base,
     }
     try:
@@ -88,7 +76,7 @@ def doctor(args, client):
         report.update(
             daemon_reachable=False,
             error=str(exc),
-            hint="Run menagerie serve, or inspect systemctl --user status menagerie.service and its journal.",
+            hint="Open Menagerie again or run menagerie serve; inspect the daemon log if startup fails.",
         )
     # Local checks describe this installation; the endpoint may belong to another.
     report["ok"] = (

@@ -3,10 +3,15 @@
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
+if "--fixture-child" in sys.argv:
+    time.sleep(90)
+    raise SystemExit()
 if "--version" in sys.argv:
     print("fixture-runtime 1.0")
     raise SystemExit()
@@ -18,9 +23,16 @@ parser.add_argument("--alias")
 parser.add_argument("--no-ui", action="store_true")
 parser.add_argument("--metrics", action="store_true")
 parser.add_argument("--fail", action="store_true")
+parser.add_argument("--spawn-child", action="store_true")
 args = parser.parse_args()
 if args.fail:
     raise SystemExit(42)
+if args.spawn_child:
+    command = [sys.executable]
+    if not getattr(sys, "frozen", False):
+        command.append(__file__)
+    child = subprocess.Popen(command + ["--fixture-child"])
+    Path(args.model).with_suffix(".child.pid").write_text(str(child.pid))
 
 
 class Handler(BaseHTTPRequestHandler):

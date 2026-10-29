@@ -1,22 +1,24 @@
 """Versioned user-space engine installs from upstream release assets."""
 
 import asyncio
+import contextlib
 import hashlib
 import platform
 import re
 import shutil
 import sys
 import tarfile
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 
-from . import adapters
+from . import adapters, host
 from .engine_catalog import ENGINES
 from .store import identity
 
 
-def release_recipes(engine, releases, machine):
+def release_recipes(engine, releases, machine, system="Linux"):
     """Select concrete assets, never the moving GitHub /latest download URL."""
-    arch = {"x86_64": "x64", "aarch64": "arm64"}.get(machine)
+    arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64"}.get(machine.lower())
     if not arch:
         return []
     recipes = {}
@@ -34,22 +36,40 @@ def release_recipes(engine, releases, machine):
         assets = release.get("assets", [])
         for asset in assets:
             name = asset["name"]
-            if not name.startswith("llama-") or not name.endswith(f"-{arch}.tar.gz"):
-                continue
-            if "-bin-ubuntu-" not in name and "-bin-linux-" not in name:
-                continue
-            if "-cuda-12.8-" in name:
-                backend = "cuda"
-            elif re.search(rf"-bin-(?:ubuntu|linux)-{arch}\.tar\.gz$", name):
-                backend = "cpu"
+            if system == "Windows":
+                # CUDA 12.4 builds do not establish Blackwell support. Select
+                # a modern toolkit build and still require a driver/probe check.
+                match = re.fullmatch(
+                    rf"llama-{re.escape(tag)}-bin-win-(cpu|cuda-(?:12\.8|13\.\d+))-{arch}\.zip",
+                    name,
+                )
+                if not match or arch != "x64":
+                    continue
+                backend = "cpu" if match[1] == "cpu" else "cuda"
+            elif system == "Linux":
+                if not name.startswith("llama-") or not name.endswith(
+                    f"-{arch}.tar.gz"
+                ):
+                    continue
+                if "-cuda-12.8-" in name and "-bin-ubuntu-" in name:
+                    backend = "cuda"
+                elif re.search(rf"-bin-(?:ubuntu|linux)-{arch}\.tar\.gz$", name):
+                    backend = "cpu"
+                else:
+                    continue
             else:
                 continue
             if backend in recipes:
                 continue
             selected = [asset]
             if engine == "llama.cpp" and backend == "cuda":
+                companion_name = (
+                    "cudart-" + name.replace(f"-{tag}-", "-")
+                    if system == "Windows"
+                    else "cudart-" + name
+                )
                 companion = next(
-                    (a for a in assets if a["name"] == "cudart-" + name), None
+                    (a for a in assets if a["name"] == companion_name), None
                 )
                 if not companion:
                     continue
@@ -64,6 +84,8 @@ def release_recipes(engine, releases, machine):
                 "version": tag,
                 "backend": backend,
                 "kind": "archive",
+                "system": system,
+                "archive_format": "zip" if system == "Windows" else "tar.gz",
                 "assets": [
                     {
                         "url": a["browser_download_url"],
@@ -72,18 +94,19 @@ def release_recipes(engine, releases, machine):
                     }
                     for a in selected
                 ],
-                "requirements": "Linux; NVIDIA driver supporting CUDA 12.8"
+                "requirements": f"{system}; NVIDIA driver compatible with the selected CUDA build; installed executable probe required"
                 if backend == "cuda"
-                else "Linux CPU",
+                else f"{system} CPU",
             }
     return list(recipes.values())
 
 
 async def catalog(client, store):
-    if platform.system() != "Linux":
+    system = platform.system()
+    if system not in {"Linux", "Windows"}:
         return {
             "engines": [],
-            "note": "Managed engines currently support Linux. Register an existing engine on other platforms.",
+            "note": "Managed engines support Linux and Windows x64. Register an existing engine on other platforms.",
         }
 
     async def discover(engine):
@@ -113,7 +136,7 @@ async def catalog(client, store):
                 )
                 response.raise_for_status()
                 recipes = release_recipes(
-                    engine["id"], response.json(), platform.machine()
+                    engine["id"], response.json(), platform.machine(), system
                 )
             for recipe in recipes:
                 recipe["repository"] = engine["repository"]
@@ -123,7 +146,7 @@ async def catalog(client, store):
                 "releases": recipes,
                 "note": ""
                 if recipes
-                else "No matching checksummed Linux binary found for this platform.",
+                else "No matching checksummed binary found for this platform.",
             }
         except (ValueError, KeyError, OSError) as exc:
             return engine | {"releases": [], "note": str(exc)}
@@ -131,10 +154,45 @@ async def catalog(client, store):
             # One unavailable supplier must not hide the other engines.
             return engine | {"releases": [], "note": f"Release discovery failed: {exc}"}
 
-    return {"engines": await asyncio.gather(*(discover(e) for e in ENGINES))}
+    supported = [e for e in ENGINES if system == "Linux" or e["id"] == "llama.cpp"]
+    return {"engines": await asyncio.gather(*(discover(e) for e in supported))}
 
 
 def unpack(archive, destination):
+    if zipfile.is_zipfile(archive):
+        with zipfile.ZipFile(archive) as bundle:
+            members = bundle.infolist()
+            if sum(m.file_size for m in members) > 12 * 1024**3 or len(members) > 20000:
+                raise ValueError("Engine archive exceeds extraction limits")
+            seen = set()
+            for member in members:
+                name = member.filename
+                parts = PurePosixPath(name).parts
+                if (
+                    not parts
+                    or name.startswith("/")
+                    or "\\" in name
+                    or any(
+                        p in {".", ".."}
+                        or ":" in p
+                        or p.endswith((" ", "."))
+                        or re.fullmatch(
+                            r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", p, re.I
+                        )
+                        for p in parts
+                    )
+                    or (member.external_attr >> 16) & 0o170000 == 0o120000
+                ):
+                    raise ValueError("Unsafe Windows engine archive member")
+                key = name.rstrip("/").casefold()
+                target = destination.joinpath(*parts)
+                if key in seen or (
+                    target.exists() and not (member.is_dir() and target.is_dir())
+                ):
+                    raise ValueError("Engine archive contains colliding paths")
+                seen.add(key)
+            bundle.extractall(destination)
+        return
     with tarfile.open(archive, "r:gz") as bundle:
         members = bundle.getmembers()
         if sum(m.size for m in members) > 12 * 1024**3:
@@ -145,14 +203,39 @@ def unpack(archive, destination):
 
 async def install(jobs, ident, recipe_id):
     recipe = jobs.store.get("engine_recipe", recipe_id)
+    if recipe.get("system", "Linux") != platform.system():
+        raise ValueError(
+            "Engine recipe targets a different operating system; refresh the engine catalog"
+        )
     root = jobs.store.root / "engines" / recipe_id
     root.parent.mkdir(parents=True, exist_ok=True)
-    # mkdir is the cross-job exclusion: an install never overwrites another one.
-    root.mkdir()
+    install_lock = host.lock_file(root.parent / (recipe_id + ".lock"))
+    pending = root / ".menagerie-install"
     try:
+        # Only a provably incomplete, unregistered install may be retried in
+        # place. Completed installations and unfamiliar directories are retained.
+        if (
+            root.is_dir()
+            and not root.is_symlink()
+            and pending.is_file()
+            and pending.read_text(encoding="utf-8") == identity(recipe)
+            and not any(
+                r.get("managed", {}).get("root") == str(root)
+                for r in jobs.store.list("runtime")
+            )
+        ):
+            shutil.rmtree(root)
+        root.mkdir()
+    except BaseException:
+        install_lock.close()
+        raise
+    try:
+        pending.write_text(identity(recipe), encoding="utf-8")
         if recipe["kind"] == "archive":
             for index, asset in enumerate(recipe["assets"]):
-                archive = root / f"download-{index}.tar.gz"
+                archive = (
+                    root / f"download-{index}.{recipe.get('archive_format', 'tar.gz')}"
+                )
                 digest, received = hashlib.sha256(), 0
                 jobs.progress(
                     ident, f"Downloading {recipe['engine']} {recipe['version']}"
@@ -180,15 +263,23 @@ async def install(jobs, ident, recipe_id):
                 # Keep cleanup sequential with extraction even on task cancellation.
                 unpack(archive, root)
                 archive.unlink()
-            binaries = list(root.rglob("llama-server"))
+            windows = platform.system() == "Windows"
+            binaries = list(
+                root.rglob("llama-server.exe" if windows else "llama-server")
+            )
             if len(binaries) != 1:
                 raise ValueError("Release must contain exactly one llama-server")
             executable = binaries[0]
-            executable.chmod(executable.stat().st_mode | 0o100)
+            if not windows:
+                executable.chmod(executable.stat().st_mode | 0o100)
             libraries = sorted(
                 {str(p.parent) for p in root.rglob("*.so*") if p.is_file()}
             )
-            env = {"LD_LIBRARY_PATH": ":".join(libraries)} if libraries else {}
+            env = (
+                {"LD_LIBRARY_PATH": ":".join(libraries)}
+                if libraries and not windows
+                else {}
+            )
         else:
             jobs.progress(ident, "Creating isolated vLLM environment")
             await adapters.command(
@@ -240,13 +331,21 @@ async def install(jobs, ident, recipe_id):
                 "root": str(root),
                 "recipe_id": recipe_id,
                 "backend": recipe["backend"],
+                "dll_dirs": sorted({str(p.parent) for p in root.rglob("*.dll")})
+                if platform.system() == "Windows"
+                else [],
             },
         }
         runtime["capabilities"] = await adapters.probe(runtime)
-        return jobs.store.put("runtime", runtime)
+        saved = jobs.store.put("runtime", runtime)
+        with contextlib.suppress(OSError):
+            pending.unlink()
+        return saved
     except BaseException:
         shutil.rmtree(root)
         raise
+    finally:
+        install_lock.close()
 
 
 def remove(store, runtime):
