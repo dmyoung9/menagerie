@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { EngineCatalog } from './EngineCatalog';
 import { VariantDialog } from './VariantDialog';
 import { TestPrompt } from './TestPrompt';
-import { gib, type api as request } from './ui';
+import { gib, telemetryStale, type api as request } from './ui';
 import type { Registry, HostSnapshot } from './types';
 import { Button } from '@/components/ui/button';
 import {
@@ -29,14 +29,13 @@ export function FirstRun({
   const [choose, setChoose] = useState(false);
   const models = data.models || [],
     deployments = data.deployments || [];
-  const stale =
-    host.stale ??
-    (typeof host.ts === 'number' && Date.now() / 1000 - host.ts > 15);
-  const telemetry = stale
-    ? 'Telemetry is stale; refresh before relying on these numbers'
-    : typeof host.ts !== 'number'
-      ? 'Telemetry timestamp unavailable'
-      : 'Observed telemetry';
+  const stale = telemetryStale(host);
+  const telemetry =
+    typeof host.ts !== 'number'
+      ? 'Telemetry not yet available; waiting on the first sample.'
+      : stale
+        ? 'Telemetry is stale; refresh before relying on these numbers'
+        : 'Observed telemetry';
   return (
     <details className="mb-5" open={!deployments.length}>
       <summary>Get your first response</summary>

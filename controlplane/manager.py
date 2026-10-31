@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 import math
 import re
 import shutil
@@ -14,6 +15,8 @@ import psutil
 from . import adapters, deployment_sets, host, processes, telemetry
 from .schema import Settings
 from .store import encode, identity, uid
+
+logger = logging.getLogger("menagerie")
 
 ACTIVE = {"QUEUED", "STARTING", "LOADING", "READY", "DEGRADED", "STOPPING"}
 TRANSITIONS = {
@@ -866,6 +869,42 @@ class Manager:
             ):
                 await self._stop_unit_locked(unit["id"], "Idle unload")
 
+    def _note_collector_success(self):
+        # A clean sample cycle closes out any prior failure run: clear the
+        # in-memory error state so "healthy now" is distinguishable from
+        # "was broken", and record recovery in the event log.
+        if self.collector["consecutive_errors"]:
+            try:
+                self.store.event(
+                    "collector_recovered",
+                    {"last_error": self.collector["last_error"]},
+                )
+            except Exception:
+                # The store may still be locked; the in-memory state below is
+                # the source of truth for /api/status and the dashboard.
+                pass
+        self.collector.update(
+            consecutive_errors=0,
+            last_error=None,
+            last_error_at=None,
+        )
+
+    def _note_collector_failure(self, message):
+        first = self.collector["consecutive_errors"] == 0
+        self.collector.update(
+            consecutive_errors=self.collector["consecutive_errors"] + 1,
+            last_error=message,
+            last_error_at=time.time(),
+        )
+        # Only persist the failure on the first iteration of a failure run, so
+        # a persistently locked store does not flood the event log; on the
+        # first failure the write itself may also fail, which is logged once.
+        if first:
+            try:
+                self.store.event("collector_error", {"error": message})
+            except Exception:
+                logger.warning("collector failure could not be persisted: %s", message)
+
     async def monitor(self):
         last_cleanup = 0
         while True:
@@ -1021,22 +1060,13 @@ class Manager:
                                     (quota,),
                                 )
                         last_cleanup = time.time()
-                self.collector["consecutive_errors"] = 0
+                self._note_collector_success()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                message = redact(str(exc))
-                self.collector.update(
-                    consecutive_errors=self.collector["consecutive_errors"] + 1,
-                    last_error=message,
-                    last_error_at=time.time(),
-                )
                 # A locked store must not end supervision: the failed write is
                 # reported in memory even when its event cannot be persisted.
-                try:
-                    self.store.event("collector_error", {"error": message})
-                except Exception:
-                    pass
+                self._note_collector_failure(redact(str(exc)))
             try:
                 interval = self.settings()["sample_seconds"]
             except Exception:

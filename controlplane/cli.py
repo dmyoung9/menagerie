@@ -7,7 +7,6 @@ import math
 import os
 import shutil
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -62,13 +61,23 @@ def doctor(args, client):
     }
     try:
         status = client.request("/api/status")
+        collector = status.get("collector") or {}
+        consecutive = collector.get("consecutive_errors") or 0
+        last_error = collector.get("last_error")
         report.update(
             daemon_reachable=True,
             version=status["version"],
-            telemetry_age_s=time.time() - status["host"].get("ts", 0),
+            telemetry_age_s=status["host"].get("age_seconds"),
             telemetry_stale=status["host"].get("stale"),
             telemetry_errors=status["host"].get("errors", []),
-            collector=status.get("collector"),
+            collector=collector,
+            collector_degraded=bool(consecutive),
+            collector_status=(
+                f"degraded: {consecutive} consecutive sample failure(s)"
+                + (f"; last: {last_error}" if last_error else "")
+                if consecutive
+                else "healthy"
+            ),
             pressure=status["host"].get("pressure"),
             deployments=[
                 {"alias": d["alias"], "state": d["state"]}
@@ -86,6 +95,7 @@ def doctor(args, client):
         report["daemon_reachable"]
         and report["dashboard_assets"]
         and report["state_writable"]
+        and not report.get("collector_degraded", False)
     )
     return report, 0 if report["ok"] else 1
 

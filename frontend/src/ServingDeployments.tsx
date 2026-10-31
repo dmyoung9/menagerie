@@ -38,6 +38,7 @@ import {
   state,
   Status,
   Tabs,
+  telemetryStale,
   type Registry,
 } from './ui';
 import { ActivityFeed } from './Views';
@@ -113,9 +114,7 @@ export function ServingTable({
       </Button>
     );
   }
-  const stale =
-    host.stale ??
-    (typeof host.ts === 'number' && Date.now() / 1000 - host.ts > 10);
+  const stale = telemetryStale(host);
   return (
     <div className="table-wrap">
       <Table className={'deployment-table ' + (compact ? 'compact' : '')}>
