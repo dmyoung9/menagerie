@@ -66,7 +66,9 @@ def doctor(args, client):
             daemon_reachable=True,
             version=status["version"],
             telemetry_age_s=time.time() - status["host"].get("ts", 0),
+            telemetry_stale=status["host"].get("stale"),
             telemetry_errors=status["host"].get("errors", []),
+            collector=status.get("collector"),
             pressure=status["host"].get("pressure"),
             deployments=[
                 {"alias": d["alias"], "state": d["state"]}

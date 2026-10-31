@@ -2,8 +2,10 @@ import asyncio
 import json
 import os
 import socket
+import sqlite3
 import struct
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -297,6 +299,28 @@ async def test_pinned_not_automatic_victim_of_on_demand(store, tmp_path):
         await m.close()
 
 
+async def test_status_reports_stale_telemetry_and_collector_errors(tmp_path):
+    app = create_app(tmp_path / "api")
+    m = app.state.manager
+    m.host = baseline() | {"ts": time.time()}
+    m.collector = {
+        "consecutive_errors": 2,
+        "last_error": "database is locked",
+        "last_error_at": time.time(),
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        status = (await client.get("/api/status")).json()
+        assert status["host"]["stale"] is False
+        assert status["host"]["age_seconds"] >= 0
+        assert status["collector"]["consecutive_errors"] == 2
+        m.host = baseline() | {"ts": time.time() - 3600}
+        status = (await client.get("/api/status")).json()
+        assert status["host"]["stale"] is True
+        assert status["host"]["age_seconds"] > 3000
+
+
 async def test_ui_revision_guard_and_model_catalog_contract(tmp_path):
     app = create_app(tmp_path / "api")
     store, m = app.state.store, app.state.manager
@@ -392,6 +416,51 @@ async def test_pressure_evicts_only_authorized_evictable(store, tmp_path, monkey
         await asyncio.wait_for(stopped.wait(), 5)
         assert store.get("deployment", "a")["state"] == "STOPPED"
         assert store.get("deployment", "b")["state"] == "READY"
+    finally:
+        await m.close()
+
+
+async def test_monitor_survives_a_locked_store(store, tmp_path, monkeypatch):
+    await seed(store, tmp_path)
+    store.put("settings", {"id": "host", "sample_seconds": 1})
+    m = Manager(store)
+    m.host = baseline()
+    ticks = []
+
+    def sample():
+        ticks.append(len(ticks) + 1)
+        return baseline() | {"ts": float(ticks[-1])}
+
+    monkeypatch.setattr("controlplane.telemetry.sample", sample)
+    listed = store.list
+    failed = False
+
+    def flaky_list(kind, c=None):
+        nonlocal failed
+        if kind == "deployment" and not failed:
+            failed = True
+            raise sqlite3.OperationalError("database is locked")
+        return listed(kind, c)
+
+    monkeypatch.setattr(store, "list", flaky_list)
+    recorded = store.event
+
+    def locked_event(kind, data, deployment=None, c=None):
+        if kind == "collector_error":
+            raise sqlite3.OperationalError("database is locked")
+        return recorded(kind, data, deployment, c)
+
+    monkeypatch.setattr(store, "event", locked_event)
+    m.loop_task = asyncio.create_task(m.monitor())
+    try:
+        for _ in range(100):
+            if len(ticks) > 1:
+                break
+            await asyncio.sleep(0.05)
+        assert len(ticks) > 1, "collector stopped after a failed error write"
+        assert not m.loop_task.done()
+        assert m.collector["consecutive_errors"] == 0
+        assert m.collector["last_error"] == "database is locked"
     finally:
         await m.close()
 

@@ -211,13 +211,20 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
 
     @app.get("/api/status")
     async def status():
+        sample_seconds = manager.settings()["sample_seconds"]
+        age = max(0.0, time.time() - manager.host.get("ts", 0))
         return {
             "version": VERSION,
             "instance_id": getattr(app.state, "instance_metadata", {}).get(
                 "instance_id"
             ),
             "csrf_token": csrf,
-            "host": manager.host,
+            "host": manager.host
+            | {
+                "age_seconds": round(age, 1),
+                "stale": age > max(10, 2 * sample_seconds),
+            },
+            "collector": manager.collector,
             "deployments": [
                 d | {"inflight": manager.inflight.get(d["id"], 0)}
                 for d in deployment_rows()

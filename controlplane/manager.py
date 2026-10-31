@@ -65,6 +65,11 @@ class Manager:
         self.was_pressure = False
         self.verified_artifacts = {}
         self.request_changed = asyncio.Event()
+        self.collector = {
+            "consecutive_errors": 0,
+            "last_error": None,
+            "last_error_at": None,
+        }
 
     def unit(self, ident):
         unit = deployment_sets.unit_for(self.store, ident)
@@ -1016,8 +1021,24 @@ class Manager:
                                     (quota,),
                                 )
                         last_cleanup = time.time()
+                self.collector["consecutive_errors"] = 0
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self.store.event("collector_error", {"error": redact(str(exc))})
-            await asyncio.sleep(self.settings()["sample_seconds"])
+                message = redact(str(exc))
+                self.collector.update(
+                    consecutive_errors=self.collector["consecutive_errors"] + 1,
+                    last_error=message,
+                    last_error_at=time.time(),
+                )
+                # A locked store must not end supervision: the failed write is
+                # reported in memory even when its event cannot be persisted.
+                try:
+                    self.store.event("collector_error", {"error": message})
+                except Exception:
+                    pass
+            try:
+                interval = self.settings()["sample_seconds"]
+            except Exception:
+                interval = 2
+            await asyncio.sleep(interval)

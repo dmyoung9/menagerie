@@ -29,12 +29,14 @@ export function FirstRun({
   const [choose, setChoose] = useState(false);
   const models = data.models || [],
     deployments = data.deployments || [];
-  const telemetry =
-    typeof host.ts !== 'number'
+  const stale =
+    host.stale ??
+    (typeof host.ts === 'number' && Date.now() / 1000 - host.ts > 15);
+  const telemetry = stale
+    ? 'Telemetry is stale; refresh before relying on these numbers'
+    : typeof host.ts !== 'number'
       ? 'Telemetry timestamp unavailable'
-      : Date.now() / 1000 - host.ts > 15
-        ? 'Telemetry is stale; refresh before relying on these numbers'
-        : 'Observed telemetry';
+      : 'Observed telemetry';
   return (
     <details className="mb-5" open={!deployments.length}>
       <summary>Get your first response</summary>
