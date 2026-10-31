@@ -90,12 +90,13 @@ def doctor(args, client):
             error=str(exc),
             hint="Open Menagerie again or run menagerie serve; inspect the daemon log if startup fails.",
         )
-    # Local checks describe this installation; the endpoint may belong to another.
+    # Local checks describe this installation; the endpoint may belong to
+    # another. Collector health is diagnostic — surfaced via collector_status /
+    # collector_degraded but not part of the daemon-reachable verdict.
     report["ok"] = (
         report["daemon_reachable"]
         and report["dashboard_assets"]
         and report["state_writable"]
-        and not report.get("collector_degraded", False)
     )
     return report, 0 if report["ok"] else 1
 
