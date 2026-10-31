@@ -3,7 +3,7 @@
 ## Install discovery
 
 Menagerie includes the plugin source in `plugins/opencode/` and bundles its runtime
-files into the Python wheel. It targets **OpenCode V2 2.1.3** and uses the matching
+files into the Python wheel. It targets **OpenCode V2 2.1.4** and uses the matching
 public `@opencode/plugin` SDK. V1 is not supported.
 
 ```sh
