@@ -64,6 +64,32 @@ export type ArtifactMetadata = UnknownRecord & {
   config?: (UnknownRecord & { text_config?: UnknownRecord | null }) | null;
   projector?: { name: string; path: string } | null;
 };
+export type TemplateKind = 'published' | 'embedded' | 'custom';
+export type TemplateSource = 'automatic' | TemplateKind;
+export type TemplateSelection = {
+  source: TemplateSource;
+  asset_id: string | null;
+};
+export type TemplateAssetPublic = {
+  id: string;
+  kind: TemplateKind;
+  artifact_id?: string | null;
+  name: string;
+  repo?: string | null;
+  revision?: string | null;
+  file_path?: string | null;
+  relative_path?: string | null;
+  sha256: string;
+  size_bytes?: number | null;
+  status?: 'available' | 'missing' | 'failed';
+  error?: string | null;
+};
+export type EffectiveTemplate = {
+  source: TemplateSource;
+  asset: TemplateAssetPublic | null;
+  description: string;
+};
+
 export type Artifact = {
   id: string;
   revision: number;
@@ -79,6 +105,8 @@ export type Artifact = {
   sha256?: string | null;
   metadata?: ArtifactMetadata;
   discovered_capabilities?: DiscoveredCapabilities;
+  template_default?: TemplateSelection | null;
+  templates?: TemplateAssetPublic[];
 };
 export type RuntimeCapabilities = {
   formats?: string[];
@@ -130,6 +158,7 @@ export type DeploymentDraft = {
   enabled: boolean;
   gpu: number;
   queue_timeout: number;
+  template_override?: TemplateSelection | null;
 };
 export type DeploymentSetDraft = {
   id?: string;
@@ -172,6 +201,7 @@ export type Deployment = {
   unit_id?: string;
   lifecycle?: DeploymentLifecycle;
   inflight?: number;
+  template_override?: TemplateSelection | null;
 };
 export type StandaloneServingDeployment = Deployment & {
   multi_model: false;
@@ -180,7 +210,12 @@ export type StandaloneServingDeployment = Deployment & {
 };
 export type DeploymentSet = Omit<
   Deployment,
-  'alias' | 'profile_id' | 'profile_snapshot' | 'port' | 'gpu'
+  | 'alias'
+  | 'profile_id'
+  | 'profile_snapshot'
+  | 'port'
+  | 'gpu'
+  | 'template_override'
 > & {
   multi_model: true;
   alias?: never;

@@ -13,9 +13,20 @@ import httpx
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from tqdm.auto import tqdm
 
-from . import adapters
+from . import adapters, templates
 from .manager import redact
 from .store import identity, uid
+
+
+class _TemplateProgress(tqdm):
+    """Silent progress for template-file downloads; they are small and
+    non-blocking. Progress is reported as a single job line."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs["file"] = io.StringIO()
+        kwargs["disable"] = False
+        super().__init__(*args, **kwargs)
+
 
 SPLIT_GGUF = re.compile(
     r"^(?P<stem>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.IGNORECASE
@@ -128,18 +139,16 @@ class Jobs:
             result = await asyncio.to_thread(inspect)
             from .capabilities import inspect as inspect_capabilities
 
-            small = {}
-            warnings = []
-            for filename, key in (
-                ("config.json", "config"),
-                ("tokenizer_config.json", "tokenizer_config"),
-                ("chat_template.jinja", "chat_template"),
-            ):
+            async def read_file(filename):
                 file = next((f for f in result["files"] if f["name"] == filename), None)
                 if not file or file.get("size") is None or file["size"] > 1024 * 1024:
-                    continue
+                    return None
                 try:
-                    url = f"https://huggingface.co/{quote(repo, safe='/')}/resolve/{result['revision']}/{filename}"
+                    url = (
+                        "https://huggingface.co/"
+                        f"{quote(repo, safe='/')}/resolve/"
+                        f"{result['revision']}/{filename}"
+                    )
                     async with self.manager.client.stream(
                         "GET", url, follow_redirects=True, timeout=10
                     ) as response:
@@ -149,12 +158,42 @@ class Jobs:
                             raw.extend(chunk)
                             if len(raw) > 1024 * 1024:
                                 raise ValueError("Metadata exceeds inspection limit")
-                    value = raw.decode()
-                    small[key] = value if key == "chat_template" else json.loads(value)
-                    if key != "chat_template" and not isinstance(small[key], dict):
-                        small[key] = {}
+                    return raw.decode()
                 except (ValueError, OSError, httpx.HTTPError):
+                    return None
+
+            small = {}
+            warnings = []
+            for filename, key in (
+                ("config.json", "config"),
+                ("tokenizer_config.json", "tokenizer_config"),
+            ):
+                value = await read_file(filename)
+                if value is None:
                     warnings.append(f"Could not inspect {filename}")
+                    continue
+                try:
+                    small[key] = json.loads(value)
+                except (ValueError, TypeError):
+                    small[key] = {}
+                if not isinstance(small[key], dict):
+                    small[key] = {}
+
+            contents = {}
+            jinja_files = [
+                f["name"]
+                for f in result["files"]
+                if f.get("name", "").lower().endswith(".jinja")
+            ]
+            for filename in jinja_files:
+                value = await read_file(filename)
+                if value is None:
+                    warnings.append(f"Could not inspect {filename}")
+                else:
+                    contents[filename] = value
+                    if filename == "chat_template.jinja":
+                        small["chat_template"] = value
+            result["contents"] = contents
             result["capabilities"] = inspect_capabilities(small)
             result["capabilities"]["dependencies"] = [
                 {
@@ -270,6 +309,7 @@ class Jobs:
                     "sha256": digest,
                     "size": companion["size"],
                 }
+            await self._persist_template_assets(artifact, repo, revision, metadata)
             return self.store.put("artifact", artifact)
 
         if filename == "__safetensors__":
@@ -315,6 +355,7 @@ class Jobs:
                 source_revision=revision,
             )
             artifact["metadata"]["discovery"] = metadata.get("capabilities", {})
+            await self._persist_template_assets(artifact, repo, revision, metadata)
             return self.store.put("artifact", artifact)
         if not filename.lower().endswith(".gguf"):
             raise ValueError("Select a GGUF file or safetensors snapshot")
@@ -398,6 +439,72 @@ class Jobs:
         )
         artifact["metadata"]["discovery"] = metadata.get("capabilities", {})
         return await attach_projector(artifact)
+
+    async def _download_template_file(self, repo, revision, filename):
+        destination = self.store.root / "models" / "hf"
+        return await asyncio.to_thread(
+            hf_hub_download,
+            repo_id=repo,
+            filename=filename,
+            revision=revision,
+            cache_dir=str(destination),
+            tqdm_class=_TemplateProgress,
+        )
+
+    async def _persist_template_assets(self, artifact, repo, revision, metadata):
+        templates.ensure_defaults(artifact)
+        drafts = templates.collect_template_drafts(artifact, metadata or {})
+        snapshot_root = (
+            Path(artifact["local_path"])
+            if artifact.get("format") == "safetensors"
+            else None
+        )
+        for draft in drafts:
+            if draft.get("kind") != "published" or not draft.get("relative_path"):
+                continue
+            rel = draft["relative_path"]
+            if snapshot_root is not None and (snapshot_root / rel).is_file():
+                # Safetensors snapshots already carry the companion files.
+                draft["file_path"] = str(snapshot_root / rel)
+                continue
+            try:
+                path = await self._download_template_file(repo, revision, rel)
+                draft["file_path"] = str(path)
+            except Exception as exc:
+                draft["file_path"] = None
+                draft["status"] = "failed"
+                draft["error"] = redact(str(exc))[:500]
+        return templates.create_template_assets(self.store, artifact["id"], drafts)
+
+    async def refresh_templates(self, ident):
+        artifact = self.store.get("artifact", ident)
+        if (
+            artifact.get("source") != "huggingface"
+            or not artifact.get("repo")
+            or not artifact.get("source_revision")
+        ):
+            # Local/imported artifact: re-index embedded templates only.
+            templates.ensure_defaults(artifact)
+            templates.create_template_assets(
+                self.store,
+                artifact["id"],
+                templates.collect_template_drafts(artifact, {}),
+            )
+            return {
+                "refreshed": 0,
+                "template_count": len(
+                    templates.list_template_assets(self.store, ident)
+                ),
+            }
+        metadata = await self.hf_files(artifact["repo"], artifact["source_revision"])
+        saved = await self._persist_template_assets(
+            artifact, artifact["repo"], artifact["source_revision"], metadata
+        )
+        self.store.put("artifact", artifact)
+        return {
+            "refreshed": len(saved),
+            "template_count": len(templates.list_template_assets(self.store, ident)),
+        }
 
     def install_plan(self, source):
         engine = source.get("engine")

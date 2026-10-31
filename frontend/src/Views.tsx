@@ -32,16 +32,19 @@ import {
   date,
   Dialog,
   Empty,
+  Field,
   eventText,
   gib,
   Json,
   Menu,
+  isRecord,
   message,
   mode,
   number,
   state,
   Status,
   Tabs,
+  templateKindLabel,
   visible,
   type Registry,
 } from './ui';
@@ -63,6 +66,9 @@ import type {
   OperationEvent,
   Profile,
   Runtime,
+  TemplateAssetPublic,
+  TemplateSelection,
+  TemplateSource,
 } from './types';
 
 import { go } from './navigation';
@@ -556,6 +562,17 @@ export function ModelLibrary({
   const [format, setFormat] = useState(''),
     [capability, setCapability] = useState(''),
     [selected, setSelected] = useState('');
+  const { confirm, confirmation } = useConfirmation();
+  const [modelDefault, setModelDefault] = useState<
+      TemplateSelection | null | undefined
+    >(undefined),
+    [editingTemplate, setEditingTemplate] =
+      useState<TemplateAssetPublic | null>(null),
+    [templateContent, setTemplateContent] = useState(''),
+    [templateBusy, setTemplateBusy] = useState(false),
+    [templateError, setTemplateError] = useState(''),
+    [templateNotice, setTemplateNotice] = useState(''),
+    [refreshingTemplates, setRefreshingTemplates] = useState(false);
   function chips(m: Artifact): string[] {
     const hints = m.discovered_capabilities || {};
     const params = parameterSize(m.repo || m.name);
@@ -599,6 +616,18 @@ export function ModelLibrary({
           : m.id === current.id,
       )
     : [];
+  useEffect(
+    () => {
+      if (!current) return;
+      setModelDefault(current.template_default ?? null);
+      setEditingTemplate(null);
+      setTemplateContent('');
+      setTemplateError('');
+      setTemplateNotice('');
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [current?.id],
+  );
   if (!data.models?.length)
     return (
       <Empty title="No models yet">
@@ -613,8 +642,97 @@ export function ModelLibrary({
         </div>
       </Empty>
     );
+  const templates = current?.templates || [];
+  async function applyModelDefault(
+    source: TemplateSource,
+    asset_id: string | null,
+  ) {
+    if (!current) return;
+    setModelDefault({ source, asset_id: asset_id ?? null });
+    setTemplateError('');
+    try {
+      const saved = await api(`/api/models/${current.id}/template-default`, {
+        source,
+        asset_id: asset_id ?? null,
+      });
+      if (isRecord(saved) && isRecord(saved.template_default))
+        setModelDefault(saved.template_default as TemplateSelection);
+      setTemplateNotice('Model template default saved.');
+    } catch (e) {
+      setTemplateError(message(e));
+    }
+  }
+  async function refreshTemplates() {
+    if (!current) return;
+    setRefreshingTemplates(true);
+    setTemplateError('');
+    try {
+      await api(`/api/models/${current.id}/refresh-templates`, {});
+      setTemplateNotice('Chat templates refreshed.');
+    } catch (e) {
+      setTemplateError(message(e));
+    } finally {
+      setRefreshingTemplates(false);
+    }
+  }
+  async function startEditing(template: TemplateAssetPublic | null) {
+    setTemplateError('');
+    setEditingTemplate(template);
+    setTemplateContent('');
+    if (template) {
+      try {
+        const full = await api(`/api/templates/${template.id}`);
+        if (isRecord(full) && typeof full.content === 'string')
+          setTemplateContent(full.content);
+      } catch (e) {
+        setTemplateError(message(e));
+      }
+    }
+  }
+  async function saveTemplate() {
+    const content = templateContent.trim();
+    if (!content) {
+      setTemplateError('Template content is required.');
+      return;
+    }
+    if (!current) return;
+    setTemplateBusy(true);
+    setTemplateError('');
+    try {
+      if (editingTemplate) {
+        await api(`/api/templates/${editingTemplate.id}`, { content });
+      } else {
+        await api('/api/templates', { artifact_id: current.id, content });
+      }
+      setTemplateNotice(
+        editingTemplate ? 'Custom template saved.' : 'Custom template created.',
+      );
+      setEditingTemplate(null);
+      setTemplateContent('');
+    } catch (e) {
+      setTemplateError(message(e));
+    } finally {
+      setTemplateBusy(false);
+    }
+  }
+  async function deleteTemplate(template: TemplateAssetPublic) {
+    if (
+      !(await confirm(
+        `Remove custom template “${template.name}”? Its content will be deleted.`,
+      ))
+    )
+      return;
+    try {
+      await api(`/api/templates/${template.id}/delete`, {});
+      setTemplateNotice('Custom template removed.');
+      setEditingTemplate(null);
+    } catch (e) {
+      setTemplateError(message(e));
+    }
+  }
   return (
     <>
+      {confirmation}
       <div className="toolbar">
         <Input
           className="search"
@@ -750,6 +868,135 @@ export function ModelLibrary({
                 · {d.state}
               </p>
             ))}
+          <h3>Chat templates</h3>
+          <Field label="Model default">
+            <NativeSelect
+              value={
+                modelDefault && modelDefault.source !== 'automatic'
+                  ? (modelDefault.asset_id ?? 'automatic')
+                  : 'automatic'
+              }
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === 'automatic') {
+                  applyModelDefault('automatic', null);
+                } else {
+                  const t = templates.find((x) => x.id === value);
+                  if (t) applyModelDefault(t.kind, t.id);
+                }
+              }}
+            >
+              <NativeSelectOption value="automatic">
+                Automatic (engine default)
+              </NativeSelectOption>
+              {templates.map((t) => (
+                <NativeSelectOption key={t.id} value={t.id}>
+                  {templateKindLabel(t.kind)} · {t.name}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          {templates.length === 0 ? (
+            <p className="muted">
+              No chat templates available. Refresh after download or add a
+              custom template.
+            </p>
+          ) : (
+            <ul className="template-list mb-3">
+              {templates.map((t) => (
+                <li key={t.id} className="text-sm">
+                  <span className="mr-2 text-muted-foreground">
+                    {templateKindLabel(t.kind)}
+                  </span>
+                  {t.name}
+                  {t.status && t.status !== 'available' && (
+                    <span className="ml-2 text-destructive-foreground">
+                      ({t.status})
+                    </span>
+                  )}
+                  {t.kind === 'custom' && (
+                    <span className="ml-4 inline-flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => startEditing(t)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => deleteTemplate(t)}
+                      >
+                        Delete
+                      </Button>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              disabled={refreshingTemplates}
+              onClick={refreshTemplates}
+            >
+              {refreshingTemplates ? 'Refreshing…' : 'Refresh templates'}
+            </Button>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => startEditing(null)}
+            >
+              New custom template
+            </Button>
+          </div>
+          {(templateError || templateNotice) && (
+            <p
+              role="status"
+              className={
+                templateError
+                  ? 'text-destructive-foreground'
+                  : 'text-success-foreground'
+              }
+            >
+              {templateError || templateNotice}
+            </p>
+          )}
+          {editingTemplate !== null && (
+            <details className="mt-2">
+              <summary>
+                {editingTemplate
+                  ? `Edit “${editingTemplate.name}”`
+                  : 'New custom template'}
+              </summary>
+              <textarea
+                className="mb-2 h-48 w-full rounded-md border border-neutral-300 bg-white p-2 font-mono text-sm"
+                placeholder='Paste a Jinja chat template, e.g. {{" - prompt }}{{ - ... }}'
+                value={templateContent}
+                onChange={(e) => setTemplateContent(e.target.value)}
+              />
+              <div className="dialog-actions">
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => setEditingTemplate(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="default"
+                  type="button"
+                  disabled={templateBusy || !templateContent.trim()}
+                  onClick={saveTemplate}
+                >
+                  {templateBusy ? 'Saving…' : 'Save template'}
+                </Button>
+              </div>
+            </details>
+          )}
           <details>
             <summary>Local file</summary>
             <code>{current.local_path}</code>

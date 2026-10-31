@@ -32,6 +32,25 @@ class Artifact(Record):
     sha256: str | None = None
     size_bytes: int = 0
     metadata: dict = Field(default_factory=dict)
+    # Per-model template selection. The source is always explicit ("Automatic"
+    # is the backwards-compatible initial default); asset_id identifies which
+    # template asset satisfies the source when source != "automatic".
+    template_default: dict | None = None
+
+
+class TemplateAsset(Record):
+    kind: Literal["published", "embedded", "custom"]
+    artifact_id: str | None = None
+    name: str
+    repo: str | None = None
+    revision: str | None = None
+    file_path: str | None = None
+    relative_path: str | None = None
+    sha256: str
+    size_bytes: int = 0
+    content: str
+    status: Literal["available", "missing", "failed"] = "available"
+    error: str | None = None
 
 
 class Runtime(Record):
@@ -77,6 +96,12 @@ class Deployment(DeploymentPolicy):
     port: int = Field(ge=1024, le=65535)
     reservation_mib: int = Field(default=0, ge=0)
     gpu: int = Field(default=0, ge=0, le=31)
+    # Per-deployment template override. None means "use model default";
+    # an explicit {source: embedded|published|custom, asset_id} wins over the
+    # model default. The source "automatic" is not stored at the deployment level
+    # (that is expressed by omitting the override entirely and relying on the
+    # model default).
+    template_override: dict | None = None
 
 
 class DeploymentSet(DeploymentPolicy):

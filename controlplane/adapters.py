@@ -11,6 +11,8 @@ from pathlib import Path
 
 import psutil
 
+from . import templates
+
 FIELDS = {
     "mmproj": {"type": "string", "label": "Multimodal projector path"},
     "ctx-size": {
@@ -417,7 +419,7 @@ def gguf_metadata(path):
         return result
 
 
-def validate_profile(profile, artifact, runtime):
+def validate_profile(profile, artifact, runtime, selection=None):
     errors = []
     if artifact["format"] != "unknown" and artifact["format"] not in runtime.get(
         "capabilities", {}
@@ -527,11 +529,18 @@ def validate_profile(profile, artifact, runtime):
                 and not re.fullmatch(r"-\d+(\.\d+)?", arg)
             ):
                 errors.append("Advanced options must use full --long names")
+    if selection is not None and selection.get("source") not in (None, "", "automatic"):
+        conflict = templates.detect_conflict(profile)
+        if conflict:
+            errors.append(
+                f"{conflict}: remove the manual flag or set the template selector to Automatic"
+            )
     return errors
 
 
-def launch_spec(deployment, profile, artifact, runtime, workdir):
-    errors = validate_profile(profile, artifact, runtime)
+def launch_spec(deployment, profile, artifact, runtime, workdir, store):
+    selection = templates.effective_selection(deployment, artifact, store)
+    errors = validate_profile(profile, artifact, runtime, selection)
     if errors:
         raise ValueError("; ".join(errors))
     model_path = artifact["local_path"]
@@ -590,7 +599,36 @@ def launch_spec(deployment, profile, artifact, runtime, workdir):
         args = [part.format_map(values) for part in runtime["command_template"]]
         if not args:
             raise ValueError("Custom runtime requires a trusted command template")
+    template_info = None
+    if (
+        templates.supports_template_flag(runtime)
+        and selection.get("source") not in (None, "automatic")
+        and selection.get("asset")
+    ):
+        asset = selection["asset"]
+        if asset.get("status") != "available":
+            raise ValueError(
+                f"Selected template {selection.get('description')} is not available; "
+                "refresh templates or choose Automatic"
+            )
+        native_path = Path(asset["file_path"]).resolve()
+        if not native_path.is_file():
+            raise ValueError(f"Selected template file not found: {native_path}")
+        template_info = {
+            "flag": templates.template_flag_name(runtime),
+            "native": str(native_path),
+            "container": f"/templates/{native_path.name}",
+        }
+    if template_info:
+        args.extend(
+            [
+                f"--{template_info['flag']}",
+                template_info["container"] if container else template_info["native"],
+            ]
+        )
     extra_mounts = []
+    if template_info and container:
+        extra_mounts.append((template_info["native"], template_info["container"]))
     for key, value in sorted(profile["config"].items()):
         if key == "metrics":
             continue

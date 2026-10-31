@@ -24,6 +24,44 @@ advertises `--mmproj`; you must separately declare image input. The file's prese
 does not establish model/engine compatibility. Other dependency relationships and
 cross-repository projector resolution are not inferred.
 
+## Chat templates
+
+A chat template is the file that tells an engine how to format a conversation
+before inference. Menagerie applies the chosen template with the flag that
+matches the engine: **`--chat-template-file`** for llama.cpp and Prism,
+**`--chat-template`** for vLLM. Models registered before this feature, or any
+selection that was never set, default to **Automatic (engine default)**, which
+means no template file.
+
+The available sources, each tagged in the UI:
+
+- **Embedded** — the template inside the artifact (GGUF
+  `tokenizer.chat_template`; safetensors `tokenizer_config.json`).
+- **Published** — a template file in the pinned Hugging Face commit (a root
+  `chat_template.jinja` or a file under a `chat_templates/` directory).
+- **Custom** — a template you author and edit yourself.
+- **Automatic** — no template file; the engine formats prompts itself.
+
+Open the model's **Details** panel and use the **Chat templates** section to:
+
+- set the **Model default** — Automatic or any discovered template; this is what
+  deployments inherit when they do not override it;
+- click **Refresh templates** to re-read and download the pinned commit's template
+  files plus the artifact's embedded metadata. This is an Activity job that does
+  not move or redownload weights and never overwrites a custom template or an
+  existing selection;
+- review the list, tagged by source and status;
+- create, edit, or remove a **Custom template** via **New custom template**.
+
+A deployment's **Chat template** setting defaults to **Inherit model default**
+and may be changed to any template for that deployment alone. Precedence is the
+deployment override, then the model default, then the engine default; there is
+no silent fallback. The **Effective:** line beneath the selector names the source
+and template file actually in effect, and notes "not available" if that file is
+missing or failed to download. A profile that still sets a manual
+`--chat-template-file` or `--chat-template` flag is rejected at save time rather
+than silently shadowing the selection.
+
 ## Configure deployment-owned reasoning presets
 
 Each model configuration has compact **Capabilities** and **Reasoning options**
