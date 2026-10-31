@@ -3,8 +3,9 @@
 from pathlib import Path
 
 import httpx
+import pytest
 
-from controlplane import templates
+from controlplane import adapters, templates
 from controlplane.api import create_app
 from controlplane.store import Store
 
@@ -39,12 +40,14 @@ def test_extract_template_files_ignores_non_templates_and_dirs():
 def test_extract_template_files_honors_chat_templates_dir():
     files = [
         {"name": "chat_templates/custom.jinja"},
+        {"name": "chat_templates/nested/foo.jinja"},
         {"name": "CHAT_TEMPLATES/other.jinja"},
         {"name": "chat_template.jinja"},
         {"name": "chat_templates/readme"},
     ]
     assert templates.extract_template_files(files) == [
         "chat_templates/custom.jinja",
+        "chat_templates/nested/foo.jinja",
         "CHAT_TEMPLATES/other.jinja",
         "chat_template.jinja",
     ]
@@ -53,6 +56,7 @@ def test_extract_template_files_honors_chat_templates_dir():
 def test_template_name_labels():
     assert templates.template_name("chat_template.jinja") == "chat_template"
     assert templates.template_name("chat_templates/custom.jinja") == "custom.jinja"
+    assert templates.template_name("chat_templates/nested/foo.jinja") == "foo.jinja"
     assert templates.template_name("CHAT_TEMPLATES/other.jinja") == "other.jinja"
     assert templates.template_name("") == "chat template"
 
@@ -188,12 +192,48 @@ def test_collect_drafts_rejects_oversized_content():
     assert drafts[0]["status"] == "missing"
 
 
+def test_collect_drafts_resolves_safetensors_embedded_to_snapshot_file(tmp_path):
+    """Regression: a safetensors embedded template's ``file_path`` must be the
+    real ``tokenizer_config.json`` in the snapshot, not the relative name."""
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "tokenizer_config.json").write_text('{"chat_template": "x"}')
+    artifact = {
+        "id": "model",
+        "format": "safetensors",
+        "local_path": str(snapshot),
+        "metadata": {"tokenizer_config": {"chat_template": " {{ p }}"}, "config": {}},
+    }
+    drafts = templates.collect_template_drafts(artifact, {})
+    assert drafts[0]["kind"] == "embedded"
+    assert drafts[0]["name"] == "tokenizer.chat_template"
+    assert drafts[0]["file_path"] == str(snapshot / "tokenizer_config.json")
+    assert drafts[0]["relative_path"] == "tokenizer_config.json"
+    assert Path(drafts[0]["file_path"]).is_file()
+
+
+def test_collect_drafts_embedded_stays_relative_when_snapshot_file_missing(tmp_path):
+    """When the snapshot lacks the companion file, the draft keeps the
+    relative name so a later refresh can resolve it; launch then fails loudly
+    rather than silently launching without a template."""
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    artifact = {
+        "id": "model",
+        "format": "safetensors",
+        "local_path": str(snapshot),
+        "metadata": {"tokenizer_config": {"chat_template": " {{ p }}"}, "config": {}},
+    }
+    drafts = templates.collect_template_drafts(artifact, {})
+    assert drafts[0]["file_path"] == "tokenizer_config.json"
+
+
 # ---------------------------------------------------------------------------
 # Asset creation
 # ---------------------------------------------------------------------------
 
 
-def test_create_template_assets_persists_and_dedupes(tmp_path):
+def test_create_template_assets_replaces_in_place_on_content_change(tmp_path):
     store = Store(tmp_path)
     drafts = [
         {
@@ -208,28 +248,34 @@ def test_create_template_assets_persists_and_dedupes(tmp_path):
             "content": "a",
             "status": "available",
         },
-        {
-            "kind": "published",
-            "name": "chat_template",
-            "content": "b",
-            "status": "available",
-        },
     ]
     saved = templates.create_template_assets(store, "model", drafts)
-    assert len(saved) == 2  # identical content is deduped
-    rows = templates.list_template_assets(store, "model")
-    assert {r["sha256"] for r in rows} == {
-        templates.sha256_text("a"),
-        templates.sha256_text("b"),
-    }
-    assert all(
-        r["name"] == "chat_template"
-        and r["artifact_id"] == "model"
-        and r["sha256"] == templates.sha256_text(r["content"])
-        for r in rows
+    assert len(saved) == 1  # identical content is deduped
+    assert saved[0]["content"] == "a"
+    assert saved[0]["sha256"] == templates.sha256_text("a")
+    first_id = saved[0]["id"]
+
+    # A content change updates the same asset in place (same id, bumped
+    # revision) rather than inserting a stale sibling that a selection might
+    # still point at.
+    saved = templates.create_template_assets(
+        store,
+        "model",
+        [
+            {
+                "kind": "published",
+                "name": "chat_template",
+                "content": "b",
+                "status": "available",
+            }
+        ],
     )
-    for asset in saved:
-        assert store.get("template", asset["id"])["sha256"] == asset["sha256"]
+    assert len(saved) == 1
+    assert saved[0]["id"] == first_id
+    assert saved[0]["content"] == "b"
+    assert saved[0]["sha256"] == templates.sha256_text("b")
+    # One row for the kind:name key; no stale duplicate.
+    assert len(templates.list_template_assets(store, "model")) == 1
 
 
 def _store(tmp_path):
@@ -887,3 +933,168 @@ async def test_refresh_templates_endpoint(tmp_path):
         }
         r = await client.post("/api/models/model/refresh-templates", headers=headers)
         assert r.status_code == 200, r.text
+
+
+# ---------------------------------------------------------------------------
+# Launch spec regression tests
+# ---------------------------------------------------------------------------
+
+_NATIVE_VLLM = {
+    "id": "vllm-1",
+    "revision": 1,
+    "name": "vLLM",
+    "engine": "vllm",
+    "execution_kind": "native",
+    "executable": "/bin/vllm-server",
+    "trust": True,
+    "env": {},
+    "capabilities": {
+        "formats": ["safetensors"],
+        "flags": ["chat-template", "max-model-len"],
+    },
+}
+
+
+def _safetensors_model(tmp_path, store, asset_id=None):
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "tokenizer_config.json").write_text('{"chat_template": " {{ p }}"}')
+    artifact = {
+        "id": "model",
+        "name": "model",
+        "format": "safetensors",
+        "local_path": str(snapshot),
+        "metadata": {
+            "tokenizer_config": {"chat_template": " {{ p }}"},
+            "config": {},
+        },
+        "template_default": {"source": "automatic", "asset_id": None},
+    }
+    drafts = templates.collect_template_drafts(artifact, {})
+    templates.create_template_assets(store, artifact["id"], drafts)
+    asset = templates.list_template_assets(store, artifact["id"])[0]
+    if asset_id is not None:
+        assert asset["id"] == asset_id
+    return artifact, asset, snapshot
+
+
+def test_launch_spec_uses_resolved_safetensors_embedded_path(tmp_path):
+    """Feature-breaking bug: a safetensors embedded template must launch with
+    the real tokenizer_config.json, not the relative name."""
+    store = Store(tmp_path)
+    artifact, asset, snapshot = _safetensors_model(tmp_path, store)
+    deployment = {
+        "id": "d1",
+        "alias": "d1",
+        "port": 8120,
+        "gpu": 0,
+        "template_override": {"source": "embedded", "asset_id": asset["id"]},
+    }
+    profile = {"config": {}, "raw_args": []}
+    spec = adapters.launch_spec(
+        deployment, profile, artifact, _NATIVE_VLLM, tmp_path, store
+    )
+    argv = spec["argv"]
+    idx = argv.index("--chat-template")
+    assert argv[idx + 1] == str(snapshot / "tokenizer_config.json")
+    assert Path(argv[idx + 1]).is_file()
+
+
+def test_launch_spec_rejects_missing_template_asset(tmp_path):
+    """A selection referencing a deleted (missing) template must be rejected
+    at launch time, not silently dropped."""
+    store = Store(tmp_path)
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "tokenizer_config.json").write_text('{"chat_template": "x"}')
+    artifact = {
+        "id": "model",
+        "name": "model",
+        "format": "safetensors",
+        "local_path": str(snapshot),
+        "metadata": {"tokenizer_config": {"chat_template": "x"}, "config": {}},
+        "template_default": {"source": "automatic", "asset_id": None},
+    }
+    deployment = {
+        "id": "d1",
+        "alias": "d1",
+        "port": 8120,
+        "gpu": 0,
+        "template_override": {"source": "embedded", "asset_id": "deleted-asset"},
+    }
+    profile = {"config": {}, "raw_args": []}
+    with pytest.raises(ValueError, match="template is missing"):
+        adapters.launch_spec(
+            deployment, profile, artifact, _NATIVE_VLLM, tmp_path, store
+        )
+
+
+def test_validate_profile_rejects_missing_template_asset(tmp_path):
+    """Plan-time validation must also reject a selection whose asset is gone."""
+    selection = {
+        "source": "embedded",
+        "asset": None,
+        "description": "embedded template missing",
+    }
+    errors = adapters.validate_profile(
+        {"config": {}, "raw_args": []},
+        {"format": "safetensors", "local_path": str(tmp_path)},
+        _NATIVE_VLLM,
+        selection,
+    )
+    assert any("template is missing" in e for e in errors)
+
+
+def test_validate_profile_accepts_available_template(tmp_path):
+    """A selection pointing at an available template is not rejected."""
+    selection = {
+        "source": "embedded",
+        "asset": {"name": "x", "status": "available"},
+        "description": "x",
+    }
+    errors = adapters.validate_profile(
+        {"config": {}, "raw_args": []},
+        {"format": "safetensors", "local_path": str(tmp_path)},
+        _NATIVE_VLLM,
+        selection,
+    )
+    assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# Model deletion cleanup
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_model_removes_template_assets(tmp_path):
+    """Deleting a model removes its template assets and custom template files
+    so no orphaned rows or files remain."""
+    app = create_app(tmp_path)
+    store = app.state.store
+    store.put("artifact", {"id": "model", "name": "M", "format": "gguf"})
+    custom_path = templates.write_custom_template(store, "{{ p }}")
+    custom_id = "custom-1"
+    store.put(
+        "template",
+        {
+            "id": custom_id,
+            "kind": "custom",
+            "artifact_id": "model",
+            "name": "custom",
+            "file_path": str(custom_path),
+            "relative_path": "custom.jinja",
+            "sha256": templates.sha256_text("{{ p }}"),
+            "content": "{{ p }}",
+            "size_bytes": 6,
+            "status": "available",
+            "error": None,
+        },
+    )
+    async with await _client(app) as client:
+        headers = {
+            "X-Menagerie-Token": (await client.get("/api/status")).json()["csrf_token"]
+        }
+        r = await client.post("/api/registry/models/model/delete", headers=headers)
+        assert r.status_code == 200, r.text
+    assert all(t["id"] != custom_id for t in store.list("template"))
+    assert not (store.root / "templates" / custom_path.name).exists()

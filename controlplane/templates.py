@@ -28,7 +28,7 @@ def is_template_file(filename: str) -> bool:
 def template_name(filename: str) -> str:
     """A readable label for a template file path."""
     parts = filename.split("/")
-    if len(parts) == 2 and parts[0].lower() == TEMPLATE_DIR:
+    if len(parts) >= 2 and parts[0].lower() == TEMPLATE_DIR:
         return Path(filename).name
     return Path(filename).stem or "chat template"
 
@@ -46,7 +46,7 @@ def extract_template_files(files: list[dict]) -> list[str]:
             continue
         parts = name.split("/")
         if parts[-1] == "chat_template.jinja" or (
-            len(parts) == 2 and parts[0].lower() == TEMPLATE_DIR
+            len(parts) >= 2 and parts[0].lower() == TEMPLATE_DIR
         ):
             result.append(name)
     return result
@@ -120,6 +120,13 @@ def collect_template_drafts(artifact: dict, hf_files: dict | None) -> list[dict]
         embedded = template_from_tokenizer_config(meta)
         if embedded:
             drafts.append(embedded)
+            root = Path(artifact.get("local_path", ""))
+            rel = embedded.get("relative_path")
+            if rel and root.is_dir() and (root / rel).is_file():
+                # The snapshot already carries the companion file; point the
+                # engine flag at the real one instead of the relative name
+                # ("tokenizer_config.json"), which would not resolve.
+                embedded["file_path"] = str(root / rel)
     files = hf_files or {}
     repo = files.get("repo")
     revision = files.get("revision")
@@ -147,9 +154,14 @@ def collect_template_drafts(artifact: dict, hf_files: dict | None) -> list[dict]
 
 
 def create_template_assets(store, artifact_id, drafts):
-    """Persist draft template assets, preserving existing user-owned custom
-    assets and deduplicating identical content. Returns the stored assets
-    for the artifact."""
+    """Persist draft template assets.
+
+    User-owned custom assets are never shadowed by re-collected published or
+    embedded drafts. A non-user asset that already owns a ``kind:name`` key is
+    updated in place (same id, bumped revision) when its content changes, so
+    existing selections keep pointing at the current content; identical content
+    is a no-op. Any duplicate sibling rows (same ``kind:name``, distinct id)
+    are collapsed to one. Returns the stored assets for the artifact."""
     for draft in drafts:
         key = f"{draft['kind']}:{draft['name']}"
         existing = [
@@ -158,27 +170,36 @@ def create_template_assets(store, artifact_id, drafts):
             if t.get("artifact_id") == artifact_id and f"{t['kind']}:{t['name']}" == key
         ]
         if existing:
-            current = existing[0]
-            if current.get("kind") == "custom":
+            current = next((t for t in existing if t.get("kind") != "custom"), None)
+            if current is None:
                 # A user's custom template is never shadowed by a re-collected
                 # published or embedded draft.
                 continue
-            if current.get("sha256") == sha256_text(draft.get("content") or ""):
-                # Identical content; nothing to persist.
-                continue
-        asset = dict(draft)
-        if asset.get("content") is None:
-            asset["content"] = ""
-        asset["artifact_id"] = artifact_id
-        if not asset.get("sha256"):
+            if current.get("sha256") != sha256_text(draft.get("content") or ""):
+                # Content changed: update the existing row in place rather than
+                # inserting a sibling, so selections referencing it stay current.
+                updated = dict(current)
+                updated.update(draft)
+                updated["content"] = draft.get("content") or ""
+                updated["sha256"] = sha256_text(updated["content"])
+                updated["artifact_id"] = artifact_id
+                updated["id"] = current["id"]
+                store.put("template", updated)
+            # Collapse duplicate sibling rows (same kind:name, distinct id).
+            for sibling in existing:
+                if sibling.get("kind") != "custom" and sibling["id"] != current["id"]:
+                    with store.transaction() as c:
+                        c.execute(
+                            "DELETE FROM objects WHERE kind='template' AND id=?",
+                            (sibling["id"],),
+                        )
+        else:
+            asset = dict(draft)
+            asset["content"] = draft.get("content") or ""
+            asset["artifact_id"] = artifact_id
             asset["sha256"] = sha256_text(asset["content"])
-        if not asset.get("id"):
-            asset["id"] = (
-                "template-"
-                + asset["sha256"][:12]
-                + f"{len(store.list('template')):06d}"
-            )
-        store.put("template", asset)
+            asset["id"] = "template-" + uid()
+            store.put("template", asset)
     return list_template_assets(store, artifact_id)
 
 

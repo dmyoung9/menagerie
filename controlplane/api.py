@@ -1053,6 +1053,26 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     p.get(key) == ident for p in store.list("profile")
                 ):
                     raise Conflict("Profiles still reference this record")
+                if kind == "models":
+                    # Template assets belong to the model; remove the custom
+                    # template files they own and the rows themselves so a
+                    # deleted model does not leave orphaned templates behind.
+                    orphaned = [
+                        t
+                        for t in store.list("template")
+                        if t.get("artifact_id") == ident
+                    ]
+                    for t in orphaned:
+                        if t.get("kind") == "custom" and t.get("file_path"):
+                            path = Path(t["file_path"])
+                            if path.is_file() and path.is_relative_to(store.root):
+                                path.unlink()
+                    if orphaned:
+                        with store.transaction() as c:
+                            c.executemany(
+                                "DELETE FROM objects WHERE kind=? AND id=?",
+                                [("template", t["id"]) for t in orphaned],
+                            )
             if remove_files:
                 if kind != "runtimes":
                     raise ValueError(

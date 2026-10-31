@@ -568,6 +568,9 @@ export function ModelLibrary({
     >(undefined),
     [editingTemplate, setEditingTemplate] =
       useState<TemplateAssetPublic | null>(null),
+    // Whether the custom-template editor is open. Distinct from which template
+    // is being edited: "New custom template" opens it with no asset selected.
+    [templateOpen, setTemplateOpen] = useState(false),
     [templateContent, setTemplateContent] = useState(''),
     [templateBusy, setTemplateBusy] = useState(false),
     [templateError, setTemplateError] = useState(''),
@@ -621,6 +624,7 @@ export function ModelLibrary({
       if (!current) return;
       setModelDefault(current.template_default ?? null);
       setEditingTemplate(null);
+      setTemplateOpen(false);
       setTemplateContent('');
       setTemplateError('');
       setTemplateNotice('');
@@ -678,6 +682,7 @@ export function ModelLibrary({
   async function startEditing(template: TemplateAssetPublic | null) {
     setTemplateError('');
     setEditingTemplate(template);
+    setTemplateOpen(true);
     setTemplateContent('');
     if (template) {
       try {
@@ -708,6 +713,7 @@ export function ModelLibrary({
         editingTemplate ? 'Custom template saved.' : 'Custom template created.',
       );
       setEditingTemplate(null);
+      setTemplateOpen(false);
       setTemplateContent('');
     } catch (e) {
       setTemplateError(message(e));
@@ -726,6 +732,7 @@ export function ModelLibrary({
       await api(`/api/templates/${template.id}/delete`, {});
       setTemplateNotice('Custom template removed.');
       setEditingTemplate(null);
+      setTemplateOpen(false);
     } catch (e) {
       setTemplateError(message(e));
     }
@@ -965,8 +972,14 @@ export function ModelLibrary({
               {templateError || templateNotice}
             </p>
           )}
-          {editingTemplate !== null && (
-            <details className="mt-2">
+          {templateOpen && (
+            <details
+              className="mt-2"
+              open
+              onToggle={(e) =>
+                setTemplateOpen((e.target as HTMLDetailsElement).open)
+              }
+            >
               <summary>
                 {editingTemplate
                   ? `Edit “${editingTemplate.name}”`
@@ -982,7 +995,10 @@ export function ModelLibrary({
                 <Button
                   variant="outline"
                   type="button"
-                  onClick={() => setEditingTemplate(null)}
+                  onClick={() => {
+                    setEditingTemplate(null);
+                    setTemplateOpen(false);
+                  }}
                 >
                   Cancel
                 </Button>

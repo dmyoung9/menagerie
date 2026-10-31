@@ -530,6 +530,11 @@ def validate_profile(profile, artifact, runtime, selection=None):
             ):
                 errors.append("Advanced options must use full --long names")
     if selection is not None and selection.get("source") not in (None, "", "automatic"):
+        if selection.get("asset") is None:
+            errors.append(
+                f"Selected {selection.get('source')} template is missing; "
+                "refresh templates or choose Automatic"
+            )
         conflict = templates.detect_conflict(profile)
         if conflict:
             errors.append(
