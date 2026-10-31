@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { gib } from './ui';
+import { gib, telemetryStale } from './ui';
 import { useEffect, useState } from 'react';
 import type {
   Deployment,
@@ -284,7 +284,7 @@ export function LiveResources({
     const timer = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(timer);
   }, []);
-  const stale = !host.ts || now / 1000 - host.ts > 10;
+  const stale = telemetryStale(host, settings?.sample_seconds, now);
   return (
     <Card className="mb-5 min-w-0 live-resources">
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">

@@ -288,6 +288,22 @@ for (const width of [1440, 390])
     ).toBeDisabled();
     await dialog.getByRole('button', { name: 'Q4_K', exact: true }).click();
     await expect(download).toBeEnabled();
+    // The default button transitions opacity from 0.5 (disabled) to 1 when it
+    // becomes enabled. While that transition is in flight, the button's
+    // effective (composited-over-the-dialog) contrast dips well below 4.5:1,
+    // so axe-core can report a spurious color-contrast violation. Wait until
+    // the button is fully rendered before analyzing. (Locators cannot be
+    // serialized as waitForFunction arguments, so the button is located in-page
+    // by role + text.)
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('[role="dialog"]');
+      if (!dialog) return false;
+      const download = Array.from(dialog.querySelectorAll('button')).find(
+        (b) => b.textContent.trim() === 'Download',
+      );
+      if (!download) return false;
+      return window.getComputedStyle(download).opacity === '1';
+    });
     expect(
       await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth),
     ).toBe(true);

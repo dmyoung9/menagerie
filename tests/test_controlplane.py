@@ -2,8 +2,10 @@ import asyncio
 import json
 import os
 import socket
+import sqlite3
 import struct
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -297,6 +299,51 @@ async def test_pinned_not_automatic_victim_of_on_demand(store, tmp_path):
         await m.close()
 
 
+async def test_status_reports_stale_telemetry_and_collector_errors(tmp_path):
+    app = create_app(tmp_path / "api")
+    m = app.state.manager
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        # Fresh sample, healthy collector -> not stale.
+        m.host = baseline() | {"ts": time.time()}
+        m.collector.update(
+            consecutive_errors=0,
+            last_error=None,
+            last_error_at=None,
+        )
+        status = (await client.get("/api/status")).json()
+        assert status["host"]["stale"] is False
+        assert status["host"]["age_seconds"] >= 0
+        assert status["collector"]["consecutive_errors"] == 0
+
+        # Collector alive but failing -> stale even though the snapshot is fresh.
+        m.collector.update(
+            consecutive_errors=2,
+            last_error="database is locked",
+            last_error_at=time.time(),
+        )
+        status = (await client.get("/api/status")).json()
+        assert status["host"]["stale"] is True
+        assert status["host"]["age_seconds"] >= 0
+        assert status["collector"]["consecutive_errors"] == 2
+
+        # Old snapshot, healthy collector -> stale by age.
+        m.host = baseline() | {"ts": time.time() - 3600}
+        m.collector["consecutive_errors"] = 0
+        m.collector["last_error"] = None
+        status = (await client.get("/api/status")).json()
+        assert status["host"]["stale"] is True
+        assert status["host"]["age_seconds"] > 3000
+
+        # No sample yet -> stale with a null age.
+        m.host = baseline()
+        del m.host["ts"]
+        status = (await client.get("/api/status")).json()
+        assert status["host"]["stale"] is True
+        assert status["host"]["age_seconds"] is None
+
+
 async def test_ui_revision_guard_and_model_catalog_contract(tmp_path):
     app = create_app(tmp_path / "api")
     store, m = app.state.store, app.state.manager
@@ -392,6 +439,108 @@ async def test_pressure_evicts_only_authorized_evictable(store, tmp_path, monkey
         await asyncio.wait_for(stopped.wait(), 5)
         assert store.get("deployment", "a")["state"] == "STOPPED"
         assert store.get("deployment", "b")["state"] == "READY"
+    finally:
+        await m.close()
+
+
+async def test_monitor_survives_a_locked_store(store, tmp_path, monkeypatch):
+    await seed(store, tmp_path)
+    store.put("settings", {"id": "host", "sample_seconds": 1})
+    m = Manager(store)
+    m.host = baseline()
+    ticks = []
+    induced_failures = 3
+
+    def sample():
+        ticks.append(len(ticks) + 1)
+        return baseline() | {"ts": float(ticks[-1])}
+
+    monkeypatch.setattr("controlplane.telemetry.sample", sample)
+    listed = store.list
+    recorded = store.event
+    lock_failures = 0
+
+    def flaky_list(kind, c=None):
+        nonlocal lock_failures
+        if kind == "deployment" and lock_failures < induced_failures:
+            lock_failures += 1
+            raise sqlite3.OperationalError("database is locked")
+        return listed(kind, c)
+
+    monkeypatch.setattr(store, "list", flaky_list)
+
+    def locked_event(kind, data, deployment=None, c=None):
+        if kind == "collector_error":
+            raise sqlite3.OperationalError("database is locked")
+        return recorded(kind, data, deployment, c)
+
+    monkeypatch.setattr(store, "event", locked_event)
+    m.loop_task = asyncio.create_task(m.monitor())
+    try:
+        # Phase 1: wait until the failure run has been recorded.
+        for _ in range(300):
+            if m.collector["consecutive_errors"]:
+                break
+            await asyncio.sleep(0.05)
+        assert m.collector["consecutive_errors"] >= 1, "failure not recorded"
+        assert m.collector["last_error"] == "database is locked"
+
+        # Phase 2: wait until the failure run has ended (a full successful
+        # iteration after the induced failures). Polling until the desired
+        # state avoids relying on a specific iteration finishing first.
+        for _ in range(300):
+            if m.collector["consecutive_errors"] == 0 and len(ticks) > induced_failures:
+                break
+            await asyncio.sleep(0.05)
+        assert len(ticks) > induced_failures, "collector stopped after a failed sample"
+        assert not m.loop_task.done()
+        # Recovery clears the in-memory error state.
+        assert m.collector["consecutive_errors"] == 0
+        assert m.collector["last_error"] is None
+        assert m.collector["last_error_at"] is None
+    finally:
+        await m.close()
+
+
+async def test_collector_error_is_redacted_before_exposure(
+    store, tmp_path, monkeypatch
+):
+    app = create_app(tmp_path / "api")
+    m = app.state.manager
+    m.host = baseline()
+    store.put("settings", {"id": "host", "sample_seconds": 1})
+    listed = store.list
+
+    def flaky_list(kind, c=None):
+        if kind == "deployment":
+            raise sqlite3.OperationalError(
+                "database is locked; key=hf_abc123 token=bearer xyz"
+            )
+        return listed(kind, c)
+
+    monkeypatch.setattr(store, "list", flaky_list)
+
+    def always_fail(kind, data, deployment=None, c=None):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(store, "event", always_fail)
+    m.loop_task = asyncio.create_task(m.monitor())
+    try:
+        for _ in range(300):
+            await asyncio.sleep(0.05)
+            if m.collector["consecutive_errors"]:
+                break
+        assert m.collector["consecutive_errors"] >= 1, "no failure recorded"
+        last_error = m.collector["last_error"]
+        assert "hf_abc123" not in last_error
+        assert "bearer xyz" not in last_error
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            status = (await client.get("/api/status")).json()
+            exposed = status["collector"]["last_error"]
+            assert "hf_abc123" not in exposed
+            assert "bearer xyz" not in exposed
     finally:
         await m.close()
 

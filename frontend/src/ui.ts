@@ -77,6 +77,23 @@ export const active = (d: Deployment | ServingDeployment) =>
   );
 export const visible = (d: Pick<Deployment, 'lifecycle'>) =>
   Boolean(d.lifecycle?.serving);
+export function telemetryStale(
+  host: { stale?: boolean; ts?: number },
+  sampleSeconds?: number,
+  now = Date.now(),
+): boolean {
+  // The server always provides `stale` (covering both a missing/old timestamp
+  // and a collector that is alive but failing); the fallback below only guards
+  // against an incompatible server and derives the threshold from the
+  // configured sample interval instead of a hard-coded constant.
+  if (typeof host.stale === 'boolean') return host.stale;
+  if (typeof host.ts !== 'number') return true;
+  const threshold =
+    typeof sampleSeconds === 'number' && sampleSeconds > 0
+      ? Math.max(10, 2 * sampleSeconds)
+      : 15;
+  return now / 1000 - host.ts > threshold;
+}
 export const mode = (d: Pick<Deployment, 'residency'>): string =>
   ({ pinned: 'Pinned', 'on-demand': 'On demand', evictable: 'Evictable' })[
     d.residency || ''

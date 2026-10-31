@@ -36,6 +36,24 @@ from .version import VERSION
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def host_view(manager, sample_seconds):
+    # Augment the raw host snapshot with client-facing staleness. `stale`
+    # is true when sampling stopped (missing/old ts) or when the collector
+    # is alive but failing (registry work blocked), so a locked store shows
+    # as stale rather than presenting a fresh-but-partial snapshot as live.
+    ts = manager.host.get("ts")
+    if not ts:
+        return manager.host | {"age_seconds": None, "stale": True}
+    age = max(0.0, time.time() - float(ts))
+    return manager.host | {
+        "age_seconds": round(age, 1),
+        "stale": (
+            manager.collector["consecutive_errors"] > 0
+            or age > max(10, 2 * float(sample_seconds))
+        ),
+    }
+
+
 def create_app(state=None, dashboard_address=None, gateway_port=8001):
     store = Store(host.state_path(state))
     manager = Manager(store)
@@ -211,20 +229,28 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
 
     @app.get("/api/status")
     async def status():
+        # A store lock must not take the health endpoint down: fall back to
+        # defaults so /api/status keeps answering and can still report
+        # collector degradation.
+        try:
+            settings = manager.settings()
+        except Exception:
+            settings = Settings().model_dump()
         return {
             "version": VERSION,
             "instance_id": getattr(app.state, "instance_metadata", {}).get(
                 "instance_id"
             ),
             "csrf_token": csrf,
-            "host": manager.host,
+            "host": host_view(manager, settings.get("sample_seconds", 2)),
+            "collector": manager.collector,
             "deployments": [
                 d | {"inflight": manager.inflight.get(d["id"], 0)}
                 for d in deployment_rows()
             ],
             "serving_deployments": serving_rows(),
             "queue": manager.waiting,
-            "settings": manager.settings(),
+            "settings": settings,
             "gateway": "/v1",
             "gateway_url": gateway_url,
             "state_path": str(store.root),
@@ -676,11 +702,23 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         async def generate():
             cursor = after
             while not manager.stopping and not await request.is_disconnected():
-                for event in store.events(cursor):
-                    cursor = event["seq"]
-                    yield f"id: {cursor}\nevent: operation\ndata: {encode(event)}\n\n"
-                yield f"event: telemetry\ndata: {encode(manager.host)}\n\n"
-                await asyncio.sleep(manager.settings()["sample_seconds"])
+                try:
+                    sample_seconds = manager.settings()["sample_seconds"]
+                except Exception:
+                    sample_seconds = 2
+                # Emit telemetry before touching the store so a locked registry
+                # still delivers a fresh (possibly stale-flagged) snapshot and
+                # does not kill the stream.
+                yield f"event: telemetry\ndata: {encode(host_view(manager, sample_seconds))}\n\n"
+                try:
+                    for event in store.events(cursor):
+                        cursor = event["seq"]
+                        yield f"id: {cursor}\nevent: operation\ndata: {encode(event)}\n\n"
+                except Exception:
+                    # Keep the stream alive through a store lock; retry the same
+                    # cursor next cycle once the lock clears.
+                    pass
+                await asyncio.sleep(float(sample_seconds))
 
         return StreamingResponse(
             generate(),

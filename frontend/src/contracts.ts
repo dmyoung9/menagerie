@@ -300,6 +300,8 @@ const deploymentMetrics = d.object<T.HostDeploymentMetrics>({
 });
 export const host = d.object<T.HostSnapshot>({
   ts: opt(d.number),
+  age_seconds: opt(d.number),
+  stale: opt(d.boolean),
   cpu_count: maybeNumber,
   cpu_percent: opt(d.number),
   ram_total_mib: opt(d.number),
@@ -338,6 +340,13 @@ export const status = d.object<T.AppStatus>({
   version: d.string,
   csrf_token: d.string,
   host,
+  collector: opt(
+    d.object<T.CollectorHealth>({
+      consecutive_errors: d.number,
+      last_error: maybeString,
+      last_error_at: maybeNumber,
+    }),
+  ),
   deployments: d.array(deployment),
   serving_deployments: opt(d.array(servingDeployment)),
   settings,

@@ -226,6 +226,8 @@ export type ProcessSample = {
 };
 export type HostSnapshot = {
   ts?: number;
+  age_seconds?: number;
+  stale?: boolean;
   cpu_count?: number | null;
   cpu_percent?: number;
   ram_total_mib?: number;
@@ -268,10 +270,16 @@ export type EngineRecommendation = {
   engine?: string | null;
   reason?: string;
 };
+export type CollectorHealth = {
+  consecutive_errors: number;
+  last_error?: string | null;
+  last_error_at?: number | null;
+};
 export type AppStatus = {
   version: string;
   csrf_token: string;
   host: HostSnapshot;
+  collector?: CollectorHealth;
   deployments: Deployment[];
   serving_deployments?: ServingDeployment[];
   settings: HostSettings;
