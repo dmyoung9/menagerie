@@ -13,7 +13,7 @@
 4. Never double-count or normalize away over-allocation. Always show the absolute capacity/demand fraction and the overage.
 5. Never silently combine disjoint hardware pools, such as GPU 0 VRAM and GPU 1 VRAM, or VRAM and system RAM.
 6. Explain uncertainty and stale data. Unknown is not zero. Predictions are not hardware measurements.
-7. Preserve valid launch attempts after warnings, subject to real engine restrictions, admission policies, and reviewed effects on other deployments.
+7. Preserve valid launch attempts after advisory information, subject to real engine restrictions and reviewed effects on other deployments.
 8. Charts enhance but never replace accessible labels, exact values, and actionable feedback.
 
 ## 2. Canonical names and units
@@ -49,7 +49,7 @@ All raw memory values should be retained in exact bytes (or in the backend's doc
 | **Free** | Unallocated memory reported by the device/OS. |
 | **Reserved** | Capacity held by a workload or Menagerie policy. Reservation is not necessarily physical usage. |
 | **Allocated** | Resources assigned by a configuration. Not synonymous with actively used. |
-| **Estimated** | Predicted runtime consumption, with confidence/provenance if available. |
+| **Estimated** | Computed from observed history and/or stated inputs, with basis and sample count. |
 | **Proposed** | Additional or replacement demand from a pending edit/start. |
 | **Available** | Capacity remaining under the *stated effective budget* after current and proposed demand. |
 | **Headroom** | Capacity set aside for driver/runtime variation, host policy, or workload spikes. |
@@ -62,7 +62,7 @@ A device has **physical capacity** and may have a lower **usable budget** after 
 
 **Live** uses timestamped host/device/process measurements. It shows used, free, load, temperature, power, and current process attribution. The source of the value is a tooltip/detail field. No data becomes `Unknown`/`Stale`, not zero.
 
-**Allocated** shows the current reservations, policy headroom, and mutually compatible concurrently resident deployments. On-demand workloads that are not guaranteed to coexist should appear as alternative configurations or admission scenarios, not all added as if resident simultaneously.
+**Allocated** shows the current running deployments, policy headroom, and what is free. On-demand workloads that are not guaranteed to coexist should appear as alternative configurations or admission scenarios, not all added as if resident simultaneously.
 
 **Projected** uses configuration-driven estimates, memory placement, proposed deltas, and the current host sample as the baseline. Used primarily in the deployment editor and prelaunch review. Estimates have uncertainty, source/provenance, and a clearly named assumption (peak vs idle, configured context and parallel slots).
 
@@ -91,7 +91,7 @@ const withinBudget = Math.min(B, D);
 const treemapTotal = Math.max(B, D);
 ```
 
-`D` must include whatever existing and proposed consumption or reservations are relevant to the particular scenario; it must not include already-running instances twice. Treat the backend's resource preview as the authority on admission feasibility where it includes eviction, headroom, sample age, and reserve semantics. Do not re-derive a verdict from the UI's partial data.
+`D` must include whatever existing and proposed consumption is relevant to the particular scenario; it must not include already-running instances twice. Treat the backend's resource preview as the authority on demand and budget fit, including headroom and sample age. Do not re-derive the status from the UI's partial data.
 
 ### 5.2 Treemap rules
 
@@ -112,7 +112,7 @@ Avoid double-counting `Over` as a fifth bar segment alongside unsplit demand. In
 
 ### 5.4 Confidence and feedback
 
-Use estimate `confidence` and `provenance` in a tooltip or an accompanying status. Distinguish high-confidence observed/engine-derived values from rough heuristics. A preview with an uncertainty band may warrant a warning before the estimated limit, but a warning is not a categorical failure. Display the exact reason: e.g. `Estimated peak exceeds GPU 0's usable budget by 1.0 GiB`, `Telemetry was last updated 18s ago`, or `Other processes currently use 1.2 GiB`.
+Use the estimate's basis (observed, derived, unavailable) and sample count in a tooltip or an accompanying status. Distinguish observed values from derived values. When demand exceeds the budget, show a simple label such as `6.4 GiB over budget`. A label is not a block and not a prediction of failure. Display the exact reason: e.g. `6.4 GiB over budget`, `Telemetry was last updated 18s ago`, or `Other processes currently use 1.2 GiB`.
 
 ## 6. Chart catalog
 
@@ -135,7 +135,7 @@ Use estimate `confidence` and `provenance` in a tooltip or an accompanying statu
 
 ### 6.1 Time-series defaults
 
-Use a 5-15 minute live view by default, with 1 hour, 24 hours, and 7 days available when retention allows. Sample at the already-configured `sample_seconds`; do not hardcode a new poll interval. Downsample/aggregate on the backend for long ranges and preserve min, max, average, and sample count per bucket when possible. If data are missing, draw gaps; do not draw zero or carry stale data indefinitely. Tooltip gives exact timestamp, series value, sampling/aggregation status, and source. Units must be shown on the y-axis or adjacent legend.
+Use a 5-15 minute live view by default, with 1 hour, 24 hours, and 7 days available when retention allows. Sample at the already-configured `sample_seconds`; do not hardcode a new poll interval. Downsample/aggregate on the backend for long ranges and preserve min, max, average, and sample count per bucket when possible. History baseline is per-run peak; within-run time series and aggregation are added later.
 
 Time series should use restrained grids, minimal point markers, hover crosshairs, and reduced-motion support. Do not smooth away true spikes or draw misleading curves between sparse samples. For very busy scenes, keep the existing `MemoryChart` lightweight SVG unless Recharts yields a demonstrated accessibility or comparison benefit.
 
@@ -175,7 +175,7 @@ These are proposed placements, not a claim that the files already exist. Use the
 
 ### 8.1 Current backend alignment
 
-The current frontend type contract in `frontend/src/types/index.ts` already exposes `GpuSnapshot` (VRAM total/used/free, utilization, temperature, power, clock); `HostSnapshot` (CPU/RAM/swap/disk/processes/deployment metrics); `HostSettings` (headroom, temperature limit, sample interval, history retention); `ResourceEstimate` (`peak_mib`, optional `idle_mib`, `components`, `confidence`, `provenance`); and `ResourcePreviewGpu` (`total_mib`, `used_mib`, `reserve_mib`, `draft_mib`, `remaining_mib`, `reservation_error`, `verdict`).
+The current frontend type contract in `frontend/src/types/index.ts` already exposes `GpuSnapshot` (VRAM total/used/free, utilization, temperature, power, clock); `HostSnapshot` (CPU/RAM/swap/disk/processes/deployment metrics); `HostSettings` (headroom, temperature limit, sample interval, history retention); `ResourceEstimate` (`peak_mib`, optional `idle_mib`, `components`, `confidence`, `provenance`); and `ResourcePreviewGpu` (`total_mib`, `used_mib`, `reserve_mib`, `draft_mib`, `remaining_mib`, `reservation_error`, `verdict`). `confidence`, `verdict`, and `reserve_mib` are transitional and will be replaced by basis, sample count, accounting status, and observed demand.
 
 Create a view model adapter with explicitly documented source and unit conversions. Reuse the backend preview's verdict and rounding-free values. Ensure all new visual states support partial or null telemetry and optional estimator components. New estimator fields must be optional or schema-versioned for older installations.
 
@@ -187,10 +187,10 @@ Create a view model adapter with explicitly documented source and unit conversio
 - Check 2 GPU devices with different physical capacities and cross-device placement; there must be no fictitious pooled VRAM.
 - Check that shared model weights on disk are counted once, but separate loaded processes are accounted for independently if not truly shared.
 - Change context, concurrency, engine, offload, and member selection; both charts must update consistently without losing unsaved editor state.
-- Validate the same projected verdict shown by the backend preview, with clear caveats for uncertain estimates and external process use.
+- Validate the same accounting status shown by the backend preview, with clear notes for derived estimates and external process use.
 - Verify no-data, disconnected hardware, CPU-only, stale, and partial sensor availability states.
 - Test keyboard, screen reader labels, touch interactions, contrast, 320px responsive widths, dark mode, and reduced motion.
-- Retain launch-review safeguards and distinguish warning from actual runtime failure.
+- Retain launch-review safeguards and distinguish advisory information from actual runtime failure.
 - Run the repository's documented check, lint, formatting, build, test, and Playwright UI workflows on fixture-only data.
 
 ## 10. Implementation order
