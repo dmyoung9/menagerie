@@ -3,6 +3,8 @@
 Contributor reference for components, styling, and accessibility. For daily use,
 start with the [user guide](../README.md).
 
+For canonical measurement units, capacity accounting, and chart selection, see [Data Display and Visualization Standards](data-display-standards.md). This specification complements the component and accessibility rules in this guide.
+
 Menagerie uses **Tailwind CSS v4** (`@tailwindcss/vite`) and the **Base UI**
 variant of shadcn/ui. UI changes must preserve routing, polling, streaming,
 launch-review consent, and domain calculations.
