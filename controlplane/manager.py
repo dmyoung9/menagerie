@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 import psutil
 
-from . import adapters, deployment_sets, host, processes, telemetry
+from . import adapters, deployment_sets, host, processes, telemetry, templates
 from .schema import Settings
 from .store import encode, identity, uid
 
@@ -324,7 +324,11 @@ class Manager:
                 self.store.get("artifact", p["artifact_id"]),
                 self.store.get("runtime", p["runtime_id"]),
             )
-            errors += [f"{d['alias']}: {e}" for e in adapters.validate_profile(p, a, r)]
+            selection = templates.effective_selection(d, a, self.store)
+            errors += [
+                f"{d['alias']}: {e}"
+                for e in adapters.validate_profile(p, a, r, selection)
+            ]
             if not Path(a["local_path"]).exists():
                 errors.append(f"Missing artifact: {a['name']}")
             elif shards := (a.get("metadata", {}).get("shards") or []):
@@ -583,7 +587,7 @@ class Manager:
         )
         folder = self.store.root / "deployments" / ident
         folder.mkdir(parents=True, exist_ok=True)
-        spec = adapters.launch_spec(d, p, a, r, folder)
+        spec = adapters.launch_spec(d, p, a, r, folder, self.store)
         artifact_path = Path(a["local_path"])
         if a.get("sha256") and artifact_path.is_file():
             stat = artifact_path.stat()

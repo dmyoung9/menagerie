@@ -18,7 +18,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-from . import adapters, deployment_sets, host, lifecycle
+from . import adapters, deployment_sets, host, lifecycle, templates
 from .catalog import apply_reasoning, export_config, normalize
 from .jobs import Jobs
 from .manager import ACTIVE, Conflict, Manager, redact
@@ -294,9 +294,157 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             ]
         return store.list(kinds[kind])
 
+    def _template_public(asset):
+        return {k: v for k, v in asset.items() if k != "content"}
+
     @app.get("/api/models")
     async def models():
-        return store.list("artifact")
+        rows = store.list("artifact")
+        for row in rows:
+            row["templates"] = [
+                _template_public(t)
+                for t in templates.list_template_assets(store, row.get("id"))
+            ]
+        return rows
+
+    @app.get("/api/models/{ident}/templates")
+    async def model_templates(ident: str):
+        return [
+            _template_public(t) for t in templates.list_template_assets(store, ident)
+        ]
+
+    @app.get("/api/templates/{ident}")
+    async def template_detail(ident: str):
+        asset = store.get("template", ident)
+        return asset
+
+    @app.post("/api/templates")
+    async def create_template(request: Request):
+        body = await request.json()
+        artifact_id = body.get("artifact_id")
+        content = body.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Custom template content is required")
+        if len(content.encode("utf-8")) > templates.TEMPLATE_MAX_SIZE:
+            raise ValueError("Template exceeds the 4 MiB limit")
+        base = None
+        if body.get("base_asset_id"):
+            base = store.get("template", body["base_asset_id"])
+            if base.get("kind") != "embedded":
+                raise ValueError(
+                    "A custom template must be copied from an existing template"
+                )
+        asset = {
+            "id": uid(),
+            "kind": "custom",
+            "artifact_id": artifact_id,
+            "name": (base["name"] + " (custom)") if base else "custom",
+            "repo": base.get("repo") if base else None,
+            "revision": base.get("revision") if base else None,
+            "file_path": str(templates.write_custom_template(store, content)),
+            "relative_path": "custom.jinja",
+            "sha256": templates.sha256_text(content),
+            "size_bytes": len(content.encode("utf-8")),
+            "content": content,
+            "status": "available",
+            "error": None,
+        }
+        return store.put("template", asset)
+
+    @app.put("/api/templates/{ident}")
+    async def update_template(ident: str, request: Request):
+        asset = store.get("template", ident)
+        if asset.get("kind") != "custom":
+            raise Conflict("Only custom templates can be edited")
+        body = await request.json()
+        content = body.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Template content is required")
+        if len(content.encode("utf-8")) > templates.TEMPLATE_MAX_SIZE:
+            raise ValueError("Template exceeds the 4 MiB limit")
+        updated = {
+            **asset,
+            "content": content,
+            "sha256": templates.sha256_text(content),
+            "size_bytes": len(content.encode("utf-8")),
+            "file_path": str(templates.write_custom_template(store, content)),
+            "status": "available",
+            "error": None,
+        }
+        return store.put("template", updated)
+
+    @app.post("/api/templates/{ident}/delete")
+    async def delete_template(ident: str):
+        asset = store.get("template", ident)
+        if asset.get("kind") != "custom":
+            raise Conflict("Published and embedded templates cannot be deleted")
+        path = Path(asset["file_path"]) if asset.get("file_path") else None
+        removed = False
+        if path:
+            try:
+                path.unlink()
+                removed = True
+            except OSError:
+                pass
+        with store.transaction() as c:
+            c.execute("DELETE FROM objects WHERE kind='template' AND id=?", (ident,))
+            store.event(
+                "delete",
+                {"kind": "template", "id": ident, "disk_files_removed": removed},
+                c=c,
+            )
+        return {"deleted": ident, "disk_files_removed": removed}
+
+    @app.post("/api/models/{ident}/refresh-templates")
+    async def refresh_templates_endpoint(ident: str):
+        return jobs.submit(
+            "Refresh chat templates", lambda j: jobs.refresh_templates(ident)
+        )
+
+    @app.post("/api/models/{ident}/template-default")
+    async def set_template_default(ident: str, request: Request):
+        body = await request.json()
+        source = body.get("source")
+        asset_id = body.get("asset_id")
+        if source not in templates.TEMPLATE_SOURCES:
+            raise ValueError(
+                "Model template default source must be automatic, embedded, "
+                "published, or custom"
+            )
+        async with manager.lock:
+            with store.transaction() as c:
+                artifact = store.get("artifact", ident, c)
+                if source == "automatic":
+                    selection = {"source": "automatic", "asset_id": None}
+                else:
+                    if not isinstance(asset_id, str) or not asset_id:
+                        raise ValueError("A named template requires its asset id")
+                    asset = next(
+                        (
+                            t
+                            for t in store.list("template", c)
+                            if t.get("id") == asset_id
+                        ),
+                        None,
+                    )
+                    if asset is None:
+                        raise ValueError(
+                            "Model template default references a missing template"
+                        )
+                    if asset.get("artifact_id") not in (None, ident):
+                        raise ValueError(
+                            "Model template default must belong to this model"
+                        )
+                    selection = {"source": source, "asset_id": asset_id}
+                artifact["template_default"] = selection
+                saved = store.put("artifact", artifact, c=c)
+        return {
+            **saved,
+            "templates": [
+                _template_public(t)
+                for t in templates.list_template_assets(store, ident)
+            ],
+        }
 
     @app.get("/api/engines/catalog")
     async def engine_catalog():
@@ -472,6 +620,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 + (artifact["sha256"] or identity(artifact["local_path"]))[:20],
                 source="local",
             )
+            templates.ensure_defaults(artifact)
+            templates.create_template_assets(
+                store, artifact["id"], templates.collect_template_drafts(artifact, {})
+            )
             existing = next(
                 (
                     a
@@ -610,6 +762,32 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             data["profile_id"] = snapshot["id"]
         else:
             snapshot = store.get("profile", data["profile_id"], c)
+        override = data.get("template_override")
+        if override:
+            if not isinstance(override, dict) or not override.get("source"):
+                raise ValueError("Template override must name a source")
+            if override.get("source") not in ("embedded", "published", "custom"):
+                raise ValueError(
+                    "Template override must be embedded, published, or custom"
+                )
+            asset = next(
+                (
+                    t
+                    for t in store.list("template", c)
+                    if t.get("id") == override.get("asset_id")
+                ),
+                None,
+            )
+            if asset is None:
+                raise ValueError("Template override references a missing template")
+            snapshot_artifact = snapshot.get("artifact_id")
+            if snapshot_artifact and asset.get("artifact_id") not in (
+                None,
+                snapshot_artifact,
+            ):
+                raise ValueError(
+                    "Template override must belong to the deployment's model"
+                )
         data.update(state="STOPPED", profile_snapshot=snapshot, reservation_active=0)
         return store.put("deployment", data, expected, c=c)
 

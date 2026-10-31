@@ -106,6 +106,27 @@ const metadata: d.Decoder<T.ArtifactMetadata> = (value, path) => {
     );
   return result as T.ArtifactMetadata;
 };
+const templateKind = d.oneOf('published', 'embedded', 'custom');
+const templateSource = d.oneOf('automatic', 'embedded', 'published', 'custom');
+const templateStatus = d.oneOf('available', 'missing', 'failed');
+export const templateAssetPublic = d.object<T.TemplateAssetPublic>({
+  id: d.string,
+  kind: templateKind,
+  artifact_id: d.nullable(d.string),
+  name: d.string,
+  repo: d.nullable(d.string),
+  revision: d.nullable(d.string),
+  file_path: d.nullable(d.string),
+  relative_path: d.nullable(d.string),
+  sha256: d.string,
+  size_bytes: d.nullable(d.number),
+  status: opt(templateStatus),
+  error: d.nullable(d.string),
+});
+export const templateSelection = d.object<T.TemplateSelection>({
+  source: templateSource,
+  asset_id: d.nullable(d.string),
+});
 export const artifact = d.object<T.Artifact>({
   id: d.string,
   revision: d.number,
@@ -121,6 +142,8 @@ export const artifact = d.object<T.Artifact>({
   sha256: maybeString,
   metadata: opt(metadata),
   discovered_capabilities: opt(discoveredCapabilities),
+  template_default: opt(d.nullable(templateSelection)),
+  templates: opt(d.array(templateAssetPublic)),
 });
 const runtimeCapabilities = d.object<T.RuntimeCapabilities>({
   formats: opt(stringArray),
@@ -206,6 +229,7 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     unit_id: opt(d.string),
     lifecycle: opt(lifecycle),
     inflight: opt(d.number),
+    template_override: opt(d.nullable(templateSelection)),
   })(value, path);
 export const servingDeployment: d.Decoder<T.ServingDeployment> = (
   value,
@@ -267,6 +291,7 @@ export const deploymentDraft = d.object<T.DeploymentDraft>({
   enabled: d.boolean,
   gpu: d.number,
   queue_timeout: d.number,
+  template_override: opt(d.nullable(templateSelection)),
 });
 export const deploymentSetDraft = d.object<T.DeploymentSetDraft>({
   id: opt(d.string),
