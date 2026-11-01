@@ -236,8 +236,6 @@ def check(installer, worker, baseline=None):
                     "profile_id": profile["id"],
                     "port": free_port(),
                     "residency": "on-demand",
-                    "reservation_mib": 0,
-                    "allow_uncertain": True,
                 },
             )
             ident = deployment["id"]
@@ -245,7 +243,7 @@ def check(installer, worker, baseline=None):
             assert not validation["errors"], "Synthetic CPU worker plan was rejected"
             loading = request(
                 f"/api/serving-deployments/{ident}/start",
-                {"plan_token": validation["plan_token"], "override": True},
+                {"plan_token": validation["plan_token"]},
             )
             for _ in range(100):
                 loading_state = next(
