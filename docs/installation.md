@@ -35,7 +35,7 @@ the dashboard. For unattended use, `--yes` skips prompts; optional actions requi
 To install a downloaded wheel:
 
 ```sh
-bash install.sh --wheel ./menagerie-2.1.3-py3-none-any.whl --constraints ./menagerie-2.1.3-requirements.txt
+bash install.sh --wheel ./menagerie-2.1.4-py3-none-any.whl --constraints ./menagerie-2.1.4-requirements.txt
 ```
 
 Release downloads must be publicly accessible. A 404 can mean unavailable assets;

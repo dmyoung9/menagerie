@@ -38,6 +38,7 @@ import {
   state,
   Status,
   Tabs,
+  telemetryStale,
   type Registry,
 } from './ui';
 import { ActivityFeed } from './Views';
@@ -114,6 +115,7 @@ export function ServingTable({
       </Button>
     );
   }
+  const stale = telemetryStale(host);
   return (
     <div className="table-wrap">
       <Table className={'deployment-table ' + (compact ? 'compact' : '')}>
@@ -122,7 +124,15 @@ export function ServingTable({
             <TableHead>Deployment</TableHead>
             <TableHead>State</TableHead>
             <TableHead>Mode</TableHead>
-            <TableHead className="numeric">VRAM (GiB)</TableHead>
+            <TableHead className="numeric">
+              VRAM (GiB)
+              {stale && (
+                <small className="muted" title="Telemetry has not updated">
+                  {' '}
+                  · stale
+                </small>
+              )}
+            </TableHead>
             <TableHead className="numeric">Requests</TableHead>
             {!compact && (
               <TableHead>
