@@ -56,8 +56,8 @@ Keep captures under ignored test output; never attach a personal browser profile
   snapshots prevent later profile edits from changing existing deployments.
 - User launches validate through `/api/serving-deployments/{id}/validate`, then
   start with its `plan_token` (CLI: `start ID --approve`). Preserve reviewed unload
-  consent. Manual estimate warnings and saved on-demand uncertainty permission
-  are different controls; do not conflate them.
+  consent. Resource accounting is advisory: never reserve memory or gate launches
+  on estimates or uncertainty; retain measured headroom/temperature protection.
 - Non-GET `/api/*` calls require the current process token, same-origin checks,
   Content-Length, and bounded bodies. ASGI tests use `http://testserver`.
 - Dashboard and gateway default to loopback. Optional private-LAN dashboard

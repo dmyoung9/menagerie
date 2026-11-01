@@ -19,7 +19,6 @@ def link(store, ids=("a", "b"), **policy):
         "priority": 50,
         "idle_timeout": 1,
         "allow_eviction": True,
-        "allow_uncertain": True,
         "enabled": True,
         "queue_timeout": 5,
     } | policy
@@ -63,6 +62,25 @@ def third(store):
     )
 
 
+def observed_capacity(manager):
+    """Switch scenarios use measured history/processes, not invented reservations."""
+    for d in manager.store.list("deployment"):
+        manager.store.put(
+            "session",
+            {
+                "id": "observed-" + d["id"],
+                "profile_hash": manager.estimate(d)["profile_hash"],
+                "started_at": time.time(),
+                "outcome": "stopped",
+                "peak_gpu_mib": 2000,
+            },
+        )
+        manager.host.setdefault("deployments", {})[d["id"]] = {
+            "gpu_mib": 6000,
+            "gpu_by_device_mib": {str(d["gpu"]): 6000},
+        }
+
+
 async def test_either_alias_loads_whole_unit_and_member_stop_stops_all(tmp_path):
     _, store, m = await setup(tmp_path)
     link(store)
@@ -103,6 +121,7 @@ async def test_bidirectional_switch_evicts_entire_units(tmp_path):
     _, store, m = await setup(tmp_path)
     link(store)
     third(store)
+    observed_capacity(m)
     try:
         large = await m.acquire("c")
         m.release(large)
@@ -123,6 +142,7 @@ async def test_switch_waits_without_blocking_nested_requests(tmp_path):
     _, store, m = await setup(tmp_path)
     link(store)
     third(store)
+    observed_capacity(m)
     try:
         large = await m.acquire("c")
         m.host["gpus"][0]["free_mib"] = 3000
@@ -233,7 +253,6 @@ async def test_new_deployment_owns_shared_policy_and_ignores_unused_group_record
                 "member_ids": ["a", "b"],
                 "residency": "on-demand",
                 "allow_eviction": True,
-                "allow_uncertain": True,
             }
             response = await client.post(
                 "/api/deployment-sets", json=body, headers=headers
@@ -326,6 +345,7 @@ async def test_per_gpu_planning_does_not_evict_an_unrelated_gpu(tmp_path):
     third(store)
     c = store.get("deployment", "c")
     store.put("deployment", c | {"state": "READY", "reservation_active": 6000})
+    observed_capacity(m)
     m.host["gpus"].append(
         {
             "index": 1,
@@ -338,6 +358,7 @@ async def test_per_gpu_planning_does_not_evict_an_unrelated_gpu(tmp_path):
     try:
         assert m.automatic_stops(["pair"]) == []
         store.put("deployment", store.get("deployment", "c") | {"gpu": 1})
+        m.host["deployments"]["c"]["gpu_by_device_mib"] = {"1": 6000}
         assert m.automatic_stops(["pair"]) == ["c"]
     finally:
         store.put("deployment", store.get("deployment", "c") | {"state": "STOPPED"})
@@ -524,6 +545,7 @@ async def test_switch_timeout_does_not_interrupt_busy_predecessor(tmp_path):
     _, store, m = await setup(tmp_path)
     link(store, queue_timeout=1)
     third(store)
+    observed_capacity(m)
     store.put("deployment", store.get("deployment", "c") | {"queue_timeout": 5})
     try:
         c = await m.acquire("c")

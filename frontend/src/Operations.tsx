@@ -17,6 +17,8 @@ import { FieldGroup, FieldSet } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useEffect, useState } from 'react';
 import { readApi } from './ui';
+import { memory, bytes } from '@/lib/formatters';
+import { DraftResources } from './Resources';
 import * as contracts from './contracts';
 import type {
   Deployment,
@@ -79,14 +81,20 @@ export function LaunchReview({
       {plan && (
         <>
           <div className="table-wrap">
-            <Table>
+            <Table
+              containerProps={{
+                tabIndex: 0,
+                role: 'region',
+                'aria-label': 'Launch resource facts',
+              }}
+            >
               <TableHeader>
                 <TableRow>
                   <TableHead>Model</TableHead>
-                  <TableHead className="numeric">
-                    Estimated VRAM (GiB)
-                  </TableHead>
-                  <TableHead>Confidence</TableHead>
+                  <TableHead className="numeric">GPU peak</TableHead>
+                  <TableHead>Basis / runs</TableHead>
+                  <TableHead>File size</TableHead>
+                  <TableHead>RAM peak</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -97,28 +105,20 @@ export function LaunchReview({
                         modal.row.name}
                     </TableCell>
                     <TableCell className="numeric">
-                      {gib(estimate.reservation_mib)}
+                      {memory(estimate.peak_mib)}
                     </TableCell>
-                    <TableCell>{estimate.confidence}</TableCell>
+                    <TableCell title={estimate.provenance}>
+                      {estimate.basis} · {estimate.sample_count} runs
+                    </TableCell>
+                    <TableCell className="numeric">
+                      {bytes(estimate.file_size_bytes)}
+                    </TableCell>
+                    <TableCell className="numeric">
+                      {memory(estimate.ram_mib)}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
-              {Object.keys(plan.estimates).length > 1 && (
-                <tfoot>
-                  <TableRow>
-                    <TableCell>Total</TableCell>
-                    <TableCell className="numeric">
-                      {gib(
-                        Object.values(plan.estimates).reduce(
-                          (sum, e) => sum + e.reservation_mib,
-                          0,
-                        ),
-                      )}
-                    </TableCell>
-                    <TableCell />
-                  </TableRow>
-                </tfoot>
-              )}
             </Table>
           </div>
           <dl className="properties">
@@ -129,6 +129,11 @@ export function LaunchReview({
               </div>
             ))}
           </dl>
+          <p>
+            System RAM available: {memory(host.ram_available_mib)}. Capacity
+            accounting is advisory, not reserved memory.
+          </p>
+          {plan.resources && <DraftResources preview={plan.resources} />}
           {plan.stops.length > 0 && (
             <div className="warning">
               <h3>Will unload</h3>
@@ -152,7 +157,7 @@ export function LaunchReview({
           ))}
           {plan.warnings.length > 0 && (
             <details open>
-              <summary>Memory uncertainty ({plan.warnings.length})</summary>
+              <summary>Launch facts ({plan.warnings.length})</summary>
               {plan.warnings.map((w: string) => (
                 <p className="warning" key={w}>
                   {w}
@@ -189,7 +194,6 @@ export function LaunchReview({
                 setError('');
                 try {
                   await api(`/api/${modal.kind}/${modal.row.id}/start`, {
-                    override: true,
                     plan_token: plan.plan_token,
                   });
                   done();

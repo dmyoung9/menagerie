@@ -943,6 +943,12 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             store.list("session"), key=lambda x: x["started_at"], reverse=True
         )
 
+    @app.get("/api/history/resources")
+    async def resource_history(artifact_id: str | None = None):
+        from .resource_history import summaries
+
+        return summaries(store, manager.settings(), artifact_id)
+
     @app.post("/api/history/sessions/{ident}/restore")
     async def restore(ident: str):
         session = store.get("session", ident)
@@ -1042,14 +1048,20 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                         "priority": 50,
                         "idle_timeout": 0,
                         "allow_eviction": False,
-                        "allow_uncertain": False,
                         "queue_timeout": 300,
                     },
                 )
                 value = DeploymentSet(
                     name="Restored " + (saved.get("deployment_name") or ident[:8]),
                     member_ids=deployments,
-                    **(policy | {"enabled": False}),
+                    **(
+                        {
+                            k: v
+                            for k, v in policy.items()
+                            if k in DeploymentSet.model_fields
+                        }
+                        | {"enabled": False}
+                    ),
                 ).model_dump(exclude_none=True)
                 return save_set(value | {"restored_from_activation": ident}, c=c)
 

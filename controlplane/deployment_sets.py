@@ -11,7 +11,6 @@ POLICY_KEYS = (
     "priority",
     "idle_timeout",
     "allow_eviction",
-    "allow_uncertain",
     "enabled",
     "queue_timeout",
 )

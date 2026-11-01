@@ -29,9 +29,9 @@ is missing or failed to download.
 
 Pinned models remain loaded until explicitly stopped or a failure occurs.
 On-demand models load when a client requests them. Allowing eviction permits an
-eligible deployment to unload to make room for other work. On-demand loading with
-uncertain estimates requires its separate permission; manual launch review shows
-warnings and asks for consent to proposed unloads.
+eligible deployment to unload to make room for other work. Memory accounting is
+advisory for manual and on-demand loading; there is no uncertainty permission or
+capacity acknowledgment. Manual launch review asks for consent to proposed unloads.
 
 ## Saving and leaving
 

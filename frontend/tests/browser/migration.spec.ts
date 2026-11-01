@@ -14,13 +14,12 @@ test('observed resources, SSE events, polling and exact preset stay integrated',
   await expect(
     page.getByRole('cell', { name: '—', exact: true }).first(),
   ).toBeVisible();
-  const tile = page.getByRole('button', { name: /^Example ready: 3 GiB/ });
+  expect(await page.locator('.chart path').count()).toBeGreaterThan(0);
+  const tile = page.getByRole('link', { name: /^Example ready: 3.0 GiB/ });
   await tile.focus();
   await page.keyboard.press('Enter');
-  await expect(
-    page.getByRole('link', { name: 'Open deployment →' }),
-  ).toBeVisible();
-  expect(await page.locator('.chart polyline').count()).toBe(1);
+  await expect(page).toHaveURL(/#\/deployments\/ready$/);
+  await navigate(page, 'Overview');
   const tokens = await page.evaluate(() => ({
     primary: getComputedStyle(document.documentElement)
       .getPropertyValue('--primary')
@@ -35,7 +34,7 @@ test('observed resources, SSE events, polling and exact preset stay integrated',
     name: 'Polled deployment',
   });
   await expect(
-    page.getByRole('link', { name: 'Polled deployment' }),
+    page.getByRole('link', { name: 'Polled deployment' }).first(),
   ).toBeVisible({ timeout: 8000 });
 });
 
@@ -247,9 +246,9 @@ test('launch warnings remain advisory and submit the plan token; local files use
   await expect(dialog.getByRole('checkbox')).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Load', exact: true }).click();
   await expect(dialog).toBeHidden();
-  expect(
-    fixture.writes.find((w) => w.path.endsWith('/start'))!.body,
-  ).toMatchObject({ override: true, plan_token: 'review-token' });
+  expect(fixture.writes.find((w) => w.path.endsWith('/start'))!.body).toEqual({
+    plan_token: 'review-token',
+  });
   await navigate(page, 'Models');
   await page
     .getByRole('button', { name: 'Add from File', exact: true })

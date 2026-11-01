@@ -173,7 +173,7 @@ async def test_capacity_port_conflict_and_stale_plan(store, tmp_path):
     plan = m.validate(["a"])
     d = store.get("deployment", "a")
     store.put("deployment", d | {"reservation_mib": 16000})
-    assert any("capacity" in e for e in m.validate(["a"])["errors"])
+    assert not m.validate(["a"])["errors"]  # Legacy reservation is inert.
     with pytest.raises(Conflict, match="changed"):
         await m.activate(["a"], True, token=plan["plan_token"])
     store.put("deployment", d)
@@ -239,9 +239,7 @@ def test_catalog_and_supervisor_owned_flags():
     )
 
 
-async def test_concurrent_admission_cannot_overbook_explicit_reservations(
-    store, tmp_path
-):
+async def test_concurrent_admission_does_not_reserve_estimated_memory(store, tmp_path):
     await seed(store, tmp_path)
     for ident in ("a", "b"):
         d = store.get("deployment", ident)
@@ -252,8 +250,8 @@ async def test_concurrent_admission_cannot_overbook_explicit_reservations(
         results = await asyncio.gather(
             m.activate(["a"], True), m.activate(["b"], True), return_exceptions=True
         )
-        assert sum(isinstance(r, Conflict) for r in results) == 1
-        assert sum(d["state"] == "READY" for d in store.list("deployment")) == 1
+        assert not any(isinstance(r, Exception) for r in results), results
+        assert sum(d["state"] == "READY" for d in store.list("deployment")) == 2
     finally:
         await m.close()
 
@@ -267,7 +265,9 @@ async def test_failed_group_restores_authorized_previous_deployment(store, tmp_p
         d = store.get("deployment", "b")
         d["profile_snapshot"]["config"]["fail"] = True
         store.put("deployment", d)
-        with pytest.raises(RuntimeError):
+        with pytest.raises(
+            RuntimeError, match="Fixture engine error: CUDA out of memory"
+        ):
             await m.activate(["b"], True, authorized_stops=["a"])
         assert store.get("deployment", "a")["state"] == "READY"
         assert await m.ready(store.get("deployment", "a"))
@@ -300,8 +300,8 @@ async def test_pinned_not_automatic_victim_of_on_demand(store, tmp_path):
         b = store.get("deployment", "b")
         store.put("deployment", b | {"residency": "on-demand", "reservation_mib": 9000})
         m.host["gpus"][0]["free_mib"] = 4000
-        with pytest.raises(Conflict, match="capacity"):
-            await m.acquire("b")
+        acquired = await m.acquire("b")
+        m.release(acquired)
         assert store.get("deployment", "a")["state"] == "READY"
         assert await m.ready(store.get("deployment", "a"))
     finally:

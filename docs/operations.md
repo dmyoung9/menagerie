@@ -24,28 +24,34 @@ configuration. Renaming does not change its alias; changing the alias requires
 updating clients. Immutable revisions remain internal for history/recovery.
 See [multi-model deployments](multi-model-deployments.md).
 
-The composer previews the whole draft alongside existing usage and desktop reserve.
+The composer previews the whole draft alongside existing usage and safety headroom.
 Context, concurrency, cache, and member changes update estimates without launching.
-Context and concurrency inputs use capacity limits with peer settings preserved;
-layer metadata bounds GPU-layer inputs. The backend rejects known-invalid model
-limits, batch/cache combinations, and draft budgets. Reservations are displayed
-separately, never added to predicted usage. llama.cpp's context is a shared pool
+Known runtime/model constraints bound inputs; estimated capacity does not. The
+backend rejects known-invalid model limits and batch/cache combinations, not
+over-budget drafts. llama.cpp's context is a shared pool
 across parallel slots. CPU/RAM offload is explicit and slower, with approximate RAM
-requirements shown. vLLM's allocation fraction is accounted for separately from its
-estimated model/context requirement. Hybrid architectures and engine overhead still
-need broader measurement. Launch review rechecks actual admission.
+requirements shown where placement is known. The engine allocates memory according
+to its own configuration. Hybrid architectures, engine buffers and internal
+weights/cache/projector splits remain unavailable without instrumentation; no
+overhead or margin is invented. Launch review rechecks actual admission.
+
+Overview shows each GPU separately, OS-available RAM, a process ownership filter,
+and live memory/activity/temperature trends. Decode throughput appears only when
+reported by the runtime. Select a deployment block or its label to open its detail
+page. Deployment/model details and Activity → Sessions show retained per-run GPU
+and RSS peaks, grouped by configuration, with measured counts, mean/max and dates.
+Failed/partial runs are included; history is not a promise of future memory fit.
 
 ## Admission and lifecycle
 
-- Capacity checks account for competing deployment reservations. Reservations
-  above physical capacity plus desktop
-  reserve are errors. Memory estimates never require an approval checkbox.
-- Reservations are **not physical GPU isolation**. External processes can consume
-  memory; estimates and observed session peaks are workload-dependent.
+- Menagerie does not reserve memory. Resource previews show free GPU/RAM, file
+  sizes and observed configuration-specific peaks (or metadata-derived file/KV
+  accounting when there are no measurements). Over-budget labels are advisory,
+  not failure predictions or approval checkboxes. Unknown measurements stay unknown.
 - Default startup gates require 2 GiB free VRAM and 4 GiB available RAM. Newly
   loading runtimes roll back if observed headroom/temperature crosses the gate.
-- Client-triggered on-demand loading with uncertain estimates requires its saved
-  permission. Manual launch review can explicitly proceed despite estimate warnings.
+- Manual and client-triggered launches do not require uncertainty permission.
+  Manual review still requires approval of proposed unloads.
 - Pinned deployments are never automatically evicted. Idle, explicitly authorized
   evictable deployments can be stopped for pressure/higher-priority demand.
   Pinned pressure is visible, not a guarantee against OOM.
@@ -54,7 +60,7 @@ need broader measurement. Launch review rechecks actual admission.
   Full queues return 429; unavailable/loading failures return structured 503 errors.
 - Ready means the runtime responds successfully and advertises the expected model.
   A running process alone is not readiness. Crashes and degraded health are distinct states.
-- Failed starts stop new processes, release reservations, and attempt to restore
+- Failed starts stop new processes, report captured engine errors, and attempt to restore
   explicitly stopped predecessors. Failed restoration is recorded, not hidden.
   Active requests block ordinary stops/evictions.
 - Streaming stays streamed; cancellation closes the upstream connection. Request
@@ -87,14 +93,14 @@ OpenTelemetry is not configured.
 Default private state: `~/.local/state/menagerie/` (override with `--state` or
 `MENAGERIE_STATE`).
 
-| Path | Contents |
-| --- | --- |
-| `registry.sqlite3` | Registry, revisions, operations, sessions, requests, hardware samples |
+| Path                           | Contents                                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `registry.sqlite3`             | Registry, revisions, operations, sessions, requests, hardware samples                             |
 | `deployments/<id>/runtime.log` | Timestamped runtime logs with limited credential filtering; 4 MiB rotation plus one previous file |
-| `models/` | Managed Hugging Face cache with resume support |
-| `runtimes/` | Isolated reviewed source builds |
-| `registry-backup-*.sqlite3` | Explicit consistent online registry backups |
-| `opencode-managed.json` | Generated client provider fragment |
+| `models/`                      | Managed Hugging Face cache with resume support                                                    |
+| `runtimes/`                    | Isolated reviewed source builds                                                                   |
+| `registry-backup-*.sqlite3`    | Explicit consistent online registry backups                                                       |
+| `opencode-managed.json`        | Generated client provider fragment                                                                |
 
 Credential filtering does not make logs safe to publish: paths, host details, or
 unrecognized secret formats may remain. Review any excerpt privately before sharing.

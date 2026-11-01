@@ -39,6 +39,8 @@ import * as contracts from './contracts';
 import { array } from './decode';
 import { DeploymentWizard } from './DeploymentWizard';
 import { LiveResources } from './Resources';
+import { ProcessResources } from '@/components/process-resources';
+import { TelemetrySeries } from '@/components/charts/telemetry-series';
 import { Editor } from './Editors';
 import { editable } from './editor-state';
 import { Connect, LaunchReview, PolicyEditor, SourceBuild } from './Operations';
@@ -51,7 +53,6 @@ import {
   ActivityFeed,
   ActivityPage,
   DeploymentDetail,
-  MemoryChart,
   ModelLibrary,
   SettingsPage,
 } from './Views';
@@ -219,7 +220,11 @@ export default function App() {
         const value: unknown = JSON.parse((e as MessageEvent<string>).data);
         const host = contracts.host(value);
         setStatus((s) => (s ? { ...s, host } : s));
-        setSamples((s) => [...s.slice(-499), host]);
+        setSamples((s) =>
+          [...s.filter((old) => old.ts !== host.ts), host]
+            .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
+            .slice(-500),
+        );
       } catch {
         setFetchError(
           'Received invalid telemetry. Waiting for a valid update.',
@@ -725,7 +730,15 @@ export default function App() {
                       />
                     </CardContent>
                   </Card>
-                  <MemoryChart samples={samples} />
+                  <ProcessResources
+                    host={host}
+                    deployments={data.deployments || []}
+                  />
+                  <TelemetrySeries
+                    samples={samples}
+                    deployments={data.deployments || []}
+                    interval={status?.settings.sample_seconds || 2}
+                  />
                   <Card>
                     <CardContent>
                       <details className="m-0">

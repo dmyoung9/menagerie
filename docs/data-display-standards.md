@@ -1,13 +1,14 @@
 # Menagerie Data Display and Visualization Standards
 
-**Status:** Proposed v1.0  
+**Status:** Design reference; current implementation described in §8.1
+
 **Scope:** React/Vite dashboard, deployment configuration, resource previews, live telemetry, model catalog, downloads, history, and evaluations.  
 **Companion:** `docs/frontend-design-system.md`  
 **Project foundation:** shadcn/ui Base UI, Mira preset `b2v6bT61lS`, Tailwind CSS v4, dark-mode default. Preserve existing semantic tokens, typography, accessibility, and UI ownership conventions.
 
 ## 1. Principles
 
-1. Display *what* a measurement is (observed, reserved, estimated, proposed), not just a number.
+1. Display _what_ a measurement is (observed, reserved, estimated, proposed), not just a number.
 2. Separate hardware utilization (activity) from memory consumption (capacity). A GPU at 100% compute load is not necessarily in trouble.
 3. Use Treemaps for **composition**, capacity bars for **budget fit**, and time series for **behavior over time**. These are complementary, not interchangeable.
 4. Never double-count or normalize away over-allocation. Always show the absolute capacity/demand fraction and the overage.
@@ -20,41 +21,41 @@
 
 All raw memory values should be retained in exact bytes (or in the backend's documented MiB-native fields), and formatted only at the view boundary. Do not change backend field units by assumption.
 
-| Metric | Primary display | Detail or note |
-| --- | --- | --- |
-| RAM/VRAM/disk/artifact size | MiB, GiB, TiB | IEC binary units; `1 GiB = 2^30 bytes`. Preserve original source's decimal GB labeling if quoting a manufacturer. |
-| Download throughput | MiB/s | Clearly distinguish from network Mbps. |
-| GPU/CPU busy time | `%` (integer) | Treat as activity, not memory capacity. |
-| Memory share and progress | `%` (integer) | Show byte fraction beside it. Projected demand may exceed 100%. |
-| Temperature | `72 °C` | Integer. Do not assume a generic throttling threshold. |
-| Power | `185 W` | Integer; show power limit only if known. |
-| Clock | MHz or GHz | Use a single scale within one comparison. |
-| Parameter count | `335M`, `8B`, `70B` | Parameter count is not disk size or quantization. Unknown stays unknown. |
-| Quantization | `Q4_K_M`, `Q8_0`, `FP16` | Label per artifact/variant, not guessed from size. |
-| Context | `32,768 tokens` | Compact `32K` only in space-constrained UI; detailed number must be exact. |
-| Inference speed | `42.6 output tokens/s` | Distinguish decode throughput from prompt/prefill throughput. |
-| Latency | `248 ms`, `1.4 s` | Label TTFT, request duration, etc. |
-| Duration | `4m 32s` | Use `MM:SS` when suitable, `1h 12m` for larger ETA; show `Estimating...` for insufficient samples. |
-| Date/time | Local human-readable timestamp | Tooltip exposes full timestamp with timezone; history stores UTC/epoch. |
+| Metric                      | Primary display                | Detail or note                                                                                                    |
+| --------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| RAM/VRAM/disk/artifact size | MiB, GiB, TiB                  | IEC binary units; `1 GiB = 2^30 bytes`. Preserve original source's decimal GB labeling if quoting a manufacturer. |
+| Download throughput         | MiB/s                          | Clearly distinguish from network Mbps.                                                                            |
+| GPU/CPU busy time           | `%` (integer)                  | Treat as activity, not memory capacity.                                                                           |
+| Memory share and progress   | `%` (integer)                  | Show byte fraction beside it. Projected demand may exceed 100%.                                                   |
+| Temperature                 | `72 °C`                        | Integer. Do not assume a generic throttling threshold.                                                            |
+| Power                       | `185 W`                        | Integer; show power limit only if known.                                                                          |
+| Clock                       | MHz or GHz                     | Use a single scale within one comparison.                                                                         |
+| Parameter count             | `335M`, `8B`, `70B`            | Parameter count is not disk size or quantization. Unknown stays unknown.                                          |
+| Quantization                | `Q4_K_M`, `Q8_0`, `FP16`       | Label per artifact/variant, not guessed from size.                                                                |
+| Context                     | `32,768 tokens`                | Compact `32K` only in space-constrained UI; detailed number must be exact.                                        |
+| Inference speed             | `42.6 output tokens/s`         | Distinguish decode throughput from prompt/prefill throughput.                                                     |
+| Latency                     | `248 ms`, `1.4 s`              | Label TTFT, request duration, etc.                                                                                |
+| Duration                    | `4m 32s`                       | Use `MM:SS` when suitable, `1h 12m` for larger ETA; show `Estimating...` for insufficient samples.                |
+| Date/time                   | Local human-readable timestamp | Tooltip exposes full timestamp with timezone; history stores UTC/epoch.                                           |
 
-**Precision:** One decimal is the normal capacity-card display, two decimals for small model sizes or when distinction matters, integers for percentages and temperatures. Raw detail tooltips can show more. Never render a nonzero value as `0.0 GiB`: switch to MiB or `<0.1 GiB`. Use comparable precision on both sides of a fraction. Exact totals and percentages are computed *before* display rounding.
+**Precision:** One decimal is the normal capacity-card display, two decimals for small model sizes or when distinction matters, integers for percentages and temperatures. Raw detail tooltips can show more. Never render a nonzero value as `0.0 GiB`: switch to MiB or `<0.1 GiB`. Use comparable precision on both sides of a fraction. Exact totals and percentages are computed _before_ display rounding.
 
 **Table formatting:** Right-align quantities, use tabular numerals, consistent units per column, and numeric sorting on raw values. Do not alphabetically sort formatted strings such as `900 MiB` and `1.2 GiB`. Show file size, parameters, quantization, and artifact type as distinct columns or compact metadata fields.
 
 ## 3. Canonical resource vocabulary
 
-| Label | Definition |
-| --- | --- |
-| **Used** | Observed consumption reported by a source at a known timestamp. |
-| **Free** | Unallocated memory reported by the device/OS. |
-| **Reserved** | Capacity held by a workload or Menagerie policy. Reservation is not necessarily physical usage. |
-| **Allocated** | Resources assigned by a configuration. Not synonymous with actively used. |
-| **Estimated** | Computed from observed history and/or stated inputs, with basis and sample count. |
-| **Proposed** | Additional or replacement demand from a pending edit/start. |
-| **Available** | Capacity remaining under the *stated effective budget* after current and proposed demand. |
-| **Headroom** | Capacity set aside for driver/runtime variation, host policy, or workload spikes. |
-| **Over budget** | Positive excess demand above the selected effective budget. |
-| **Peak** | Maximum measurement or estimate over a named time window or workload assumption. |
+| Label           | Definition                                                                                      |
+| --------------- | ----------------------------------------------------------------------------------------------- |
+| **Used**        | Observed consumption reported by a source at a known timestamp.                                 |
+| **Free**        | Unallocated memory reported by the device/OS.                                                   |
+| **Reserved**    | Capacity held by a workload or Menagerie policy. Reservation is not necessarily physical usage. |
+| **Allocated**   | Resources assigned by a configuration. Not synonymous with actively used.                       |
+| **Estimated**   | Computed from observed history and/or stated inputs, with basis and sample count.               |
+| **Proposed**    | Additional or replacement demand from a pending edit/start.                                     |
+| **Available**   | Capacity remaining under the _stated effective budget_ after current and proposed demand.       |
+| **Headroom**    | Capacity set aside for driver/runtime variation, host policy, or workload spikes.               |
+| **Over budget** | Positive excess demand above the selected effective budget.                                     |
+| **Peak**        | Maximum measurement or estimate over a named time window or workload assumption.                |
 
 A device has **physical capacity** and may have a lower **usable budget** after reserved headroom. Both boundaries must be visible or clearly stated. The `gpu_headroom_mib` and `ram_headroom_mib` settings belong in this accounting. GPU telemetry may include driver-reserved memory, external processes, or unattributed use; show these as explicit categories only when there is evidence. Never label unattributed bytes as belonging to a model.
 
@@ -70,7 +71,7 @@ The UI may offer a Live / Allocated / Projected segmented selector. Never add va
 
 ### 4.1 Memory components
 
-Where the runtime estimator can substantiate the breakdown, use a hierarchy such as GPU > serving deployment > model > weights / KV cache / compute buffers / runtime overhead. For multi-model deployments, each model has a separate runtime-instance identity and its own memory requirements unless explicit shared-process behavior is verified. Offloaded weight or KV memory belongs in a *different* system-RAM view; it cannot appear as additional VRAM demand. No component should appear as an exact number if only the total is known: display an `Unattributed estimate` component instead.
+Where the runtime estimator can substantiate the breakdown, use a hierarchy such as GPU > serving deployment > model > weights / KV cache / compute buffers / runtime overhead. For multi-model deployments, each model has a separate runtime-instance identity and its own memory requirements unless explicit shared-process behavior is verified. Offloaded weight or KV memory belongs in a _different_ system-RAM view; it cannot appear as additional VRAM demand. No component should appear as an exact number if only the total is known: display an `Unattributed estimate` component instead.
 
 ### 4.2 Multiple GPUs
 
@@ -78,7 +79,7 @@ Show one VRAM budget per GPU, with its own capacity and placement. Never merge t
 
 ## 5. Canonical capacity pair
 
-**Recommended signature UI:** Treemap for shares + stacked horizontal capacity bar for exact fit, using the *same model* and *same budget basis*. Use the pair in deployment configuration, resource previews, and selected dashboard drill-downs. For single-value or two-category cases, a bar with a compact legend is preferable to a tiny Treemap.
+**Recommended signature UI:** Treemap for shares + stacked horizontal capacity bar for exact fit, using the _same model_ and _same budget basis_. Use the pair in deployment configuration, resource previews, and selected dashboard drill-downs. For single-value or two-category cases, a bar with a compact legend is preferable to a tiny Treemap.
 
 ### 5.1 Calculation
 
@@ -96,9 +97,11 @@ const treemapTotal = Math.max(B, D);
 ### 5.2 Treemap rules
 
 **Under budget:** Show demand components and one `Available` leaf, totaling `B`.  
-**Over budget:** Show the *first `B` units of demand* in a `Within budget` group, and the remaining `D-B` units in an `Over budget` group, totaling `D`. Split a component into in-budget and overflow portions only as required. Do not add `Over` on top of full unsplit demand; that double-counts.  
+**Over budget:** Show the _first `B` units of demand_ in a `Within budget` group, and the remaining `D-B` units in an `Over budget` group, totaling `D`. Split a component into in-budget and overflow portions only as required. Do not add `Over` on top of full unsplit demand; that double-counts.
+
 **Ordering:** To partition components, use a stable ordering, preferably by serving unit and configured sequence/priority. Describe the split as an accounting visualization, not as an assertion that this specific model would fail to load.  
-**Area:** A leaf area represents a nonnegative quantity. The *whole* Treemap has scale `max(B, D)`. The visual therefore rescales when demand exceeds the budget; the adjacent capacity bar and text preserve physical reference.  
+**Area:** A leaf area represents a nonnegative quantity. The _whole_ Treemap has scale `max(B, D)`. The visual therefore rescales when demand exceeds the budget; the adjacent capacity bar and text preserve physical reference.
+
 **Hierarchy:** Keep grouping deterministic and allow model and component drill-down. A leaf that is too small for a label remains accessible through legend/tooltips/table. Custom SVG nodes must preserve adequate contrast, text cutoff, hover/focus labels, and accessibility.  
 **Color:** Categorical colors identify models/components; semantic amber/red is reserved for warning/overflow. The `Available` tile is neutral and subdued. Avoid turning all highly used resources red.
 
@@ -116,22 +119,22 @@ Use the estimate's basis (observed, derived, unavailable) and sample count in a 
 
 ## 6. Chart catalog
 
-| Screen / question | Canonical variant | Notes |
-| --- | --- | --- |
-| Deployment allocation: What takes VRAM? | `Treemap` (hierarchical; custom content) | Show model/weights/KV/overhead and Available or Over. Use with a capacity bar. |
-| Deployment allocation: Will it fit? | `BarChart` horizontal stacked + `ReferenceLine` | Exact demand vs usable and physical limits; overage visible. |
-| Live GPU busy %, CPU busy % | `LineChart` | Percentage axis fixed 0-100; GPU saturation not an error color. |
-| Live GPU VRAM/RAM consumption over time | `AreaChart` (single used amount), optionally `ComposedChart` for allocated vs observed | Avoid stacking used + reserved when reserved is already part of used. Plot a capacity reference. |
-| Historical peak and variation | `ComposedChart` or `AreaChart` with min/max band plus mean/median line | Keep aggregated min/max/p95 accessible in tooltip. Do not imply a continuous high-resolution sample where history is bucketed. |
-| GPU temperature / power / clock over time | `LineChart` per independent unit; `ReferenceLine` for known limit | Do not plot C, W and MHz on a single unlabeled axis. |
-| Download progress | Progress bar (shadcn), not Recharts | Show bytes done/total, rate, ETA, and state as text. |
-| Download speed over time | Small `AreaChart` or `LineChart` | Optional detail; show instantaneous and smoothed trend as distinct metrics. |
-| Disk composition by installed models | `Treemap` or horizontal `BarChart` | Show installed artifact bytes and free space when appropriate; never sum deduplicated shared weights per deployment. |
-| Inference tokens/s, TTFT, requests/s, queue over time | `LineChart`, occasionally `ComposedChart` | Separate different units; don't mix latency and throughput on one axis by default. |
-| Compare engines/models across benchmarks | `BarChart` horizontal for categories, `ScatterChart` for paired trade-offs | Use p50/p95 for distributions when sample count is meaningful. |
-| Model counts / status breakdown | Metric cards or table; optional `BarChart` | Avoid pies/donuts for tiny categories where labels matter more. |
-| Deployment status / errors / health | Status cards, activity feed, table | Not all data needs a chart. |
-| GPU usage distribution across intervals | Optional box plot in history/analysis | Not recommended as the primary operational view. Recharts' example box-plot implementation is not the default Menagerie chart. |
+| Screen / question                                     | Canonical variant                                                                      | Notes                                                                                                                          |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Deployment allocation: What takes VRAM?               | `Treemap` (hierarchical; custom content)                                               | Show model/weights/KV/overhead and Available or Over. Use with a capacity bar.                                                 |
+| Deployment allocation: Will it fit?                   | `BarChart` horizontal stacked + `ReferenceLine`                                        | Exact demand vs usable and physical limits; overage visible.                                                                   |
+| Live GPU busy %, CPU busy %                           | `LineChart`                                                                            | Percentage axis fixed 0-100; GPU saturation not an error color.                                                                |
+| Live GPU VRAM/RAM consumption over time               | `AreaChart` (single used amount), optionally `ComposedChart` for allocated vs observed | Avoid stacking used + reserved when reserved is already part of used. Plot a capacity reference.                               |
+| Historical peak and variation                         | `ComposedChart` or `AreaChart` with min/max band plus mean/median line                 | Keep aggregated min/max/p95 accessible in tooltip. Do not imply a continuous high-resolution sample where history is bucketed. |
+| GPU temperature / power / clock over time             | `LineChart` per independent unit; `ReferenceLine` for known limit                      | Do not plot C, W and MHz on a single unlabeled axis.                                                                           |
+| Download progress                                     | Progress bar (shadcn), not Recharts                                                    | Show bytes done/total, rate, ETA, and state as text.                                                                           |
+| Download speed over time                              | Small `AreaChart` or `LineChart`                                                       | Optional detail; show instantaneous and smoothed trend as distinct metrics.                                                    |
+| Disk composition by installed models                  | `Treemap` or horizontal `BarChart`                                                     | Show installed artifact bytes and free space when appropriate; never sum deduplicated shared weights per deployment.           |
+| Inference tokens/s, TTFT, requests/s, queue over time | `LineChart`, occasionally `ComposedChart`                                              | Separate different units; don't mix latency and throughput on one axis by default.                                             |
+| Compare engines/models across benchmarks              | `BarChart` horizontal for categories, `ScatterChart` for paired trade-offs             | Use p50/p95 for distributions when sample count is meaningful.                                                                 |
+| Model counts / status breakdown                       | Metric cards or table; optional `BarChart`                                             | Avoid pies/donuts for tiny categories where labels matter more.                                                                |
+| Deployment status / errors / health                   | Status cards, activity feed, table                                                     | Not all data needs a chart.                                                                                                    |
+| GPU usage distribution across intervals               | Optional box plot in history/analysis                                                  | Not recommended as the primary operational view. Recharts' example box-plot implementation is not the default Menagerie chart. |
 
 ### 6.1 Time-series defaults
 
@@ -155,7 +158,7 @@ Hover/focus tooltips should show name, exact amount, proportion, source type, an
 
 ## 8. Standard component boundaries
 
-`frontend/src/components/ui/chart.tsx`: generated/owned shadcn chart primitives via the **Base UI** registry. Do not swap to Radix or use third-party wrapper packages in place of the official registry. The Base UI chart docs currently use Recharts v3; pin a tested compatible `recharts` version and account for release-specific API changes. The existing repo does *not* yet have `recharts` in `frontend/package.json`.
+`frontend/src/components/ui/chart.tsx`: generated/owned shadcn chart primitives via the **Base UI** registry. Do not swap to Radix or use third-party wrapper packages in place of the official registry. The Base UI chart docs currently use Recharts v3; pin a tested compatible `recharts` version and account for release-specific API changes. The existing repo does _not_ yet have `recharts` in `frontend/package.json`.
 
 Recommended product components:
 
@@ -175,9 +178,27 @@ These are proposed placements, not a claim that the files already exist. Use the
 
 ### 8.1 Current backend alignment
 
-The current frontend type contract in `frontend/src/types/index.ts` already exposes `GpuSnapshot` (VRAM total/used/free, utilization, temperature, power, clock); `HostSnapshot` (CPU/RAM/swap/disk/processes/deployment metrics); `HostSettings` (headroom, temperature limit, sample interval, history retention); `ResourceEstimate` (`peak_mib`, optional `idle_mib`, `components`, `confidence`, `provenance`); and `ResourcePreviewGpu` (`total_mib`, `used_mib`, `reserve_mib`, `draft_mib`, `remaining_mib`, `reservation_error`, `verdict`). `confidence`, `verdict`, and `reserve_mib` are transitional and will be replaced by basis, sample count, accounting status, and observed demand.
+The frontend wire contract exposes nullable GPU/RAM resource facts, `basis`
+(`observed`, `derived`, `unavailable`), `sample_count`, file bytes and optional
+metadata-derived KV components. Preview GPUs carry separate physical capacity,
+free memory, safety headroom, draft demand, remaining budget and accounting
+`status` (`within_budget`, `over_budget`, `unavailable`). There are no confidence,
+reservation or fit-verdict fields. Headroom is not held memory. Launch facts use
+the same backend preview as editors; over-budget accounting never blocks saving
+or loading. Measured safety limits and reviewed unload consent remain enforced.
 
-Create a view model adapter with explicitly documented source and unit conversions. Reuse the backend preview's verdict and rounding-free values. Ensure all new visual states support partial or null telemetry and optional estimator components. New estimator fields must be optional or schema-versioned for older installations.
+The dashboard and daemon ship together; decoders require these core fields and
+accept null facts explicitly. Execution-fingerprint history includes failed runs,
+per-pool sample counts, mean/max run peaks and date ranges. Legacy summaries are
+read from preserved snapshots. Per-run facts expire under existing summary/quota
+settings independently of configuration restoration. Within-run stored time series
+and long-range aggregation remain future work. Overview trends use already-collected
+host history/SSE, configured sample cadence, explicit gaps and runtime-reported
+decode gauges only. Unsupported throughput/components stay unavailable.
+
+The product retains its lightweight SVG treemap/trend infrastructure instead of
+adding Recharts for these bounded views. The component placements in §8 and the
+longer-range chart catalog are design guidance, not claims of implemented features.
 
 ## 9. Verification and acceptance
 
@@ -196,7 +217,7 @@ Create a view model adapter with explicitly documented source and unit conversio
 ## 10. Implementation order
 
 1. Establish pure metric formatters and names; standardize all table and dashboard readouts.
-2. Create a single unit-safe projected capacity view model, with backend verdict alignment and golden accounting tests.
+2. Create a single unit-safe projected capacity view model, with backend accounting-status alignment and golden accounting tests.
 3. Implement the capacity bar; it is the authoritative fit-to-budget visualization.
 4. Add the hierarchical allocation Treemap and coordinated selection/tooltip interactions, with tested under/at/over-budget states.
 5. Integrate the pair into deployment configuration and launch review, preserving editor state and permissions.

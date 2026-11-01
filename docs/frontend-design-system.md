@@ -78,7 +78,8 @@ group and use DropdownMenuItem, not nested Buttons. Select items belong inside
 SelectGroup. Dialogs always have a title. Portals own positioning, collision
 handling, modal focus, scroll locking, and dismissal.
 
-Local source customizations: NativeSelect wrappers fill their field; Slider
+Local source customizations: Table accepts `containerProps` for named, keyboard-
+focusable horizontal scrolling regions; NativeSelect wrappers fill their field; Slider
 forwards accessible names/value text to thumbs; Sonner receives its theme from
 the caller without a Next.js theme dependency; CardTitle retains native heading
 semantics; FieldSet allows shrinking below native fieldset min-content width so
@@ -93,10 +94,19 @@ panels. They preserve browser Back and existing hash URLs.
 Use semantic tokens and built-in component variants. There are no legacy global
 button/input/table/dialog skin rules. Plain CSS in `style.css`, `catalog.css`,
 and `capabilities.css` handles product layout and custom graphics. ResourceMap,
-LiveResources, DraftResources, and their attribution/reservation/staleness rules
+LiveResources, DraftResources, and their attribution/staleness rules
 are retained. Their palette now comes from semantic/chart tokens. MemoryChart
-remains a small, responsive SVG: introducing Recharts would add machinery
-without improving its existing time-series behavior.
+remains available as a small, responsive SVG. The Overview uses lightweight
+`components/charts/telemetry-series.tsx` for independently labeled activity,
+temperature, memory and runtime-reported decode throughput, with quantitative
+timestamps, missing-sample gaps and an accessible exact-sample list. It does not
+derive throughput from request latency. Unsupported metrics remain unavailable.
+`lib/formatters.ts` owns unit formatting, `lib/capacity-accounting.ts` owns pure
+overflow splitting, and `components/charts/capacity-bar.tsx` pairs absolute budget
+accounting with ResourceMap. Preserve the preset tokens; no chart dependency is
+needed for these small SVGs. ResourceHistory and ProcessResources own the retained
+run summaries and filterable ownership tables. Headroom is a measured safety
+policy, not a memory reservation.
 
 ## Verification
 

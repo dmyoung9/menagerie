@@ -49,6 +49,7 @@ import {
   type Registry,
 } from './ui';
 import { ModelCard } from './ModelCard';
+import { ResourceHistory } from '@/components/resource-history';
 import { EngineCatalog } from './EngineCatalog';
 import { byteSize, parameterSize, quantization } from './variants';
 import { useConfirmation } from '@/hooks/use-confirmation';
@@ -360,6 +361,12 @@ export function DeploymentDetail({
       />
       {tab === 'Overview' && (
         <>
+          {profile?.artifact_id && (
+            <ResourceHistory
+              key={profile.artifact_id}
+              artifactId={profile.artifact_id}
+            />
+          )}
           <div className="stats">
             <Card className="mb-5 min-w-0 gap-0 p-5 flex flex-col gap-3">
               <CardHeader className="p-0 pb-3">
@@ -499,8 +506,6 @@ export function DeploymentDetail({
                 <dd>{d.gpu}</dd>
                 <dt>Priority</dt>
                 <dd>{d.priority}</dd>
-                <dt>VRAM reservation (MiB)</dt>
-                <dd>{d.reservation_mib || 'Estimated'}</dd>
                 <dt>Queue timeout (s)</dt>
                 <dd>{d.queue_timeout}</dd>
               </dl>
@@ -861,6 +866,10 @@ export function ModelLibrary({
             </p>
           ))}
           <InspectModel key={current.id} id={current.id} />
+          <ResourceHistory
+            key={'history-' + current.id}
+            artifactId={current.id}
+          />
           <h3>Deployments</h3>
           {(data.deployments || [])
             .filter((d) => d.profile_snapshot?.artifact_id === current.id)
@@ -1200,6 +1209,7 @@ export function ActivityPage({
       )}
       {tab === 'Sessions' && (
         <>
+          <ResourceHistory />
           <div className="toolbar">
             <Button
               variant="outline"

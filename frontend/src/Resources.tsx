@@ -1,8 +1,11 @@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { gib, telemetryStale } from './ui';
+import { telemetryStale } from './ui';
 import { useEffect, useState } from 'react';
+import { memory, bytes, budgetLabel } from '@/lib/formatters';
+import { capacityAccounting } from '@/lib/capacity-accounting';
+import { CapacityBar } from '@/components/charts/capacity-bar';
 import type {
   Deployment,
   GpuSnapshot,
@@ -44,6 +47,7 @@ function tileColor(tile: Tile) {
   if (tile.kind === 'free') return 'var(--muted)';
   if (tile.kind === 'reserve') return 'var(--chart-3)';
   if (tile.kind === 'external') return 'var(--secondary)';
+  if (tile.kind === 'overflow') return 'var(--destructive)';
   const index =
     [...(tile.group || tile.id)].reduce(
       (n, c) => (n * 31 + c.charCodeAt(0)) % 997,
@@ -56,11 +60,13 @@ export function ResourceMap({
   total,
   tiles,
   summary,
+  budget,
 }: {
   title: string;
   total: number;
   tiles: Tile[];
   summary?: string;
+  budget?: number;
 }) {
   const [selected, setSelected] = useState('');
   const valid = tiles.filter((t) => Number.isFinite(t.mib) && t.mib > 0);
@@ -69,7 +75,10 @@ export function ResourceMap({
     <section className="resource-card">
       <div className="section-heading">
         <h3>{title}</h3>
-        <span>{gib(total)} GiB capacity</span>
+        <span>
+          {memory(total)} physical capacity
+          {budget !== undefined && ` · ${memory(budget)} map budget`}
+        </span>
       </div>
       {summary && <p className="resource-verdict">{summary}</p>}
       <div
@@ -80,7 +89,10 @@ export function ResourceMap({
         {layout(valid).map((t) => (
           <Button
             variant="ghost"
-            type="button"
+            type={t.href ? undefined : 'button'}
+            render={t.href ? <a href={t.href} /> : undefined}
+            nativeButton={!t.href}
+            role={t.href ? 'link' : undefined}
             key={t.id}
             className={'resource-tile ' + (t.kind || '')}
             style={{
@@ -92,13 +104,15 @@ export function ResourceMap({
                 ? undefined
                 : `color-mix(in oklch, ${tileColor(t)} 28%, var(--background))`,
             }}
-            aria-label={`${t.label}: ${gib(t.mib)} GiB${t.detail ? '. ' + t.detail : ''}`}
-            aria-pressed={selected === t.id}
-            title={`${t.label}: ${gib(t.mib)} GiB${t.detail ? '\n' + t.detail : ''}`}
-            onClick={() => setSelected(t.id)}
+            aria-label={`${t.label}: ${memory(t.mib)}${t.detail ? '. ' + t.detail : ''}`}
+            aria-pressed={t.href ? undefined : selected === t.id}
+            title={`${t.label}: ${memory(t.mib)}${t.detail ? '\n' + t.detail : ''}`}
+            onClick={() => {
+              if (!t.href) setSelected(t.id);
+            }}
           >
             <span>{t.label}</span>
-            <strong>{gib(t.mib)} GiB</strong>
+            <strong>{memory(t.mib)}</strong>
           </Button>
         ))}
       </div>
@@ -106,21 +120,26 @@ export function ResourceMap({
         {valid.map((t) => (
           <Button
             variant="ghost"
-            type="button"
+            type={t.href ? undefined : 'button'}
+            render={t.href ? <a href={t.href} /> : undefined}
+            nativeButton={!t.href}
+            role={t.href ? 'link' : undefined}
             key={t.id}
-            aria-pressed={selected === t.id}
-            onClick={() => setSelected(t.id)}
+            aria-pressed={t.href ? undefined : selected === t.id}
+            onClick={() => {
+              if (!t.href) setSelected(t.id);
+            }}
           >
             <i style={{ background: tileColor(t) }} />
             {t.label}
-            <b>{gib(t.mib)}</b>
+            <b>{memory(t.mib)}</b>
           </Button>
         ))}
       </div>
       {chosen && (
         <p className="resource-inspector" role="status">
           <strong>
-            {chosen.label}: {gib(chosen.mib)} GiB.
+            {chosen.label}: {memory(chosen.mib)}.
           </strong>{' '}
           {chosen.detail}{' '}
           {chosen.href && <a href={chosen.href}>Open deployment →</a>}
@@ -147,7 +166,7 @@ export function DraftResources({
         <CardTitle role="heading" aria-level={2}>
           Resource preview
         </CardTitle>
-        <Badge variant="secondary">Estimated</Badge>
+        <Badge variant="secondary">Advisory · no reservation</Badge>
       </CardHeader>
       <CardContent>
         {!preview ? (
@@ -169,16 +188,30 @@ export function DraftResources({
                 {
                   id: 'used',
                   label: 'Already in use',
-                  mib: g.used_mib,
+                  mib: g.used_mib ?? 0,
                   kind: 'external',
                 },
                 {
                   id: 'reserve',
-                  label: 'Desktop reserve',
-                  mib: g.reserve_mib,
+                  label: 'Safety headroom',
+                  mib: g.headroom_mib,
                   kind: 'reserve',
                 },
               ];
+              if (
+                g.total_mib !== null &&
+                g.free_mib !== null &&
+                g.used_mib !== null &&
+                g.total_mib > g.used_mib + g.free_mib
+              )
+                tiles.push({
+                  id: 'unavailable',
+                  label: 'Unattributed capacity',
+                  mib: g.total_mib - g.used_mib - g.free_mib,
+                  kind: 'external',
+                  detail:
+                    'Physical capacity minus reported used and free; not assigned to a model.',
+                });
               preview.members
                 .filter((m) => m.gpu === g.index)
                 .forEach((m) => {
@@ -189,37 +222,57 @@ export function DraftResources({
                       ? `${m.name} (${Number(m.key) + 1})`
                       : m.name;
                   Object.entries(
-                    e.components || { 'Measured peak + margin': e.peak_mib },
+                    e.components || { 'Observed peak': e.peak_mib ?? 0 },
                   ).forEach(([label, mib]) =>
                     tiles.push({
                       id: m.key + label,
                       group: m.name + m.key,
                       label: `${name} · ${label}`,
                       mib: Number(mib),
-                      detail: `${e.confidence} confidence. ${e.provenance}`,
+                      detail: `${e.basis} · ${e.sample_count} runs. ${e.provenance}`,
                     }),
                   );
                 });
               tiles.push({
                 id: 'free',
                 label: 'Remaining',
-                mib: Math.max(0, g.remaining_mib),
+                mib: Math.max(0, g.remaining_mib ?? 0),
                 kind: 'free',
               });
               return (
                 <div key={g.index}>
-                  {g.reservation_error && (
-                    <p className="warning">
-                      Explicit reservations exceed physical capacity including
-                      desktop reserve. Launch will be blocked.
+                  {g.total_mib !== null &&
+                  g.used_mib !== null &&
+                  g.free_mib !== null &&
+                  g.draft_mib !== null ? (
+                    <>
+                      <CapacityBar
+                        budget={Math.max(0, g.total_mib - g.headroom_mib)}
+                        components={tiles.filter(
+                          (t) => t.id !== 'reserve' && t.id !== 'free',
+                        )}
+                      />
+                      <ResourceMap
+                        title={`GPU ${g.index} · ${g.name}`}
+                        total={g.total_mib}
+                        budget={Math.max(0, g.total_mib - g.headroom_mib)}
+                        tiles={
+                          capacityAccounting(
+                            Math.max(0, g.total_mib - g.headroom_mib),
+                            tiles.filter(
+                              (t) => t.id !== 'reserve' && t.id !== 'free',
+                            ),
+                          ).tiles
+                        }
+                        summary={`${budgetLabel(g.remaining_mib)} · ${memory(g.free_mib)} free · ${memory(g.headroom_mib)} safety headroom (not reserved)`}
+                      />
+                    </>
+                  ) : (
+                    <p>
+                      GPU {g.index}: accounting unavailable ·{' '}
+                      {memory(g.free_mib)} free
                     </p>
                   )}
-                  <ResourceMap
-                    title={`GPU ${g.index} · ${g.name}`}
-                    total={g.total_mib}
-                    tiles={tiles}
-                    summary={`${g.verdict} · ${g.remaining_mib < 0 ? gib(-g.remaining_mib) + ' GiB over capacity (map scaled to demand)' : gib(g.remaining_mib) + ' GiB remaining after reserve'}`}
-                  />
                 </div>
               );
             })}
@@ -231,25 +284,39 @@ export function DraftResources({
                 </p>
               ))}
             <p className="muted">
-              RAM available: {gib(preview.ram_available_mib)} GiB · reserve:{' '}
-              {gib(preview.ram_reserve_mib)} GiB · estimated CPU/RAM offload:{' '}
-              {gib(
-                preview.members.reduce(
-                  (sum: number, m) => sum + (m.estimate.ram_mib || 0),
-                  0,
-                ),
-              )}{' '}
-              GiB. CPU offload is slower than GPU-resident inference.
+              System RAM: {memory(preview.ram_available_mib)} available ·{' '}
+              {memory(preview.ram_headroom_mib)} safety headroom ·{' '}
+              {memory(preview.ram_draft_mib)} proposed RSS/offload ·{' '}
+              {budgetLabel(preview.ram_remaining_mib)}. CPU offload is slower
+              than GPU-resident inference.
             </p>
             {preview.ram_available_mib !== null &&
-              preview.ram_available_mib < preview.ram_reserve_mib && (
+              preview.ram_draft_mib !== null && (
+                <CapacityBar
+                  budget={Math.max(
+                    0,
+                    preview.ram_available_mib - preview.ram_headroom_mib,
+                  )}
+                  components={[
+                    {
+                      id: 'ram',
+                      label: 'Proposed RAM',
+                      mib: preview.ram_draft_mib,
+                    },
+                  ]}
+                />
+              )}
+            {preview.ram_available_mib !== null &&
+              preview.ram_available_mib < preview.ram_headroom_mib && (
                 <p className="warning">
                   Host RAM is below the headroom gate. Loading is blocked until
                   memory is available.
                 </p>
               )}
-            {(!preview.sample_ts ||
-              Date.now() / 1000 - preview.sample_ts > 10) && (
+            {telemetryStale(
+              { ts: preview.sample_ts ?? undefined },
+              preview.sample_seconds,
+            ) && (
               <p className="warning">
                 Capacity telemetry is stale or unavailable. Refresh before
                 relying on this budget.
@@ -257,9 +324,9 @@ export function DraftResources({
             )}
             {preview.members.map((m) => (
               <p className="muted" key={m.key}>
-                {m.name}: predicted peak {gib(m.estimate.peak_mib)} GiB ·
-                reservation {gib(m.estimate.reservation_mib)} GiB (not
-                additional usage).
+                {m.name}: {m.estimate.basis} peak {memory(m.estimate.peak_mib)}{' '}
+                · file {bytes(m.estimate.file_size_bytes)} ·{' '}
+                {m.estimate.sample_count} runs. {m.estimate.provenance}
               </p>
             ))}
             <small className="muted">{preview.note}</small>
@@ -297,8 +364,10 @@ export function LiveResources({
       </CardHeader>
       <CardContent>
         <p className="muted">
-          Select a block to inspect it. Reserve is held out of available space,
-          not added to observed usage.
+          Open a deployment from its block or label. Process totals are
+          observed; internal weights, KV cache and projector components are
+          unavailable without runtime instrumentation. Safety headroom is a
+          policy limit, not reserved memory.
         </p>
         <div className="resource-grid">
           {(host.gpus || []).map((g: GpuSnapshot) => {
@@ -308,31 +377,30 @@ export function LiveResources({
                   GPU {g.index}: memory telemetry unavailable.
                 </p>
               );
-            // Process GPU samples are aggregate across devices. Never invent per-GPU attribution.
-            const tracked: Tile[] =
-              host.gpus?.length === 1
-                ? deployments.flatMap((d) => {
-                    const mib = host.deployments?.[d.id]?.gpu_mib;
-                    return typeof mib === 'number' && mib > 0
-                      ? [
-                          {
-                            id: d.id,
-                            group: d.unit_id || d.id,
-                            label: d.name,
-                            mib,
-                            href: '#/deployments/' + (d.unit_id || d.id),
-                            detail:
-                              'Observed process VRAM; internal weights/cache split is not measured.',
-                          },
-                        ]
-                      : [];
-                  })
+            // Prefer device-attributed process samples; aggregate-only samples are safe on one GPU only.
+            const tracked: Tile[] = deployments.flatMap((d) => {
+              const metrics = host.deployments?.[d.id];
+              const mib =
+                metrics?.gpu_by_device_mib?.[String(g.index)] ??
+                (host.gpus?.length === 1 ? metrics?.gpu_mib : null);
+              return typeof mib === 'number' && mib > 0
+                ? [
+                    {
+                      id: d.id,
+                      group: d.unit_id || d.id,
+                      label: d.name,
+                      mib,
+                      href: '#/deployments/' + (d.unit_id || d.id),
+                      detail:
+                        'Observed process VRAM; internal weights/cache split is not measured.',
+                    },
+                  ]
                 : [];
+            });
             const attributed = tracked.reduce((n, t) => n + t.mib, 0);
             const consistent = attributed <= g.used_mib;
             const tiles: Tile[] = consistent ? tracked : [];
-            const free = Math.max(0, g.total_mib - g.used_mib),
-              reserve = Math.min(free, settings.gpu_headroom_mib || 2048);
+            const free = g.free_mib;
             tiles.push(
               {
                 id: 'external',
@@ -343,25 +411,32 @@ export function LiveResources({
                   'Desktop, external processes, or memory that cannot be reliably attributed.',
               },
               {
-                id: 'reserve',
-                label: 'Desktop reserve',
-                mib: reserve,
-                kind: 'reserve',
-              },
-              {
                 id: 'free',
-                label: 'Available to deploy',
-                mib: free - reserve,
-                kind: 'free',
+                label: free == null ? 'Unattributed capacity' : 'Free',
+                mib: free ?? Math.max(0, g.total_mib - g.used_mib),
+                kind: free == null ? 'external' : 'free',
+                detail:
+                  free == null
+                    ? 'Capacity minus reported used. Free telemetry is unavailable; this is not measured free memory.'
+                    : 'Device-reported unallocated memory.',
               },
             );
+            if (free != null && g.total_mib > g.used_mib + free)
+              tiles.push({
+                id: 'unavailable',
+                label: 'Unattributed capacity',
+                mib: g.total_mib - g.used_mib - free,
+                kind: 'external',
+                detail:
+                  'Physical capacity minus reported used and free; not assigned to a model.',
+              });
             return (
               <ResourceMap
                 key={g.index}
                 title={`GPU ${g.index} · ${g.name}`}
                 total={g.total_mib}
                 tiles={tiles}
-                summary={`${gib(g.used_mib)} GiB used · ${g.utilization ?? '—'}% GPU utilization`}
+                summary={`${memory(g.used_mib)} used · ${memory(g.free_mib)} free · ${memory(settings.gpu_headroom_mib)} headroom limit · ${g.utilization ?? '—'}% GPU utilization`}
               />
             );
           })}
@@ -384,26 +459,13 @@ export function LiveResources({
                       'Total minus OS-reported available RAM; process RSS can share pages and is not added here.',
                   },
                   {
-                    id: 'reserve',
-                    label: 'Host reserve',
-                    mib: Math.min(
-                      host.ram_available_mib,
-                      settings.ram_headroom_mib || 4096,
-                    ),
-                    kind: 'reserve',
-                  },
-                  {
                     id: 'free',
-                    label: 'Available to deploy',
-                    mib: Math.max(
-                      0,
-                      host.ram_available_mib -
-                        (settings.ram_headroom_mib || 4096),
-                    ),
+                    label: 'Available RAM (OS)',
+                    mib: host.ram_available_mib,
                     kind: 'free',
                   },
                 ]}
-                summary={`${host.cpu_percent ?? '—'}% CPU · ${gib(host.swap_used_mib)} GiB swap used`}
+                summary={`${memory(host.ram_available_mib)} available · ${memory(settings.ram_headroom_mib)} headroom limit · ${host.cpu_percent ?? '—'}% CPU · ${memory(host.swap_used_mib)} swap used`}
               />
             )}
         </div>

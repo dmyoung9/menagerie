@@ -65,6 +65,44 @@ def test_telemetry_windows_path_and_unavailable_load_average(monkeypatch):
     assert result["errors"] == ["Synthetic telemetry unavailable"]
 
 
+def test_gpu_process_samples_preserve_device_identity_without_exposing_uuids(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        telemetry.psutil, "disk_usage", lambda _: SimpleNamespace(free=1, total=2)
+    )
+    monkeypatch.setattr(
+        telemetry.psutil,
+        "virtual_memory",
+        lambda: SimpleNamespace(total=100, available=50),
+    )
+    monkeypatch.setattr(
+        telemetry.psutil, "swap_memory", lambda: SimpleNamespace(used=0)
+    )
+    monkeypatch.setattr(
+        telemetry.psutil, "Process", lambda: SimpleNamespace(cpu_affinity=lambda: [0])
+    )
+    monkeypatch.setattr(telemetry.psutil, "cpu_percent", lambda: 0)
+    monkeypatch.setattr(telemetry, "executable", lambda _: "synthetic-nvidia-smi")
+
+    def query(argv, **kwargs):
+        if "--query-gpu=" in argv[1]:
+            output = "0,Example A,8192,1000,7192,10,40,50,100,GPU-SYNTHETIC-A\n1,Example B,16384,2000,14384,20,50,60,200,GPU-SYNTHETIC-B\n"
+        else:
+            output = "101,fixture-engine,500,GPU-SYNTHETIC-A\n101,fixture-engine,700,GPU-SYNTHETIC-B\n202,external,200,GPU-SYNTHETIC-A\n"
+        return SimpleNamespace(returncode=0, stdout=output)
+
+    monkeypatch.setattr(telemetry.subprocess, "run", query)
+    result = sample_host()
+    assert [p["gpu_index"] for p in result["processes"]] == [0, 1, 0]
+    assert "GPU-SYNTHETIC" not in json.dumps(result)
+    assert telemetry.gpu_process_usage(result, [101]) == 1200
+    assert telemetry.gpu_process_usage(result, [101], 0) == 500
+    assert telemetry.gpu_process_usage(result, [101], 1) == 700
+    result["processes"][0]["gpu_index"] = None
+    assert telemetry.gpu_process_usage(result, [101], 0) is None
+
+
 def test_lock_excludes_other_process_and_recovers(tmp_path):
     path = tmp_path / "daemon.lock"
     script = "from pathlib import Path; from controlplane.host import lock_file; import sys; lock_file(Path(sys.argv[1]))"

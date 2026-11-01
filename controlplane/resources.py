@@ -1,11 +1,13 @@
-"""Side-effect-free resource estimates shared by draft previews and admission."""
+"""Resource facts and advisory accounting. Estimates never reserve or gate memory."""
 
 import math
 
-from . import adapters
+from .store import identity
 
 
-def positive(value, fallback):
+def positive(value, fallback=None):
+    if isinstance(value, bool):
+        return fallback
     try:
         value = float(value)
         return value if math.isfinite(value) and value > 0 else fallback
@@ -13,69 +15,140 @@ def positive(value, fallback):
         return fallback
 
 
-def estimate(artifact, config, reservation=0, measured=()):
+def profile_hash(profile, artifact, runtime, gpu):
+    """Fingerprint execution inputs, not names, revisions or catalog labels."""
+    return identity(
+        {
+            "artifact": [
+                artifact["id"],
+                artifact.get("sha256"),
+                artifact.get("size_bytes"),
+            ],
+            "runtime": [
+                runtime["id"],
+                runtime.get("capabilities", {}).get("sha256"),
+                runtime.get("version"),
+                runtime.get("execution_kind"),
+                runtime.get("executable"),
+                runtime.get("command_template"),
+                runtime.get("env"),
+            ],
+            "config": profile["config"],
+            "raw_args": profile.get("raw_args", []),
+            "gpu": gpu,
+        }
+    )
+
+
+def run_profile_hash(run):
+    """Read legacy summaries using their preserved execution identities, without rewriting snapshots."""
+    deployment = run.get("deployment_snapshot", {})
+    profile = deployment.get("profile_snapshot")
+    artifact, runtime = run.get("artifact_identity"), run.get("runtime_identity")
+    if profile and artifact and runtime:
+        return profile_hash(profile, artifact, runtime, deployment.get("gpu", 0))
+    return run.get("profile_hash")
+
+
+def estimate(artifact, config, measured=()):
     meta, arch = artifact.get("metadata", {}), artifact.get("architecture") or ""
-    hf = meta.get("config", {}).get("text_config") or meta.get("config", {})
+    hf = meta.get("config") or {}
+    hf = hf.get("text_config") or hf
     layers = positive(
-        meta.get(f"{arch}.block_count"), positive(hf.get("num_hidden_layers"), 32)
+        meta.get(f"{arch}.block_count"), positive(hf.get("num_hidden_layers"))
     )
     heads = positive(
         meta.get(f"{arch}.attention.head_count_kv"),
-        positive(hf.get("num_key_value_heads"), 8),
+        positive(hf.get("num_key_value_heads")),
+    )
+    hidden, attention_heads = (
+        positive(hf.get("hidden_size")),
+        positive(hf.get("num_attention_heads")),
     )
     headsize = positive(
         meta.get(f"{arch}.attention.key_length"),
         positive(
             hf.get("head_dim"),
-            positive(hf.get("hidden_size"), 4096)
-            / positive(hf.get("num_attention_heads"), 32),
+            hidden / attention_heads if hidden and attention_heads else None,
         ),
     )
+    value_size = positive(meta.get(f"{arch}.attention.value_length"), headsize)
+    ctx = positive(config.get("ctx-size", config.get("max-model-len")))
     cache = {"f16": 2, "q8_0": 1.0625, "q4_0": 0.5625}
-    ctx = positive(config.get("ctx-size", config.get("max-model-len")), 8192)
-    kv = (
-        ctx
-        * layers
-        * heads
-        * headsize
-        * (
-            cache.get(str(config.get("cache-type-k")), 2)
-            + cache.get(str(config.get("cache-type-v")), 2)
-        )
-        / 1048576
+    k, v = (
+        cache.get(str(config.get("cache-type-k", "f16"))),
+        cache.get(str(config.get("cache-type-v", "f16"))),
     )
-    weights = positive(artifact.get("size_bytes"), 0) / 1048576
+    kv = (
+        ctx * layers * heads * (headsize * k + value_size * v) / 1048576
+        if all((ctx, layers, heads, headsize, value_size, k, v))
+        else None
+    )
+    size = artifact.get("size_bytes")
+    weights = size / 1048576 if isinstance(size, (int, float)) and size >= 0 else None
     offload = config.get("gpu-layers", "all")
-    fraction = min(1, max(0, int(offload)) / layers) if str(offload).isdigit() else 1
-    ram = weights * (1 - fraction)
-    weights *= fraction
-    if fraction == 0:
-        ram += kv + 1280
-        kv = 0
-    overhead = 768 + 512 * max(1, positive(config.get("parallel"), 1))
-    if fraction == 0:
-        overhead = 0
-    idle, peak = weights + kv + (768 if fraction else 0), weights + kv + overhead
-    measured = [v for v in measured if positive(v, 0)]
-    if measured:
-        peak = max(measured) * 1.15 + 256
+    fraction = (
+        min(1, max(0, int(offload)) / layers)
+        if str(offload).isdigit() and layers
+        else 0
+        if str(offload) == "0"
+        else 1
+        if offload in ("all", -1)
+        else None
+    )
+    gpu = (
+        weights * fraction + (kv or 0) * (fraction > 0)
+        if weights is not None and fraction is not None
+        else None
+    )
+    ram = (
+        weights * (1 - fraction) + (kv or 0) * (fraction == 0)
+        if weights is not None and fraction is not None
+        else None
+    )
+    observations = [
+        s
+        for s in measured
+        if s.get("resource_history_retained", True)
+        and (s.get("peak_gpu_mib") is not None or s.get("peak_ram_mib") is not None)
+    ]
+    gpu_peaks = [
+        s["peak_gpu_mib"] for s in observations if s.get("peak_gpu_mib") is not None
+    ]
+    ram_peaks = [
+        s["peak_ram_mib"] for s in observations if s.get("peak_ram_mib") is not None
+    ]
+    observed = bool(gpu_peaks or ram_peaks)
     return {
-        "idle_mib": round(idle),
-        "peak_mib": round(peak),
-        "ram_mib": round(ram),
+        "peak_mib": max(gpu_peaks)
+        if observed and gpu_peaks
+        else None
+        if observed
+        else gpu,
+        "ram_mib": max(ram_peaks)
+        if observed and ram_peaks
+        else None
+        if observed
+        else ram,
+        "file_size_bytes": size,
+        "kv_mib": kv,
         "components": None
-        if measured
+        if observed or fraction is None or weights is None
         else {
-            "Weights": round(weights),
-            "KV cache": round(kv),
-            "Runtime overhead": round(overhead),
+            "Weights": weights * fraction,
+            **({"KV cache": kv} if kv is not None and fraction else {}),
         },
-        "confidence": "medium" if measured else "low",
-        "provenance": "previous process measurements + 15% + 256 MiB; workload-dependent"
-        if measured
-        else "Weight size, model metadata, KV cache and runtime overhead estimate",
-        "reservation_mib": reservation or round(peak),
-        "physical_limit": False,
+        "basis": "observed"
+        if observed
+        else "derived"
+        if gpu is not None
+        else "unavailable",
+        "sample_count": len(observations) if observed else 0,
+        "provenance": "Past per-process peaks for this configuration; not a guarantee"
+        if observed
+        else "File size + metadata-derived KV cache"
+        if kv is not None
+        else "File size only; KV cache unavailable from supplied metadata/configuration",
     }
 
 
@@ -84,8 +157,6 @@ def preview(manager, drafts):
     members = []
     for index, draft in enumerate(drafts):
         profile = draft["configuration"]
-        artifact = manager.store.get("artifact", profile["artifact_id"])
-        runtime = manager.store.get("runtime", profile["runtime_id"])
         for key in ("ctx-size", "max-model-len", "parallel"):
             value = profile["config"].get(key)
             if value is not None and (
@@ -94,42 +165,31 @@ def preview(manager, drafts):
                 raise ValueError(
                     f"{key} must be a positive integer within the preview range"
                 )
-        utilization = profile["config"].get("gpu-memory-utilization")
-        if utilization is not None and (
-            type(utilization) not in (int, float) or not 0.05 <= utilization <= 0.95
-        ):
-            raise ValueError(
-                "gpu-memory-utilization must be a number between 0.05 and 0.95"
-            )
-        d = draft | {"profile_snapshot": profile}
         members.append(
             {
                 "key": str(index),
                 "name": draft["name"],
                 "gpu": draft["gpu"],
-                "estimate": manager.estimate(d),
+                "estimate": manager.estimate(draft | {"profile_snapshot": profile}),
                 "recommendation": {},
-                "artifact": artifact,
-                "schema": adapters.option_schema(runtime),
             }
         )
     gpus = []
     for gpu in host.get("gpus", []):
-        total, used = gpu.get("total_mib"), gpu.get("used_mib")
-        if total is None or used is None:
-            continue
+        total, used, free = (
+            gpu.get("total_mib"),
+            gpu.get("used_mib"),
+            gpu.get("free_mib"),
+        )
         selected = [m for m in members if m["gpu"] == gpu["index"]]
-        # Editing an inactive deployment never removes another process from this baseline.
-        needed = sum(m["estimate"]["peak_mib"] for m in selected)
-        reserve = settings["gpu_headroom_mib"]
-        remaining = total - used - reserve - needed
-        explicit = sum(d["reservation_mib"] for d in drafts if d["gpu"] == gpu["index"])
-        explicit += sum(
-            d.get("reservation_mib", 0)
-            for d in manager.store.list("deployment")
-            if d.get("gpu") == gpu["index"]
-            and d.get("state")
-            in {"QUEUED", "STARTING", "LOADING", "READY", "DEGRADED", "STOPPING"}
+        known = all(m["estimate"]["peak_mib"] is not None for m in selected)
+        needed = (
+            sum(m["estimate"]["peak_mib"] or 0 for m in selected) if known else None
+        )
+        remaining = (
+            free - settings["gpu_headroom_mib"] - needed
+            if free is not None and needed is not None
+            else None
         )
         gpus.append(
             {
@@ -137,123 +197,47 @@ def preview(manager, drafts):
                 "name": gpu.get("name", "GPU"),
                 "total_mib": total,
                 "used_mib": used,
-                "reserve_mib": reserve,
+                "free_mib": free,
+                "headroom_mib": settings["gpu_headroom_mib"],
                 "draft_mib": needed,
                 "remaining_mib": remaining,
-                "reservation_error": explicit + reserve > total,
-                "verdict": "Over budget"
+                "status": "unavailable"
+                if remaining is None
+                else "over_budget"
                 if remaining < 0
-                else "Tight fit"
-                if remaining < total * 0.1
-                else "Fits estimate",
+                else "within_budget",
             }
         )
-        for m in selected:
-            schema, artifact = m["schema"], m["artifact"]
-            config = drafts[int(m["key"])]["configuration"]["config"]
-            context_key = next(
-                (k for k in ("ctx-size", "max-model-len") if k in schema), None
-            )
-            meta, arch = (
-                artifact.get("metadata", {}),
-                artifact.get("architecture") or "",
-            )
-            layers = positive(meta.get(f"{arch}.block_count"), None)
-            rec = {"gpu_layers_max": int(layers) if layers else None}
-            available = total - used - reserve - (needed - m["estimate"]["peak_mib"])
-            if "allocation_mib" in m["estimate"]:
-                rec["gpu_memory_utilization_max"] = max(0, min(0.95, available / total))
-                rec["gpu_memory_utilization_min"] = max(
-                    0.05, m["estimate"]["required_mib"] / total
-                )
-                available = min(available, m["estimate"]["allocation_mib"])
-            if "parallel" in schema:
-                limit = int(positive(schema["parallel"].get("max"), 64))
-                context = positive(config.get("ctx-size"), 8192)
-                rec["parallel_recommended_max"] = next(
-                    (
-                        n
-                        for n in range(min(limit, 256, int(context // 32)), 0, -1)
-                        if estimate(artifact, config | {"parallel": n})["peak_mib"]
-                        <= available
-                    ),
-                    None,
-                )
-            if context_key:
-                field = schema[context_key]
-                minimum = int(positive(field.get("min"), 512))
-                maximum = int(positive(field.get("max"), 1048576))
-                hf = meta.get("config", {}).get("text_config") or meta.get("config", {})
-                model_context = positive(
-                    meta.get(f"{arch}.context_length"),
-                    positive(hf.get("max_position_embeddings"), None),
-                )
-                parallel = (
-                    positive(config.get("parallel"), 1)
-                    if context_key == "ctx-size"
-                    else 1
-                )
-                minimum = max(minimum, int(parallel * 32))
-                if model_context:
-                    maximum = min(maximum, int(model_context * parallel))
-                # All peers retain their current configuration; only this member varies.
-                low, high, best = minimum, maximum, None
-                while low <= high:
-                    mid = (low + high) // 2
-                    candidate = estimate(artifact, config | {context_key: mid})[
-                        "peak_mib"
-                    ]
-                    if candidate <= available:
-                        best, low = mid, mid + 1
-                    else:
-                        high = mid - 1
-                rec |= {
-                    "context_key": context_key,
-                    "context_recommended_max": best,
-                    "context_default": min(8192, best) if best is not None else None,
-                    "reason": "Estimated capacity after desktop reserve and other selected models",
-                }
-            m["recommendation"] = rec
+    ram_known = all(m["estimate"]["ram_mib"] is not None for m in members)
+    ram_demand = (
+        sum(m["estimate"]["ram_mib"] or 0 for m in members) if ram_known else None
+    )
+    ram_free = host.get("ram_available_mib")
     return {
         "gpus": gpus,
-        "members": [
-            {k: v for k, v in m.items() if k not in {"artifact", "schema"}}
-            for m in members
-        ],
+        "members": members,
         "sample_ts": host.get("ts"),
-        "ram_available_mib": host.get("ram_available_mib"),
-        "ram_reserve_mib": settings["ram_headroom_mib"],
-        "note": "Limits use model metadata and estimated memory. Changing system load can still cause a launch to fail.",
+        "sample_seconds": settings["sample_seconds"],
+        "ram_available_mib": ram_free,
+        "ram_headroom_mib": settings["ram_headroom_mib"],
+        "ram_draft_mib": ram_demand,
+        "ram_remaining_mib": ram_free - settings["ram_headroom_mib"] - ram_demand
+        if ram_free is not None and ram_demand is not None
+        else None,
+        "note": "Advisory accounting only. No memory is reserved. Launch stops only at measured safety limits or a real runtime failure.",
     }
 
 
 def validate_budget(manager, drafts):
-    """Apply the same peer-preserving budget used by the configuration controls."""
-    resolved = []
-    for draft in drafts:
-        profile = draft.get("configuration") or manager.store.get(
-            "profile", draft["profile_id"]
-        )
-        resolved.append(draft | {"configuration": profile})
-    result = preview(manager, resolved)
-    errors = []
-    for gpu in result["gpus"]:
-        if gpu["remaining_mib"] < 0 or gpu["reservation_error"]:
-            errors.append(
-                f"GPU {gpu['index']} configuration exceeds the available memory budget; reduce context/concurrency, select smaller weights, or choose CPU/RAM offload"
-            )
-    ram = sum(m["estimate"]["ram_mib"] for m in result["members"])
-    if any(
-        m["estimate"].get("required_mib", 0)
-        > m["estimate"].get("allocation_mib", float("inf"))
-        for m in result["members"]
-    ):
-        errors.append(
-            "vLLM's GPU memory allocation is below the estimated model and context requirement; increase its allocation or reduce context"
-        )
-    if ram and ram > (result["ram_available_mib"] or 0) - result["ram_reserve_mib"]:
-        errors.append(
-            "CPU/RAM offload exceeds available system memory after the desktop reserve"
-        )
-    if errors:
-        raise ValueError("; ".join(errors))
+    """Validate preview inputs, never reject a configuration on estimated capacity."""
+    return preview(
+        manager,
+        [
+            d
+            | {
+                "configuration": d.get("configuration")
+                or manager.store.get("profile", d["profile_id"])
+            }
+            for d in drafts
+        ],
+    )

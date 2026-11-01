@@ -55,7 +55,6 @@ export const test = base.extend<{ fixture: Fixture }>({
         queue_timeout: 300,
         gpu: 0,
         port: id === 'ready' ? 8120 : 8121,
-        reservation_mib: 0,
         allow_eviction: false,
         profile_snapshot: profile,
         lifecycle: { serving: enabled },
@@ -248,13 +247,16 @@ export const test = base.extend<{ fixture: Fixture }>({
               gpu: m.gpu,
               estimate: {
                 peak_mib: 4096,
+                ram_mib: 0,
+                file_size_bytes: 2048 * 1048576,
+                kv_mib: 2048,
+                profile_hash: 'fixture-config',
                 components: {
                   Weights: 2048,
-                  'KV cache': 1024,
-                  'Runtime overhead': 1024,
+                  'KV cache': 2048,
                 },
-                reservation_mib: 4096,
-                confidence: 'low',
+                basis: 'derived',
+                sample_count: 0,
                 provenance: 'Fixture estimate',
               },
               recommendation: {
@@ -271,16 +273,17 @@ export const test = base.extend<{ fixture: Fixture }>({
             gpus: [
               {
                 ...fixture.host.gpus[0],
-                reserve_mib: 2048,
+                headroom_mib: 2048,
                 draft_mib: 4096 * members.length,
                 remaining_mib: 10240 - 4096 * members.length,
-                verdict: 'Fits estimate',
-                reservation_error: false,
+                status: members.length > 2 ? 'over_budget' : 'within_budget',
               },
             ],
             sample_ts: fixture.host.ts,
             ram_available_mib: 24000,
-            ram_reserve_mib: 4096,
+            ram_headroom_mib: 4096,
+            ram_draft_mib: 0,
+            ram_remaining_mib: 19904,
             note: 'Preview only; launch rechecks capacity.',
           });
         }
@@ -349,8 +352,19 @@ export const test = base.extend<{ fixture: Fixture }>({
         if (path.endsWith('/validate'))
           return send({
             errors: [],
-            warnings: ['Low-confidence memory estimate.'],
-            estimates: { idle: { reservation_mib: 6800, confidence: 'low' } },
+            warnings: ['1.0 GiB over budget'],
+            estimates: {
+              idle: {
+                peak_mib: 6800,
+                ram_mib: null,
+                basis: 'observed',
+                sample_count: 2,
+                file_size_bytes: 8 * 1024 ** 3,
+                kv_mib: null,
+                profile_hash: 'fixture-config',
+                provenance: 'Observed fixture peaks',
+              },
+            },
             stops: [],
             plan_token: 'review-token',
           });

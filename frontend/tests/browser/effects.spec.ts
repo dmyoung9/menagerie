@@ -64,7 +64,14 @@ test('wizard preserves edits on identical polling snapshots but updates changed 
 }) => {
   await page.route('**/api/resources/preview', (route) =>
     route.fulfill({
-      json: { members: [], gpus: [], ram_available_mib: 0, ram_reserve_mib: 0 },
+      json: {
+        members: [],
+        gpus: [],
+        ram_available_mib: 0,
+        ram_headroom_mib: 0,
+        ram_draft_mib: 0,
+        ram_remaining_mib: 0,
+      },
     }),
   );
   await page.goto('/tests/effects.html?scenario=wizard');

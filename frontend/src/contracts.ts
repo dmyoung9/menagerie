@@ -217,9 +217,7 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     residency: opt(d.string),
     priority: opt(d.number),
     idle_timeout: opt(d.number),
-    reservation_mib: opt(d.number),
     allow_eviction: opt(d.boolean),
-    allow_uncertain: opt(d.boolean),
     enabled: d.boolean,
     state: d.string,
     gpu: opt(d.number),
@@ -268,7 +266,6 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
     idle_timeout: opt(d.number),
     queue_timeout: opt(d.number),
     allow_eviction: opt(d.boolean),
-    allow_uncertain: opt(d.boolean),
     revision: d.number,
     lifecycle: opt(lifecycle),
     inflight: opt(d.number),
@@ -285,9 +282,7 @@ export const deploymentDraft = d.object<T.DeploymentDraft>({
   residency: d.string,
   priority: d.number,
   idle_timeout: d.number,
-  reservation_mib: d.number,
   allow_eviction: d.boolean,
-  allow_uncertain: d.boolean,
   enabled: d.boolean,
   gpu: d.number,
   queue_timeout: d.number,
@@ -300,7 +295,6 @@ export const deploymentSetDraft = d.object<T.DeploymentSetDraft>({
   priority: d.number,
   idle_timeout: d.number,
   allow_eviction: d.boolean,
-  allow_uncertain: d.boolean,
   enabled: d.boolean,
   queue_timeout: d.number,
   members: d.array(deploymentDraft),
@@ -317,6 +311,7 @@ export const gpu = d.object<T.GpuSnapshot>({
   clock_mhz: maybeNumber,
 });
 const deploymentMetrics = d.object<T.HostDeploymentMetrics>({
+  gpu_by_device_mib: opt(d.record(d.nullable(d.number))),
   gpu_mib: maybeNumber,
   rss_mib: maybeNumber,
   cpu_percent: maybeNumber,
@@ -339,6 +334,7 @@ export const host = d.object<T.HostSnapshot>({
   processes: opt(
     d.array(
       d.object<T.ProcessSample>({
+        gpu_index: maybeNumber,
         pid: d.number,
         name: d.string,
         gpu_mib: d.nullable(d.number),
@@ -430,14 +426,43 @@ export const engineRecommendation = d.object<T.EngineRecommendation>({
   reason: opt(d.string),
 });
 export const resourceEstimate = d.object<T.ResourceEstimate>({
-  idle_mib: opt(d.number),
-  peak_mib: d.number,
-  ram_mib: opt(d.number),
+  peak_mib: d.nullable(d.number),
+  ram_mib: d.nullable(d.number),
+  file_size_bytes: d.nullable(d.number),
+  kv_mib: d.nullable(d.number),
   components: opt(d.nullable(d.record(d.number))),
-  confidence: d.string,
+  basis: d.oneOf('observed', 'derived', 'unavailable'),
+  sample_count: d.number,
   provenance: d.string,
-  reservation_mib: d.number,
+  profile_hash: d.string,
 });
+const peakSummary = d.object<T.ResourceHistoryGroup['gpu']>({
+  sample_count: d.number,
+  mean_peak_mib: d.nullable(d.number),
+  max_peak_mib: d.nullable(d.number),
+});
+export const resourceHistory = d.array(
+  d.object<T.ResourceHistoryGroup>({
+    artifact_id: d.nullable(d.string),
+    model_name: d.string,
+    profile_hash: d.string,
+    run_count: d.number,
+    first_run_at: d.number,
+    last_run_at: d.number,
+    gpu: peakSummary,
+    ram: peakSummary,
+    runs: d.array(
+      d.object<T.ResourceHistoryGroup['runs'][number]>({
+        id: d.string,
+        started_at: d.number,
+        ended_at: d.nullable(d.number),
+        outcome: d.string,
+        peak_gpu_mib: d.nullable(d.number),
+        peak_ram_mib: d.nullable(d.number),
+      }),
+    ),
+  }),
+);
 export const resourcePreview = d.object<T.ResourcePreview>({
   members: d.array(
     d.object<T.ResourcePreviewMember>({
@@ -452,42 +477,39 @@ export const resourcePreview = d.object<T.ResourcePreview>({
     d.object<T.ResourcePreviewGpu>({
       index: d.number,
       name: d.string,
-      total_mib: d.number,
-      used_mib: d.number,
-      reserve_mib: d.number,
-      draft_mib: d.number,
-      remaining_mib: d.number,
-      reservation_error: d.boolean,
-      verdict: d.string,
+      total_mib: d.nullable(d.number),
+      used_mib: d.nullable(d.number),
+      free_mib: d.nullable(d.number),
+      headroom_mib: d.number,
+      draft_mib: d.nullable(d.number),
+      remaining_mib: d.nullable(d.number),
+      status: d.oneOf('within_budget', 'over_budget', 'unavailable'),
     }),
   ),
   ram_available_mib: d.nullable(d.number),
-  ram_reserve_mib: d.number,
+  ram_headroom_mib: d.number,
+  ram_draft_mib: d.nullable(d.number),
+  ram_remaining_mib: d.nullable(d.number),
   sample_ts: maybeNumber,
+  sample_seconds: opt(d.number),
   note: opt(d.string),
 });
 export const resourcePreviewDraft = d.object<T.ResourcePreviewDraft>({
   name: opt(d.string),
   gpu: opt(d.number),
-  reservation_mib: opt(d.number),
   configuration: opt(profileDraft),
 });
 export const resourceDraft = d.object<T.ResourceDraft>({
   name: d.string,
   gpu: d.number,
-  reservation_mib: d.number,
   configuration: profileDraft,
 });
 export const resourcePreviewRequest = d.object<T.ResourcePreviewRequest>({
   members: d.array(resourceDraft),
 });
 export const launchPlan = d.object<T.LaunchPlan>({
-  estimates: d.record(
-    d.object<T.ReservationEstimate>({
-      reservation_mib: d.number,
-      confidence: d.string,
-    }),
-  ),
+  resources: opt(resourcePreview),
+  estimates: d.record(resourceEstimate),
   stops: stringArray,
   errors: stringArray,
   warnings: stringArray,

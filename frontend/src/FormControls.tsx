@@ -17,7 +17,7 @@ import type {
   RuntimeRecommendation,
 } from './types';
 
-type PlacementValue = Pick<DeploymentDraft, 'gpu' | 'reservation_mib' | 'port'>;
+type PlacementValue = Pick<DeploymentDraft, 'gpu' | 'port'>;
 
 export function Placement({
   value,
@@ -60,41 +60,6 @@ export function Placement({
             onChange={(e) => change({ ...value, gpu: Number(e.target.value) })}
           />
         )}
-      </Field>
-      <Field label="Memory reservation">
-        <div className="control-pair">
-          <NativeSelect
-            aria-label="Memory reservation mode"
-            value={value.reservation_mib === 0 ? 'auto' : 'custom'}
-            onChange={(e) =>
-              change({
-                ...value,
-                reservation_mib: e.target.value === 'auto' ? 0 : 1024,
-              })
-            }
-          >
-            <NativeSelectOption value="auto">
-              Automatic estimate
-            </NativeSelectOption>
-            <NativeSelectOption value="custom">Custom GiB</NativeSelectOption>
-          </NativeSelect>
-          {value.reservation_mib !== 0 && (
-            <Input
-              aria-label="Memory reservation in GiB"
-              type="number"
-              required
-              min={1 / 1024}
-              step={1 / 1024}
-              value={value.reservation_mib / 1024}
-              onChange={(e) =>
-                change({
-                  ...value,
-                  reservation_mib: Math.round(Number(e.target.value) * 1024),
-                })
-              }
-            />
-          )}
-        </div>
       </Field>
       <Field label="Private port">
         <Input

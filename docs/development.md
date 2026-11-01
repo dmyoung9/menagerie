@@ -13,6 +13,17 @@ admission and process ownership. `Store` uses SQLite WAL, revision checks, and
 history. Serving deployments own shared loading/eviction policy; model instances
 retain their engine configuration snapshots and stable aliases.
 
+Resource accounting is advisory. `controlplane/resources.py` derives only file
+size and metadata-backed KV values, preferring retained process peaks with no
+margin. Execution fingerprints exclude names/catalog/revisions and include engine,
+artifact, configuration, raw arguments and placement. Legacy session snapshots are
+read through the same fingerprint calculation without rewriting restoration data.
+`GET /api/history/resources?artifact_id=ID` returns configuration groups, per-pool
+measured counts/mean/max peaks, date ranges and individual runs, including failures.
+Missing measurements are null. The monitor prunes expired/quota-excess resource
+fields separately from restorable session configuration. Resource summaries have
+the same per-category `summary_days`/`history_quota_mib` bounds as requests/samples.
+
 Backend API contracts are in `controlplane/schema.py`. Frontend wire decoders
 are in `frontend/src/contracts.ts`; domain types are in `frontend/src/types/`.
 Use the [frontend contributor reference](frontend-design-system.md) when changing

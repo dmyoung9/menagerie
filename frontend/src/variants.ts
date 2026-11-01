@@ -40,10 +40,7 @@ export const parameterSize = (text: string) =>
   text
     .match(/(?:^|[-_/:])(\d+(?:\.\d+)?[BM])(?=[-_.:/]|$)/i)?.[1]
     .toUpperCase() || 'Unspecified';
-export const byteSize = (bytes: number | null) =>
-  bytes == null
-    ? 'Size not reported'
-    : `${(bytes / 1024 ** 3).toLocaleString(undefined, { maximumFractionDigits: 2 })} GiB`;
+export { bytes as byteSize } from './lib/formatters.ts';
 
 export function quantization(name: string): { quant: string; suffix: string } {
   const stem = name.replace(/\.gguf$/i, '').replace(/-\d{5}-of-\d{5}$/i, '');

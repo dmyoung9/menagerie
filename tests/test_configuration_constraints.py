@@ -1,4 +1,3 @@
-import pytest
 from test_resources import fixture
 
 from controlplane.adapters import validate_profile
@@ -70,7 +69,7 @@ def test_known_invalid_combinations_and_manual_unknown_engine():
     )
 
 
-def test_offload_is_explicit_and_ram_budget_is_enforced(tmp_path):
+def test_offload_is_explicit_and_ram_budget_is_advisory(tmp_path):
     _, manager, draft = fixture(tmp_path)
     artifact = manager.store.get("artifact", "weights")
     config = draft["configuration"]["config"]
@@ -80,16 +79,14 @@ def test_offload_is_explicit_and_ram_budget_is_enforced(tmp_path):
     assert cpu["peak_mib"] == 0 and cpu["ram_mib"] > artifact["size_bytes"] / 1048576
     draft["configuration"]["config"]["gpu-layers"] = "0"
     manager.host["ram_available_mib"] = 5000
-    with pytest.raises(ValueError, match="system memory"):
-        validate_budget(manager, [draft])
+    assert validate_budget(manager, [draft])["ram_remaining_mib"] < 0
 
 
-def test_budget_rejection_preserves_selected_settings(tmp_path):
+def test_over_budget_preview_preserves_selected_settings(tmp_path):
     from copy import deepcopy
 
     _, manager, draft = fixture(tmp_path)
     draft["configuration"]["config"]["ctx-size"] = 1048576
     before = deepcopy(draft)
-    with pytest.raises(ValueError, match="memory budget"):
-        validate_budget(manager, [draft])
+    assert validate_budget(manager, [draft])["gpus"][0]["status"] == "over_budget"
     assert draft == before

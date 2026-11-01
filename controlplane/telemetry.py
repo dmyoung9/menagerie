@@ -63,10 +63,13 @@ def sample():
             return None
 
     try:
+        gpu_indices = {}
         for row in query(
             "gpu",
-            "index,name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu,power.draw,clocks.current.sm",
+            "index,name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu,power.draw,clocks.current.sm,uuid",
         ):
+            if len(row) > 9:
+                gpu_indices[row[9].strip()] = int(row[0])
             result["gpus"].append(
                 dict(
                     zip(
@@ -81,13 +84,20 @@ def sample():
                             "power_w",
                             "clock_mhz",
                         ),
-                        [int(row[0]), row[1].strip()] + [num(v) for v in row[2:]],
+                        [int(row[0]), row[1].strip()] + [num(v) for v in row[2:9]],
                     )
                 )
             )
-        for row in query("compute-apps", "pid,process_name,used_memory"):
+        for row in query("compute-apps", "pid,process_name,used_memory,gpu_uuid"):
             result["processes"].append(
-                {"pid": int(row[0]), "name": row[1].strip(), "gpu_mib": num(row[2])}
+                {
+                    "pid": int(row[0]),
+                    "name": row[1].strip(),
+                    "gpu_mib": num(row[2]),
+                    "gpu_index": gpu_indices.get(row[3].strip())
+                    if len(row) > 3
+                    else None,
+                }
             )
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         result["errors"].append(str(exc))
@@ -95,10 +105,17 @@ def sample():
     return result
 
 
-def gpu_process_usage(host, pids):
+def gpu_process_usage(host, pids, gpu_index=None):
     if not host.get("gpus") or host.get("gpu_process_attribution") is False:
         return None
-    values = [p["gpu_mib"] for p in host.get("processes", []) if p["pid"] in pids]
+    matched = [p for p in host.get("processes", []) if p["pid"] in pids]
+    if gpu_index is not None and any(p.get("gpu_index") is None for p in matched):
+        return None
+    values = [
+        p["gpu_mib"]
+        for p in matched
+        if gpu_index is None or p.get("gpu_index") == gpu_index
+    ]
     return None if any(v is None for v in values) else sum(values)
 
 
