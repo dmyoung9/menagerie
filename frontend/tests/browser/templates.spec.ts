@@ -22,7 +22,7 @@ test('model details opens the new-custom-template editor and saves it', async ({
         size_bytes: 12,
         status: 'available',
         repo: 'fixture/model',
-        revision: 'fixture-commit',
+        source_revision: 'fixture-commit',
         error: null,
       },
       {
@@ -36,7 +36,7 @@ test('model details opens the new-custom-template editor and saves it', async ({
         size_bytes: 6,
         status: 'available',
         repo: null,
-        revision: null,
+        source_revision: null,
         error: null,
       },
     ],

@@ -115,7 +115,7 @@ export const templateAssetPublic = d.object<T.TemplateAssetPublic>({
   artifact_id: d.nullable(d.string),
   name: d.string,
   repo: d.nullable(d.string),
-  revision: d.nullable(d.string),
+  source_revision: d.nullable(d.string),
   file_path: d.nullable(d.string),
   relative_path: d.nullable(d.string),
   sha256: d.string,

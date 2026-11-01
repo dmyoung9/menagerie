@@ -72,6 +72,8 @@ def template_from_gguf(metadata: dict, local_path: str) -> dict | None:
     return {
         "kind": "embedded",
         "name": "embedded",
+        "repo": None,
+        "source_revision": None,
         "file_path": local_path,
         "relative_path": None,
         "content": raw,
@@ -95,6 +97,8 @@ def template_from_tokenizer_config(metadata: dict) -> dict | None:
     return {
         "kind": "embedded",
         "name": "tokenizer.chat_template",
+        "repo": None,
+        "source_revision": None,
         "file_path": "tokenizer_config.json",
         "relative_path": "tokenizer_config.json",
         "content": raw,
@@ -141,7 +145,7 @@ def collect_template_drafts(artifact: dict, hf_files: dict | None) -> list[dict]
                 "kind": "published",
                 "name": template_name(filename),
                 "repo": repo,
-                "revision": revision,
+                "source_revision": revision,
                 "file_path": filename,
                 "relative_path": filename,
                 "content": content,

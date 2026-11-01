@@ -76,7 +76,7 @@ export type TemplateAssetPublic = {
   artifact_id?: string | null;
   name: string;
   repo?: string | null;
-  revision?: string | null;
+  source_revision?: string | null;
   file_path?: string | null;
   relative_path?: string | null;
   sha256: string;

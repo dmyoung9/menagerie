@@ -287,6 +287,48 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             "inflight": manager.inflight,
         }
 
+    def _template_public(asset):
+        """Stable, content-free wire shape for a stored template asset.
+
+        ``revision`` is the store's row revision, so the publisher's commit is
+        ``source_revision`` (as on artifacts). Fields added after rows were
+        first stored are normalized to null so clients keep a strict contract."""
+        row = {
+            key: asset.get(key)
+            for key in (
+                "id",
+                "kind",
+                "artifact_id",
+                "name",
+                "repo",
+                "source_revision",
+                "file_path",
+                "relative_path",
+                "sha256",
+                "size_bytes",
+                "error",
+            )
+        }
+        if asset.get("status") is not None:
+            row["status"] = asset["status"]
+        return row
+
+    def _model_rows():
+        """Artifacts with their content-stripped template assets.
+
+        The dashboard reads models from the registry, while API clients use
+        /api/models; both must carry the templates the pickers select from."""
+        return [
+            row
+            | {
+                "templates": [
+                    _template_public(asset)
+                    for asset in templates.list_template_assets(store, row.get("id"))
+                ]
+            }
+            for row in store.list("artifact")
+        ]
+
     kinds = {
         "models": "artifact",
         "runtimes": "runtime",
@@ -316,22 +358,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
 
             return [
                 r | {"discovered_capabilities": inspect(r.get("metadata", {}))}
-                for r in store.list("artifact")
+                for r in _model_rows()
             ]
         return store.list(kinds[kind])
 
-    def _template_public(asset):
-        return {k: v for k, v in asset.items() if k != "content"}
-
     @app.get("/api/models")
     async def models():
-        rows = store.list("artifact")
-        for row in rows:
-            row["templates"] = [
-                _template_public(t)
-                for t in templates.list_template_assets(store, row.get("id"))
-            ]
-        return rows
+        return _model_rows()
 
     @app.get("/api/models/{ident}/templates")
     async def model_templates(ident: str):

@@ -162,7 +162,7 @@ def test_collect_drafts_published_from_hf_listing():
     assert kinds == {"published"}
     by_name = {d["name"]: d for d in drafts}
     assert by_name["chat_template"]["repo"] == "org/repo"
-    assert by_name["chat_template"]["revision"] == "abc"
+    assert by_name["chat_template"]["source_revision"] == "abc"
     assert by_name["chat_template"]["status"] == "available"
     assert by_name["alt.jinja"]["file_path"] == "chat_templates/alt.jinja"
 
@@ -565,6 +565,35 @@ async def test_models_endpoint_exposes_content_stripped_templates(tmp_path):
         assert (await client.get("/api/templates/a1")).json()[
             "content"
         ] == "secret-content"
+
+
+async def test_registry_models_carry_content_stripped_templates(tmp_path):
+    """The dashboard's model and deployment pickers read /api/registry/models."""
+    app = create_app(tmp_path)
+    store = app.state.store
+    store.put("artifact", {"id": "model", "name": "M", "format": "gguf"})
+    store.put(
+        "template",
+        {
+            "id": "a1",
+            "kind": "embedded",
+            "artifact_id": "model",
+            "name": "embedded",
+            "sha256": "sha",
+            "content": "secret-content",
+            "size_bytes": 0,
+            "status": "available",
+            "error": None,
+        },
+    )
+    async with await _client(app) as client:
+        rows = (await client.get("/api/registry/models")).json()
+        model = next(m for m in rows if m["id"] == "model")
+        assert model["templates"][0]["name"] == "embedded"
+        assert model["templates"][0]["repo"] is None
+        assert model["templates"][0]["source_revision"] is None
+        assert "content" not in model["templates"][0]
+        assert "discovered_capabilities" in model
 
 
 async def test_set_model_default_automatic_and_specific(tmp_path):
