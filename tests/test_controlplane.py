@@ -15,11 +15,20 @@ from controlplane.catalog import normalize
 from controlplane.manager import Conflict, Manager
 from controlplane.store import Store
 
+_used_ports: set[int] = set()
+
 
 def port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    # The OS may hand back the same ephemeral port to back-to-back bind(0)
+    # calls when the pool is small or recently freed. Track issued ports so
+    # deployments never share one.
+    while True:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            p = s.getsockname()[1]
+        if p not in _used_ports:
+            _used_ports.add(p)
+            return p
 
 
 @pytest.fixture
