@@ -1,7 +1,15 @@
-import type { Deployment, OperationEvent, ServingDeployment } from './types';
+import type {
+  Deployment,
+  EffectiveTemplate,
+  OperationEvent,
+  ServingDeployment,
+  TemplateAssetPublic,
+  TemplateSelection,
+  TemplateSource,
+} from './types';
 import type { Decoder } from './decode';
 import { eventPayload } from './contracts';
-export type { Registry } from './types';
+export type { EffectiveTemplate, Registry } from './types';
 
 export { Json, JsonEdit } from './Json';
 export {
@@ -100,6 +108,47 @@ export const mode = (d: Pick<Deployment, 'residency'>): string =>
   ] ||
   d.residency ||
   'Unknown';
+export const templateKindLabel = (kind: TemplateAssetPublic['kind']): string =>
+  ({ published: 'Published', embedded: 'Embedded', custom: 'Custom' })[kind];
+export const templateSourceLabel = (source: TemplateSource): string =>
+  (
+    ({
+      automatic: 'Automatic (engine default)',
+      embedded: 'Embedded',
+      published: 'Published',
+      custom: 'Custom',
+    }) satisfies Record<TemplateSource, string>
+  )[source] || source;
+export function effectiveTemplate(
+  override: TemplateSelection | null | undefined,
+  modelDefault: TemplateSelection | null | undefined,
+  templates: TemplateAssetPublic[] | undefined,
+): EffectiveTemplate {
+  const list = templates || [];
+  const first = (
+    selection: TemplateSelection | null | undefined,
+  ): EffectiveTemplate => {
+    if (selection?.source && selection.source !== 'automatic') {
+      const asset = selection.asset_id
+        ? (list.find((t) => t.id === selection.asset_id) ?? null)
+        : null;
+      return {
+        source: selection.source,
+        asset,
+        description: asset
+          ? asset.name
+          : `${selection.source} template missing`,
+      };
+    }
+    return {
+      source: 'automatic',
+      asset: null,
+      description: 'No template (engine default)',
+    };
+  };
+  if (override) return first(override);
+  return first(modelDefault);
+}
 export function state(d: Pick<Deployment, 'enabled' | 'state'>): string {
   if (!d.enabled) return 'Inactive';
   return (

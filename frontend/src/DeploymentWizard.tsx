@@ -23,7 +23,9 @@ import type {
   DeploymentDraft,
   JsonValue,
   ModelCatalog,
+  TemplateSelection,
 } from './types';
+import { ChatTemplateSettings } from './ChatTemplateSettings';
 
 export function DeploymentWizard({
   data,
@@ -59,6 +61,8 @@ export function DeploymentWizard({
   const [extra, setExtra] = useState<Record<string, JsonValue>>({}),
     [args, setArgs] = useState<string[]>([]),
     [invalid, setInvalid] = useState<Record<string, boolean>>({});
+  const [templateOverride, setTemplateOverride] =
+    useState<TemplateSelection | null>(null);
   const usedPorts = new Set((data.deployments || []).map((d) => d.port));
   const [advanced, setAdvanced] = useState<DeploymentDraft>({
     ...defaults.deployments,
@@ -169,6 +173,7 @@ export function DeploymentWizard({
         alias: apiAlias,
         residency,
         idle_timeout: idle,
+        template_override: templateOverride,
         enabled: true,
       });
       created(saved, load);
@@ -238,6 +243,7 @@ export function DeploymentWizard({
                       setArtifactId(e.target.value);
                       setRuntimeId('');
                       setExtra({});
+                      setTemplateOverride(null);
                     }}
                   >
                     <NativeSelectOption value="" disabled>
@@ -277,6 +283,14 @@ export function DeploymentWizard({
                       Set up engine
                     </Button>
                   </div>
+                )}
+                {artifact && (
+                  <ChatTemplateSettings
+                    label="Chat template"
+                    model={artifact}
+                    override={templateOverride}
+                    onChange={setTemplateOverride}
+                  />
                 )}
               </>
             </>

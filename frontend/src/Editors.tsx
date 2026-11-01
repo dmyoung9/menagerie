@@ -39,6 +39,7 @@ import type {
   Runtime,
   RuntimeRecommendation,
 } from './types';
+import { ChatTemplateSettings } from './ChatTemplateSettings';
 
 export function ConfigurationFields({
   value,
@@ -452,6 +453,16 @@ export function Editor(props: EditorProps) {
       {kind === 'deployments' && deployment && (
         <>
           {input('alias', 'API model ID')}
+          {deployment.configuration && (
+            <ChatTemplateSettings
+              label="Chat template"
+              model={data.models.find(
+                (m) => m.id === deployment.configuration?.artifact_id,
+              )}
+              override={deployment.template_override || null}
+              onChange={(selection) => set('template_override', selection)}
+            />
+          )}
           {deployment.configuration && (
             <ConfigurationFields
               value={deployment.configuration}

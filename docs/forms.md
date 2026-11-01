@@ -16,6 +16,15 @@ Changing engines can reset engine-specific settings; review the confirmation
 before continuing. Uncommon runtime options and environment overrides are
 available in Advanced settings. Only use options supported by the selected engine.
 
+## Chat template override
+
+In the deployment wizard and the member editor, the **Chat template** setting
+defaults to **Inherit model default** (engine default if the model default is
+Automatic). Choose a specific template to override it for that deployment only;
+the model default and every other deployment are untouched. The **Effective:**
+line shows what will actually run, and notes "not available" if the chosen file
+is missing or failed to download.
+
 ## Loading policy
 
 Pinned models remain loaded until explicitly stopped or a failure occurs.

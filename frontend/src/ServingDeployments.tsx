@@ -44,6 +44,7 @@ import {
 import { ActivityFeed } from './Views';
 import { go } from './navigation';
 import { ConfigurationFields } from './Editors';
+import { ChatTemplateSettings } from './ChatTemplateSettings';
 import { defaults, editable } from './editor-state';
 import { Duration, Placement } from './FormControls';
 import { DraftResources } from './Resources';
@@ -626,6 +627,18 @@ export function DeploymentSetEditor({
                     preview.data?.members?.[index]?.recommendation
                   }
                 />
+                {m.configuration && (
+                  <ChatTemplateSettings
+                    label="Chat template"
+                    model={data.models.find(
+                      (x) => x.id === m.configuration?.artifact_id,
+                    )}
+                    override={m.template_override || null}
+                    onChange={(selection) =>
+                      updateMember(index, { template_override: selection })
+                    }
+                  />
+                )}
                 <details>
                   <summary>Placement</summary>
                   <Placement

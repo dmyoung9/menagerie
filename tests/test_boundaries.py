@@ -45,7 +45,7 @@ def test_container_spec_is_pinned_readonly_loopback_and_gpu_explicit(tmp_path):
     profile = {"config": {}, "raw_args": []}
     artifact = {"format": "safetensors", "local_path": str(tmp_path)}
     spec = adapters.launch_spec(
-        deployment, profile, artifact, runtime, tmp_path / "work"
+        deployment, profile, artifact, runtime, tmp_path / "work", None
     )
     argv = spec["argv"]
     assert "--privileged" not in argv
