@@ -100,9 +100,10 @@ class Jobs:
         self.manager.spawn(run())
         return job
 
-    def progress(self, ident, text):
+    def progress(self, ident, text, transfer=None):
         job = self.store.get("job", ident)
         job["progress"] = text
+        job["transfer"] = transfer
         self.store.put("job", job, historical=False)
 
     async def hf_search(self, query):
@@ -259,7 +260,14 @@ class Jobs:
                 if time.monotonic() - self.last_report > 1:
                     owner.progress(
                         ident,
-                        f"{self.desc or 'Downloading'}: {self.n:,} / {self.total or '?'} {self.unit}",
+                        "Downloading",
+                        transfer={
+                            "done_bytes": self.n,
+                            "total_bytes": self.total,
+                            "rate_bytes_per_second": self.format_dict.get("rate"),
+                        }
+                        if self.unit == "B"
+                        else None,
                     )
                     self.last_report = time.monotonic()
                 return result
@@ -328,7 +336,7 @@ class Jobs:
                 raise ValueError("Insufficient disk capacity for repository snapshot")
             self.progress(
                 ident,
-                f"Downloading {len(files)} files · {size:,} bytes; no repository Python code",
+                f"Downloading {len(files)} files",
             )
             path = await asyncio.to_thread(
                 snapshot_download,
@@ -375,7 +383,7 @@ class Jobs:
             for position, shard in enumerate(shards, 1):
                 self.progress(
                     ident,
-                    f"Downloading {shard['name']} ({position}/{len(shards)}) · {shard['size']:,} bytes · resumes from HF cache",
+                    f"Downloading {shard['name']} ({position}/{len(shards)})",
                 )
                 paths.append(
                     await asyncio.to_thread(
@@ -417,7 +425,7 @@ class Jobs:
         file = shards[0]
         self.progress(
             ident,
-            f"Downloading {filename} · {file['size']:,} bytes · resumes from HF cache",
+            f"Downloading {filename}",
         )
         path = await asyncio.to_thread(
             hf_hub_download,

@@ -17,6 +17,8 @@ import { FieldGroup, FieldSet } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useEffect, useState } from 'react';
 import { readApi } from './ui';
+import { memory, bytes } from '@/lib/formatters';
+import { DraftResources } from './Resources';
 import * as contracts from './contracts';
 import type {
   Deployment,
@@ -26,7 +28,7 @@ import type {
   LaunchModal,
   LaunchPlan,
 } from './types';
-import { api, CopyButton, Dialog, Field, gib, Json, message, Tabs } from './ui';
+import { api, CopyButton, Dialog, Field, Json, message, Tabs } from './ui';
 
 export function LaunchReview({
   modal,
@@ -78,57 +80,61 @@ export function LaunchReview({
       {!plan && !error && <p className="muted">Checking capacity…</p>}
       {plan && (
         <>
-          <div className="table-wrap">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Model</TableHead>
-                  <TableHead className="numeric">
-                    Estimated VRAM (GiB)
-                  </TableHead>
-                  <TableHead>Confidence</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {Object.entries(plan.estimates).map(([id, estimate]) => (
-                  <TableRow key={id}>
-                    <TableCell>
-                      {deployments.find((d) => d.id === id)?.name ||
-                        modal.row.name}
-                    </TableCell>
-                    <TableCell className="numeric">
-                      {gib(estimate.reservation_mib)}
-                    </TableCell>
-                    <TableCell>{estimate.confidence}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-              {Object.keys(plan.estimates).length > 1 && (
-                <tfoot>
-                  <TableRow>
-                    <TableCell>Total</TableCell>
-                    <TableCell className="numeric">
-                      {gib(
-                        Object.values(plan.estimates).reduce(
-                          (sum, e) => sum + e.reservation_mib,
-                          0,
-                        ),
-                      )}
-                    </TableCell>
-                    <TableCell />
-                  </TableRow>
-                </tfoot>
-              )}
-            </Table>
-          </div>
-          <dl className="properties">
-            {(host.gpus || []).map((g, index: number) => (
-              <div className="property-pair" key={g.index ?? index}>
-                <dt>GPU {g.index ?? index} free (GiB)</dt>
-                <dd>{gib(g.free_mib)}</dd>
+          {!plan.resources && (
+            <>
+              <div className="table-wrap">
+                <Table
+                  containerProps={{
+                    tabIndex: 0,
+                    role: 'region',
+                    'aria-label': 'Launch resource facts',
+                  }}
+                >
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Model</TableHead>
+                      <TableHead className="numeric">GPU peak</TableHead>
+                      <TableHead>Basis / runs</TableHead>
+                      <TableHead>File size</TableHead>
+                      <TableHead>RAM peak</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {Object.entries(plan.estimates).map(([id, estimate]) => (
+                      <TableRow key={id}>
+                        <TableCell>
+                          {deployments.find((d) => d.id === id)?.name ||
+                            modal.row.name}
+                        </TableCell>
+                        <TableCell className="numeric">
+                          {memory(estimate.peak_mib)}
+                        </TableCell>
+                        <TableCell title={estimate.provenance}>
+                          {estimate.basis} · {estimate.sample_count} runs
+                        </TableCell>
+                        <TableCell className="numeric">
+                          {bytes(estimate.file_size_bytes)}
+                        </TableCell>
+                        <TableCell className="numeric">
+                          {memory(estimate.ram_mib)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
-            ))}
-          </dl>
+              <dl className="properties">
+                {(host.gpus || []).map((g, index: number) => (
+                  <div className="property-pair" key={g.index ?? index}>
+                    <dt>GPU {g.index ?? index} free</dt>
+                    <dd>{memory(g.free_mib)}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p>System RAM available: {memory(host.ram_available_mib)}</p>
+            </>
+          )}
+          {plan.resources && <DraftResources preview={plan.resources} />}
           {plan.stops.length > 0 && (
             <div className="warning">
               <h3>Will unload</h3>
@@ -150,9 +156,9 @@ export function LaunchReview({
               </AlertDescription>
             </Alert>
           ))}
-          {plan.warnings.length > 0 && (
+          {plan.warnings.length > 0 && !plan.resources && (
             <details open>
-              <summary>Memory uncertainty ({plan.warnings.length})</summary>
+              <summary>Launch facts ({plan.warnings.length})</summary>
               {plan.warnings.map((w: string) => (
                 <p className="warning" key={w}>
                   {w}
@@ -189,7 +195,6 @@ export function LaunchReview({
                 setError('');
                 try {
                   await api(`/api/${modal.kind}/${modal.row.id}/start`, {
-                    override: true,
                     plan_token: plan.plan_token,
                   });
                   done();

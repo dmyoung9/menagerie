@@ -152,9 +152,7 @@ export type DeploymentDraft = {
   residency: string;
   priority: number;
   idle_timeout: number;
-  reservation_mib: number;
   allow_eviction: boolean;
-  allow_uncertain: boolean;
   enabled: boolean;
   gpu: number;
   queue_timeout: number;
@@ -167,7 +165,6 @@ export type DeploymentSetDraft = {
   priority: number;
   idle_timeout: number;
   allow_eviction: boolean;
-  allow_uncertain: boolean;
   enabled: boolean;
   queue_timeout: number;
   members: DeploymentDraft[];
@@ -189,9 +186,7 @@ export type Deployment = {
   residency?: string;
   priority?: number;
   idle_timeout?: number;
-  reservation_mib?: number;
   allow_eviction?: boolean;
-  allow_uncertain?: boolean;
   enabled: boolean;
   state: string;
   gpu?: number;
@@ -248,6 +243,7 @@ export type GpuSnapshot = {
   clock_mhz?: number | null;
 };
 export type HostDeploymentMetrics = {
+  gpu_by_device_mib?: Record<string, number | null>;
   gpu_mib?: number | null;
   rss_mib?: number | null;
   cpu_percent?: number | null;
@@ -255,6 +251,7 @@ export type HostDeploymentMetrics = {
   pids?: number[];
 };
 export type ProcessSample = {
+  gpu_index?: number | null;
   pid: number;
   name: string;
   gpu_mib: number | null;
@@ -351,6 +348,11 @@ export type Job = {
   state: string;
   created_at: number;
   progress?: string;
+  transfer?: {
+    done_bytes: number;
+    total_bytes?: number | null;
+    rate_bytes_per_second?: number | null;
+  } | null;
   error?: string;
 };
 export type MetricSample = HostSnapshot;
@@ -372,13 +374,15 @@ export type EngineReleaseCatalog = {
   note?: string;
 };
 export type ResourceEstimate = {
-  idle_mib?: number;
-  peak_mib: number;
-  ram_mib?: number;
+  peak_mib: number | null;
+  ram_mib: number | null;
+  file_size_bytes: number | null;
+  kv_mib: number | null;
   components?: Record<string, number> | null;
-  confidence: string;
+  basis: 'observed' | 'derived' | 'unavailable';
+  sample_count: number;
   provenance: string;
-  reservation_mib: number;
+  profile_hash: string;
 };
 export type ResourcePreviewMember = {
   key: string;
@@ -394,26 +398,29 @@ export type ResourcePreviewMember = {
 export type ResourcePreviewGpu = {
   index: number;
   name: string;
-  total_mib: number;
-  used_mib: number;
-  reserve_mib: number;
-  draft_mib: number;
-  remaining_mib: number;
-  reservation_error: boolean;
-  verdict: string;
+  total_mib: number | null;
+  used_mib: number | null;
+  free_mib: number | null;
+  headroom_mib: number;
+  draft_mib: number | null;
+  remaining_mib: number | null;
+  status: 'within_budget' | 'over_budget' | 'unavailable';
 };
 export type ResourcePreview = {
+  ram_total_mib?: number | null;
   gpus: ResourcePreviewGpu[];
   members: ResourcePreviewMember[];
   ram_available_mib: number | null;
-  ram_reserve_mib: number;
+  ram_headroom_mib: number;
+  ram_draft_mib: number | null;
+  ram_remaining_mib: number | null;
   sample_ts?: number | null;
+  sample_seconds?: number;
   note?: string;
 };
 export type ResourcePreviewDraft = {
   name?: string;
   gpu?: number;
-  reservation_mib?: number;
   configuration?: ProfileDraft;
 };
 export type ResourceDraft = Required<ResourcePreviewDraft>;
@@ -530,12 +537,9 @@ export type DeploymentActions = {
   load: (kind: LaunchKind, row: LaunchTarget) => void;
   edit: EditAction;
 };
-export type ReservationEstimate = {
-  reservation_mib: number;
-  confidence: string;
-};
 export type LaunchPlan = {
-  estimates: Record<string, ReservationEstimate>;
+  resources?: ResourcePreview;
+  estimates: Record<string, ResourceEstimate>;
   stops: string[];
   errors: string[];
   warnings: string[];
@@ -561,6 +565,35 @@ export type HistorySession = {
   peak_gpu_mib?: number;
   peak_ram_mib?: number;
   outcome?: string;
+};
+export type ResourceHistoryGroup = {
+  configuration?: JsonObject;
+  runtime_name?: string | null;
+  gpu_index?: number | null;
+  artifact_id: string | null;
+  model_name: string;
+  profile_hash: string;
+  run_count: number;
+  first_run_at: number;
+  last_run_at: number;
+  gpu: {
+    sample_count: number;
+    mean_peak_mib: number | null;
+    max_peak_mib: number | null;
+  };
+  ram: {
+    sample_count: number;
+    mean_peak_mib: number | null;
+    max_peak_mib: number | null;
+  };
+  runs: {
+    id: string;
+    started_at: number;
+    ended_at: number | null;
+    outcome: string;
+    peak_gpu_mib: number | null;
+    peak_ram_mib: number | null;
+  }[];
 };
 export type HistoryActivation = {
   id: string;

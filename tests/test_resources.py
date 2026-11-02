@@ -21,7 +21,12 @@ def fixture(tmp_path):
             "format": "gguf",
             "size_bytes": 4 * 1024**3,
             "architecture": "llama",
-            "metadata": {"llama.block_count": 32, "llama.context_length": 32768},
+            "metadata": {
+                "llama.block_count": 32,
+                "llama.context_length": 32768,
+                "llama.attention.head_count_kv": 8,
+                "llama.attention.key_length": 128,
+            },
         },
     )
     store.put(
@@ -51,7 +56,6 @@ def fixture(tmp_path):
     draft = {
         "name": "Example",
         "gpu": 0,
-        "reservation_mib": 0,
         "configuration": {
             "name": "Example",
             "artifact_id": "weights",
@@ -62,7 +66,7 @@ def fixture(tmp_path):
     return app, manager, draft
 
 
-def test_components_match_shared_launch_estimate_and_peers_reduce_recommendation(
+def test_components_match_shared_launch_estimate_and_peers_have_separate_demand(
     tmp_path,
 ):
     app, manager, draft = fixture(tmp_path)
@@ -70,13 +74,9 @@ def test_components_match_shared_launch_estimate_and_peers_reduce_recommendation
     e = one["members"][0]["estimate"]
     assert sum(e["components"].values()) == e["peak_mib"]
     assert e == manager.estimate(draft | {"profile_snapshot": draft["configuration"]})
-    assert one["members"][0]["recommendation"]["gpu_layers_max"] == 32
     two = preview(manager, [draft, draft])
     assert two["gpus"][0]["draft_mib"] == 2 * e["peak_mib"]
-    assert (
-        two["members"][0]["recommendation"]["context_recommended_max"]
-        < one["members"][0]["recommendation"]["context_recommended_max"]
-    )
+    assert two["members"][0]["recommendation"] == {}
     assert one["gpus"][0]["remaining_mib"] == 16384 - 2048 - 2048 - e["peak_mib"]
 
 
@@ -84,52 +84,46 @@ def test_pressure_unknown_gpu_and_reservations_are_not_hidden(tmp_path):
     _, manager, draft = fixture(tmp_path)
     draft["reservation_mib"] = 20000
     result = preview(manager, [draft])
-    assert result["gpus"][0]["reservation_error"]
+    assert "reservation_error" not in result["gpus"][0]
     assert (
         result["gpus"][0]["draft_mib"] == result["members"][0]["estimate"]["peak_mib"]
     )  # not reservation + peak
     manager.host["gpus"][0]["used_mib"] = 15000
+    manager.host["gpus"][0]["free_mib"] = 1384
     result = preview(manager, [draft])
-    assert result["gpus"][0]["verdict"] == "Over budget"
-    assert result["members"][0]["recommendation"]["context_recommended_max"] is None
+    assert result["gpus"][0]["status"] == "over_budget"
+    assert result["members"][0]["recommendation"] == {}
     manager.host["gpus"] = []
     assert preview(manager, [draft])["gpus"] == []
 
 
-def test_recommendation_fits_but_next_token_does_not_and_scales_with_concurrency(
+def test_metadata_only_kv_without_overhead_margin_or_guessed_fallbacks(
     tmp_path,
 ):
     _, manager, draft = fixture(tmp_path)
-    manager.host["gpus"][0]["total_mib"] = 11000
-    result = preview(manager, [draft])
-    best = result["members"][0]["recommendation"]["context_recommended_max"]
     artifact = manager.store.get("artifact", "weights")
-    available = 11000 - 2048 - 2048
     config = draft["configuration"]["config"]
-    assert estimate(artifact, config | {"ctx-size": best})["peak_mib"] <= available
-    assert estimate(artifact, config | {"ctx-size": best + 1})["peak_mib"] > available
-    draft["configuration"]["config"]["parallel"] = 2
+    e = estimate(artifact, config)
+    assert e["kv_mib"] == 8192 * 32 * 8 * 128 * 4 / 1048576
+    assert e["peak_mib"] == 4096 + e["kv_mib"]
     assert (
-        preview(manager, [draft])["members"][0]["recommendation"][
-            "context_recommended_max"
-        ]
-        < best
-    )
-    draft["configuration"]["config"]["parallel"] = 4
-    assert (
-        preview(manager, [draft])["members"][0]["recommendation"][
-            "context_recommended_max"
-        ]
-        is None
-    )
+        estimate(artifact, config | {"parallel": 4})["kv_mib"] == e["kv_mib"]
+    )  # llama.cpp ctx-size is shared.
+    missing = estimate(artifact | {"metadata": {}}, config)
+    assert missing["kv_mib"] is None and missing["peak_mib"] == 4096
+    assert "unavailable" in missing["provenance"]
 
 
 def test_measurement_provenance_does_not_fabricate_internal_breakdown(tmp_path):
     _, manager, draft = fixture(tmp_path)
     artifact = manager.store.get("artifact", "weights")
-    result = estimate(artifact, draft["configuration"]["config"], measured=[6000])
-    assert result["peak_mib"] == 7156
-    assert result["confidence"] == "medium"
+    result = estimate(
+        artifact,
+        draft["configuration"]["config"],
+        measured=[{"peak_gpu_mib": 6000, "peak_ram_mib": 1400}],
+    )
+    assert result["peak_mib"] == 6000 and result["ram_mib"] == 1400
+    assert result["basis"] == "observed" and result["sample_count"] == 1
     assert result["components"] is None
 
 
@@ -143,7 +137,9 @@ def test_separate_gpu_budgets_and_model_context_ceiling(tmp_path):
     assert result["gpus"][0]["draft_mib"] == result["gpus"][1]["draft_mib"]
     assert result["gpus"][0]["used_mib"] == 2048
     assert result["gpus"][1]["used_mib"] == 0
-    assert result["members"][1]["recommendation"]["context_recommended_max"] == 32768
+    assert (
+        result["gpus"][1]["status"] == "unavailable"
+    )  # Missing free memory is not zero.
 
 
 async def test_preview_endpoint_is_bounded_authenticated_and_side_effect_free(tmp_path):
@@ -168,10 +164,7 @@ async def test_preview_endpoint_is_bounded_authenticated_and_side_effect_free(tm
                 "/api/resources/preview", json={"members": [draft]}, headers=headers
             )
             assert response.status_code == 200, response.text
-            assert (
-                response.json()["members"][0]["recommendation"]["context_default"]
-                <= 8192
-            )
+            assert response.json()["members"][0]["estimate"]["basis"] == "derived"
             assert (
                 await client.post(
                     "/api/resources/preview",

@@ -20,6 +20,8 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('/node_modules/@base-ui/')) return 'base-ui';
+          if (/\/node_modules\/(?:recharts|d3-[^/]+|victory-vendor)\//.test(id))
+            return 'charts';
           if (id.includes('/node_modules/')) return 'vendor';
         },
       },

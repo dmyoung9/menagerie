@@ -73,7 +73,11 @@ export const number = (v: unknown, digits = 1) =>
     ? v.toLocaleString(undefined, { maximumFractionDigits: digits })
     : '—';
 export const gib = (v: unknown) =>
-  typeof v === 'number' ? number(v / 1024) : '—';
+  typeof v === 'number' && Number.isFinite(v)
+    ? v > 0 && v / 1024 < 0.1
+      ? '<0.1'
+      : number(v / 1024)
+    : '—';
 export const date = (v: number) =>
   v ? new Date(v * 1000).toLocaleString() : '—';
 export const pretty = (v: unknown) => JSON.stringify(v, null, 2);

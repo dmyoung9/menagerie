@@ -42,6 +42,7 @@ import {
   type Registry,
 } from './ui';
 import { ActivityFeed } from './Views';
+import { ResourceHistory } from '@/components/resource-history';
 import { go } from './navigation';
 import { ConfigurationFields } from './Editors';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
@@ -292,7 +293,6 @@ export function DeploymentSetEditor({
     priority: 50,
     idle_timeout: 300,
     allow_eviction: false,
-    allow_uncertain: false,
     enabled: true,
     queue_timeout: 300,
     ...(initial
@@ -303,7 +303,6 @@ export function DeploymentSetEditor({
           priority: initial.priority ?? 50,
           idle_timeout: initial.idle_timeout ?? 300,
           allow_eviction: initial.allow_eviction ?? false,
-          allow_uncertain: initial.allow_uncertain ?? false,
           enabled: initial.enabled,
           queue_timeout: initial.queue_timeout ?? 300,
         }
@@ -482,7 +481,6 @@ export function DeploymentSetEditor({
         priority: value.priority,
         idle_timeout: value.idle_timeout,
         allow_eviction: value.allow_eviction,
-        allow_uncertain: value.allow_uncertain,
         enabled: value.enabled,
         queue_timeout: value.queue_timeout,
       };
@@ -709,15 +707,6 @@ export function DeploymentSetEditor({
                 onCheckedChange={(checked) => set('allow_eviction', checked)}
               />
               Can unload to make room for another deployment
-            </label>
-          )}
-          {value.residency === 'on-demand' && (
-            <label className="check">
-              <Checkbox
-                checked={value.allow_uncertain}
-                onCheckedChange={(checked) => set('allow_uncertain', checked)}
-              />
-              Allow on-demand loading with uncertain memory estimates
             </label>
           )}
           <details>
@@ -993,6 +982,14 @@ export function MultiDeploymentDetail({
           </div>
         </>
       )}
+      {tab === 'Models' &&
+        [
+          ...new Set(
+            d.members
+              .map((m) => m.profile_snapshot?.artifact_id)
+              .filter((id): id is string => !!id),
+          ),
+        ].map((id) => <ResourceHistory key={id} artifactId={id} />)}
       {tab === 'Policy' && (
         <Card className="mb-5 min-w-0 gap-0 p-5">
           <CardContent className="p-0">

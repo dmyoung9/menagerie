@@ -27,6 +27,7 @@ parser.add_argument("--spawn-child", action="store_true")
 parser.add_argument("--gpu-layers", type=int, default=0)
 args = parser.parse_args()
 if args.fail:
+    print("Fixture engine error: CUDA out of memory", file=sys.stderr, flush=True)
     raise SystemExit(42)
 if args.spawn_child:
     command = [sys.executable]

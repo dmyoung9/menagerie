@@ -14,6 +14,7 @@ object({
   jobs: array(contracts.job),
   preview: contracts.resourcePreview,
   sessions: array(contracts.historySession),
+  resources: contracts.resourceHistory,
   requests: array(contracts.historyRequest),
   recommendation: contracts.engineRecommendation,
   activations: array(contracts.historyActivation),

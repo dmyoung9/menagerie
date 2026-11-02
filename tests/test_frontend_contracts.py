@@ -107,6 +107,7 @@ async def test_frontend_decodes_actual_api_responses(tmp_path, monkeypatch):
             "deployment_snapshot": member,
             "outcome": "stopped",
             "peak_gpu_mib": 0,
+            "profile_hash": "fixture-config",
         },
     )
     store.put(
@@ -159,7 +160,7 @@ async def test_frontend_decodes_actual_api_responses(tmp_path, monkeypatch):
         payload["recommendation"] = await get(
             "/api/models/unknown-format/engine-recommendation"
         )
-        for kind in ("sessions", "requests", "activations"):
+        for kind in ("sessions", "requests", "activations", "resources"):
             payload[kind] = await get(f"/api/history/{kind}")
         payload["events"] = await get("/api/events")
         payload["revisions"] = await get("/api/profiles/profile/revisions")

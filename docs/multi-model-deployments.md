@@ -30,9 +30,9 @@ permission belong to the deployment.
   they were running at shutdown. A manual unload clears that restart intent.
 
 For automatic switching in both directions, both deployments must permit eviction,
-have compatible priorities, and not be pinned. On-demand starts are admitted against
-the reviewed memory estimate; uncertain estimates require the saved on-demand
-permission. Manual launch review supplies an explicit override. A start can
+have compatible priorities, and not be pinned. Observed history or file-size/KV
+accounting informs proposed switches, but never reserves memory or blocks a start.
+Manual launch review preserves consent to proposed unloads. A start can
 still fail if external memory use changes after admission, and that failure stays
 visible. Group membership does not bypass these safeguards.
 

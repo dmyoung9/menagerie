@@ -148,8 +148,8 @@ backups. Review custom paths separately before removing anything.
 - **Dashboard unavailable:** verify the selected release and reinstall if its
   bundled assets are missing.
 - **Runtime load failed:** inspect Activity, engine compatibility, capacity, and
-  executable permissions. On-demand uncertainty permission differs from manual
-  launch review; see [operations](operations.md).
+  executable permissions. Activity shows captured engine errors; memory accounting
+  does not block loading. See [operations](operations.md).
 - **Client model missing:** check enabled aliases and declared capabilities, then
   reload the client integration. See [OpenCode setup](opencode.md).
 - **Port changed:** pass `--port` to CLI commands and update client gateway settings.

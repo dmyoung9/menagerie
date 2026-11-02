@@ -498,12 +498,6 @@ export function DeploymentWizard({
                     [
                       ['port', 'Private port', 1024, 65535],
                       ['gpu', 'GPU index', 0, 31],
-                      [
-                        'reservation_mib',
-                        'VRAM reservation (MiB; 0 = estimate)',
-                        0,
-                        undefined,
-                      ],
                       ['priority', 'Priority', 0, 100],
                       ['queue_timeout', 'Queue timeout (seconds)', 1, 1800],
                     ] as const
@@ -578,25 +572,6 @@ export function DeploymentWizard({
                   : ''}
                 .
               </p>
-              {residency === 'on-demand' && (
-                <>
-                  <label className="check">
-                    <Checkbox
-                      checked={advanced.allow_uncertain}
-                      onCheckedChange={(checked) =>
-                        setAdvanced({ ...advanced, allow_uncertain: checked })
-                      }
-                    />
-                    Allow on-demand loading with uncertain memory estimates
-                  </label>
-                  {!advanced.allow_uncertain && (
-                    <p className="warning">
-                      Client-triggered loading may be blocked until this
-                      permission is granted.
-                    </p>
-                  )}
-                </>
-              )}
             </>
           )}
         </FieldSet>

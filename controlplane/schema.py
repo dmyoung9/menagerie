@@ -83,7 +83,6 @@ class DeploymentPolicy(Record):
     priority: int = Field(default=50, ge=0, le=100)
     idle_timeout: int = Field(default=300, ge=0, le=86400)
     allow_eviction: bool = False
-    allow_uncertain: bool = False
     enabled: bool = True
     queue_timeout: int = Field(default=300, ge=1, le=1800)
 
@@ -94,7 +93,6 @@ class Deployment(DeploymentPolicy):
     configuration: Profile | None = None
     alias: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,159}$")
     port: int = Field(ge=1024, le=65535)
-    reservation_mib: int = Field(default=0, ge=0)
     gpu: int = Field(default=0, ge=0, le=31)
     # Per-deployment template override. None means "use model default";
     # an explicit {source: embedded|published|custom, asset_id} wins over the
@@ -133,7 +131,6 @@ class Settings(BaseModel):
 class ResourceDraft(BaseModel):
     name: str = "Draft model"
     gpu: int = Field(default=0, ge=0, le=31)
-    reservation_mib: int = Field(default=0, ge=0)
     configuration: Profile
 
 

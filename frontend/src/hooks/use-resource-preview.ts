@@ -30,7 +30,6 @@ export function useResourcePreview(
       return {
         name: member.name || 'Draft model',
         gpu: member.gpu ?? 0,
-        reservation_mib: member.reservation_mib || 0,
         configuration: configuration
           ? Object.fromEntries(
               configurationKeys

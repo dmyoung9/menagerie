@@ -506,7 +506,6 @@ export function Editor(props: EditorProps) {
             <Placement
               value={{
                 gpu: deployment.gpu,
-                reservation_mib: deployment.reservation_mib,
                 port: deployment.port,
               }}
               change={(placement) =>
@@ -534,10 +533,6 @@ export function Editor(props: EditorProps) {
                     'allow_eviction',
                     'Can unload to make room for another deployment',
                   )}
-                {check(
-                  'allow_uncertain',
-                  'Allow on-demand loading with uncertain memory estimates',
-                )}
               </>
             )}
           </details>

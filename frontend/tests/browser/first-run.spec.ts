@@ -60,8 +60,19 @@ test('unloading another deployment still requires consent', async ({
       contentType: 'application/json',
       body: JSON.stringify({
         errors: [],
-        warnings: ['Low confidence'],
-        estimates: { idle: { reservation_mib: 6800, confidence: 'low' } },
+        warnings: ['1.0 GiB over budget'],
+        estimates: {
+          idle: {
+            peak_mib: 6800,
+            ram_mib: null,
+            basis: 'observed',
+            sample_count: 2,
+            file_size_bytes: 8 * 1024 ** 3,
+            kv_mib: null,
+            profile_hash: 'fixture-config',
+            provenance: 'Observed fixture peaks',
+          },
+        },
         stops: ['ready'],
         plan_token: 'review-token',
       }),

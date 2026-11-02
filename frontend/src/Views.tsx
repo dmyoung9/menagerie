@@ -49,6 +49,9 @@ import {
   type Registry,
 } from './ui';
 import { ModelCard } from './ModelCard';
+import { ResourceHistory } from '@/components/resource-history';
+import { OperationProgress } from '@/components/operation-progress';
+import { memory, percent, tokenRate } from '@/lib/formatters';
 import { EngineCatalog } from './EngineCatalog';
 import { byteSize, parameterSize, quantization } from './variants';
 import { useConfirmation } from '@/hooks/use-confirmation';
@@ -366,9 +369,7 @@ export function DeploymentDetail({
                 <CardDescription>VRAM</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3 p-0">
-                <strong>
-                  {gib(process.gpu_mib)} <small>GiB</small>
-                </strong>
+                <strong>{memory(process.gpu_mib)}</strong>
               </CardContent>
             </Card>
             <Card className="mb-5 min-w-0 gap-0 p-5 flex flex-col gap-3">
@@ -441,24 +442,30 @@ export function DeploymentDetail({
                       rate('prompt_tokens_total', 'prompt_seconds_total'),
                     )}
                   </dd>
-                  <dt>Generation (tok/s)</dt>
+                  <dt>Generation</dt>
                   <dd>
-                    {number(
+                    {tokenRate(
                       rate(
                         'tokens_predicted_total',
                         'tokens_predicted_seconds_total',
                       ),
                     )}
                   </dd>
-                  <dt>Process RAM (GiB)</dt>
-                  <dd>{gib(process.rss_mib)}</dd>
-                  <dt>CPU (%)</dt>
-                  <dd>{number(process.cpu_percent)}</dd>
+                  <dt>Process RAM</dt>
+                  <dd>{memory(process.rss_mib)}</dd>
+                  <dt>CPU activity</dt>
+                  <dd>{percent(process.cpu_percent)}</dd>
                 </dl>
                 <small className="muted">Runtime averages since loading.</small>
               </CardContent>
             </Card>
           </div>
+          {profile?.artifact_id && (
+            <ResourceHistory
+              key={profile.artifact_id}
+              artifactId={profile.artifact_id}
+            />
+          )}
         </>
       )}
       {tab === 'Configuration' && (
@@ -499,8 +506,6 @@ export function DeploymentDetail({
                 <dd>{d.gpu}</dd>
                 <dt>Priority</dt>
                 <dd>{d.priority}</dd>
-                <dt>VRAM reservation (MiB)</dt>
-                <dd>{d.reservation_mib || 'Estimated'}</dd>
                 <dt>Queue timeout (s)</dt>
                 <dd>{d.queue_timeout}</dd>
               </dl>
@@ -861,6 +866,10 @@ export function ModelLibrary({
             </p>
           ))}
           <InspectModel key={current.id} id={current.id} />
+          <ResourceHistory
+            key={'history-' + current.id}
+            artifactId={current.id}
+          />
           <h3>Deployments</h3>
           {(data.deployments || [])
             .filter((d) => d.profile_snapshot?.artifact_id === current.id)
@@ -1141,11 +1150,9 @@ export function ActivityPage({
                     <Status
                       value={j.state.charAt(0) + j.state.slice(1).toLowerCase()}
                     />
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <strong>{j.name}</strong>
-                      <p className={j.error ? 'error-text' : 'muted'}>
-                        {j.error || j.progress}
-                      </p>
+                      <OperationProgress job={j} />
                     </div>
                   </div>
                 ))
@@ -1200,6 +1207,7 @@ export function ActivityPage({
       )}
       {tab === 'Sessions' && (
         <>
+          <ResourceHistory />
           <div className="toolbar">
             <Button
               variant="outline"

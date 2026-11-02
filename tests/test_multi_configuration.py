@@ -177,7 +177,6 @@ async def test_reused_weights_have_independent_serving_lifecycles(tmp_path):
                         "name": f"{name}-{i}",
                         "alias": f"{name}-{i}",
                         "port": port(),
-                        "reservation_mib": 1000,
                         "configuration": {
                             "name": "Gemma",
                             "artifact_id": "weights",
@@ -191,7 +190,6 @@ async def test_reused_weights_have_independent_serving_lifecycles(tmp_path):
                     json={
                         "name": name,
                         "residency": "on-demand",
-                        "allow_uncertain": True,
                         "members": members,
                     },
                     headers=headers,

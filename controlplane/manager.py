@@ -12,7 +12,16 @@ from pathlib import Path
 import httpx
 import psutil
 
-from . import adapters, deployment_sets, host, processes, telemetry, templates
+from . import (
+    adapters,
+    deployment_sets,
+    host,
+    processes,
+    resource_history,
+    resources,
+    telemetry,
+    templates,
+)
 from .schema import Settings
 from .store import encode, identity, uid
 
@@ -95,13 +104,15 @@ class Manager:
         deficits = {}
         for gpu in self.host.get("gpus", []):
             needed = sum(
-                self.estimate(d)["reservation_mib"]
+                self.estimate(d)["peak_mib"] or 0
                 for d in (self.store.get("deployment", i) for i in selected)
                 if d["gpu"] == gpu["index"] and d["state"] not in ACTIVE
             )
             deficits[gpu["index"]] = max(
                 0,
-                needed - max(0, gpu["free_mib"] - self.settings()["gpu_headroom_mib"]),
+                needed - max(0, gpu["free_mib"] - self.settings()["gpu_headroom_mib"])
+                if gpu.get("free_mib") is not None
+                else 0,
             )
         candidates = [
             u
@@ -120,15 +131,14 @@ class Manager:
             freed = {}
             for d in unit["members"]:
                 if d["state"] in ACTIVE:
-                    measured = (
-                        self.host.get("deployments", {}).get(d["id"], {}).get("gpu_mib")
-                    )
-                    freed[d["gpu"]] = freed.get(d["gpu"], 0) + (
-                        measured
-                        if measured is not None
-                        else d.get("reservation_active")
-                        or self.estimate(d)["reservation_mib"]
-                    )
+                    metrics = self.host.get("deployments", {}).get(d["id"], {})
+                    by_device = metrics.get("gpu_by_device_mib")
+                    if by_device is None and len(self.host.get("gpus", [])) == 1:
+                        by_device = {str(d["gpu"]): metrics.get("gpu_mib")}
+                    for index, measured in (by_device or {}).items():
+                        if measured is not None:
+                            gpu_index = int(index)
+                            freed[gpu_index] = freed.get(gpu_index, 0) + measured
             if any(
                 deficits.get(gpu, 0) > 0 and amount > 0 for gpu, amount in freed.items()
             ):
@@ -268,40 +278,18 @@ class Manager:
             self.file_lock.close()
 
     def estimate(self, d):
-        from .resources import estimate
-
         p = d["profile_snapshot"]
         a = self.store.get("artifact", p["artifact_id"])
+        runtime = self.store.get("runtime", p["runtime_id"])
+        fingerprint = resources.profile_hash(p, a, runtime, d.get("gpu", 0))
         measured = [
             s
-            for s in self.store.list("session")
-            if s.get("profile_hash") == identity(p)
-            and s.get("peak_gpu_mib", 0) > 0
-            and s.get("outcome") == "stopped"
+            for s in resource_history.retained(self.store, self.settings())
+            if resources.run_profile_hash(s) == fingerprint
         ]
-        result = estimate(
-            a,
-            p["config"],
-            d.get("reservation_mib", 0),
-            [s["peak_gpu_mib"] for s in measured],
-        )
-        runtime = self.store.get("runtime", p["runtime_id"])
-        gpu = next(
-            (g for g in self.host.get("gpus", []) if g["index"] == d.get("gpu", 0)), {}
-        )
-        if runtime["engine"] == "vllm" and gpu.get("total_mib"):
-            allocated = round(
-                gpu["total_mib"] * float(p["config"].get("gpu-memory-utilization", 0.5))
-            )
-            required = result["peak_mib"]
-            result.update(
-                peak_mib=max(required, allocated),
-                required_mib=required,
-                allocation_mib=allocated,
-                components=None,
-                reservation_mib=d.get("reservation_mib") or max(required, allocated),
-            )
-        return result
+        return resources.estimate(a, p["config"], measured) | {
+            "profile_hash": fingerprint
+        }
 
     def validate(self, ids, authorized_stops=None):
         duplicates = len(set(ids)) != len(ids)
@@ -377,50 +365,57 @@ class Manager:
                     sock.close()
             est = self.estimate(d)
             estimates[d["id"]] = est
-            warnings.append(
-                f"{d['alias']}: {est['confidence']}-confidence memory estimate. {est['provenance']}"
-            )
         settings = self.settings()
         if shutil.disk_usage(self.store.root).free < 128 * 1024 * 1024:
             errors.append(
                 "Insufficient registry/log disk capacity (128 MiB reserve required)"
             )
         for gpu in self.host.get("gpus", []):
-            resident = [
-                d
-                for d in all_d
-                if d["gpu"] == gpu["index"]
-                and d["state"] in ACTIVE
-                and d["id"] not in authorized_stops
-            ]
             new = [
                 d
                 for d in selected
                 if d["gpu"] == gpu["index"] and d["state"] not in ACTIVE
             ]
-            explicit = sum(d["reservation_mib"] for d in resident + new)
-            if explicit + settings["gpu_headroom_mib"] > gpu["total_mib"]:
-                errors.append(
-                    "Explicit reservations exceed GPU capacity including desktop headroom"
-                )
-            needed = sum(estimates[d["id"]]["reservation_mib"] for d in new)
+            needed = sum(estimates[d["id"]]["peak_mib"] or 0 for d in new)
             if (
-                needed > gpu["free_mib"] - settings["gpu_headroom_mib"]
+                gpu.get("free_mib") is not None
+                and needed > gpu["free_mib"] - settings["gpu_headroom_mib"]
                 and not authorized_stops
             ):
                 warnings.append(
-                    f"Estimated peak exceeds currently free GPU {gpu['index']} capacity"
+                    f"GPU {gpu['index']}: {(needed - gpu['free_mib'] + settings['gpu_headroom_mib']) / 1024:.1f} GiB over budget"
                 )
-            if gpu["free_mib"] < settings["gpu_headroom_mib"] and not authorized_stops:
+            if (
+                gpu.get("free_mib") is not None
+                and gpu["free_mib"] < settings["gpu_headroom_mib"]
+                and not authorized_stops
+            ):
                 errors.append("GPU below desktop headroom gate")
         if any(
             str(d["profile_snapshot"]["config"].get("gpu-layers", "all")) != "0"
             and d["gpu"] not in [g["index"] for g in self.host.get("gpus", [])]
             for d in selected
         ):
-            errors.append("Selected NVIDIA GPU has no telemetry")
-        if self.host.get("ram_available_mib", 0) < settings["ram_headroom_mib"]:
+            warnings.append(
+                "Selected GPU telemetry unavailable; memory accounting is unavailable"
+            )
+        if (
+            self.host.get("ram_available_mib") is not None
+            and self.host["ram_available_mib"] < settings["ram_headroom_mib"]
+        ):
             errors.append("Host below RAM headroom gate")
+        ram = [
+            estimates[d["id"]]["ram_mib"] for d in selected if d["state"] not in ACTIVE
+        ]
+        if (
+            all(v is not None for v in ram)
+            and self.host.get("ram_available_mib") is not None
+        ):
+            over = (
+                sum(ram) - self.host["ram_available_mib"] + settings["ram_headroom_mib"]
+            )
+            if over > 0:
+                warnings.append(f"System RAM: {over / 1024:.1f} GiB over budget")
         plan = {
             "deployments": [
                 {
@@ -444,6 +439,18 @@ class Manager:
             "errors": errors,
             "warnings": warnings,
             "estimates": estimates,
+            "resources": resources.preview(
+                self,
+                [
+                    {
+                        "name": d["name"],
+                        "gpu": d["gpu"],
+                        "configuration": d["profile_snapshot"],
+                    }
+                    for d in selected
+                    if d["state"] not in ACTIVE
+                ],
+            ),
             "stops": authorized_stops,
             "plan_token": identity(plan),
             "impact": "Stops lose KV caches. Failed replacement launches attempt to restore stopped deployments.",
@@ -488,12 +495,6 @@ class Manager:
             raise Conflict("; ".join(check["errors"]))
         if any(self.inflight.get(i, 0) for i in authorized_stops or []):
             raise Conflict("Deployment has active requests")
-        if (
-            check["warnings"]
-            and not override
-            and not all(self.store.get("deployment", i)["allow_uncertain"] for i in ids)
-        ):
-            raise Conflict("Uncertain memory estimates require explicit override")
         stopped, started = [], []
         unit = self.unit(ids[0])
         activation = self.store.put(
@@ -516,7 +517,7 @@ class Manager:
                 if d["state"] in ACTIVE:
                     stopped.append(i)
                     await self._stop(i, "Authorized deployment switch")
-            # All reservations are committed before any launch side effect.
+            # Commit lifecycle ownership before any launch side effect; no memory reservation.
             with self.store.transaction() as c:
                 for i in ids:
                     d = self.store.get("deployment", i, c)
@@ -529,7 +530,7 @@ class Manager:
                     )
                     d.update(
                         state="QUEUED",
-                        reservation_active=check["estimates"][i]["reservation_mib"],
+                        session_id=None,
                         failure_reason=None,
                     )
                     self.store.put("deployment", d, historical=False, c=c)
@@ -538,7 +539,6 @@ class Manager:
                         {
                             "from": "VALIDATING",
                             "to": "QUEUED",
-                            "reservation_mib": d["reservation_active"],
                         },
                         i,
                         c,
@@ -559,6 +559,9 @@ class Manager:
             )
             for i in reversed(started):
                 await self._stop(i, "Launch rollback", force=True)
+                self.finish_session(
+                    self.store.get("deployment", i), "failed", redact(str(exc))
+                )
                 self.transition(i, "VALIDATING")
                 self.transition(i, "FAILED", redact(str(exc)))
             for i in stopped:
@@ -568,9 +571,7 @@ class Manager:
                     self.transition(
                         i,
                         "QUEUED",
-                        reservation_active=self.estimate(
-                            self.store.get("deployment", i)
-                        )["reservation_mib"],
+                        session_id=None,
                     )
                     await self._start(i)
                 except Exception as restore_error:
@@ -631,7 +632,7 @@ class Manager:
                 "activation_id": activation_id,
                 "deployment_id": ident,
                 "deployment_snapshot": d,
-                "profile_hash": identity(p),
+                "profile_hash": resources.profile_hash(p, a, r, d["gpu"]),
                 "runtime_identity": r,
                 "artifact_identity": a,
                 "argv": spec["argv"],
@@ -660,27 +661,35 @@ class Manager:
             pid=proc.pid,
             pid_started=psutil.Process(proc.pid).create_time(),
         )
-        self.spawn(self.capture_log(ident, proc, folder / "runtime.log"))
+        log_task = self.spawn(self.capture_log(ident, proc, folder / "runtime.log"))
         deadline = time.monotonic() + d["queue_timeout"]
         while time.monotonic() < deadline:
             if proc.returncode is not None:
+                if log_task:
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(asyncio.shield(log_task), 1)
                 raise RuntimeError(
-                    f"Runtime exited {processes.exit_reason(proc.returncode)}; inspect deployment logs"
+                    self.engine_failure(
+                        d | {"session_id": session["id"]}, proc.returncode
+                    )
                 )
             settings = self.settings()
             gpu = next(
                 (g for g in self.host.get("gpus", []) if g["index"] == d["gpu"]), None
             )
             if gpu and (
-                gpu["free_mib"] < settings["gpu_headroom_mib"]
+                (
+                    gpu.get("free_mib") is not None
+                    and gpu["free_mib"] < settings["gpu_headroom_mib"]
+                )
                 or (gpu.get("temperature") or 0) > settings["temperature_limit"]
             ):
                 raise RuntimeError(
                     "Launch aborted: measured GPU headroom/temperature crossed the desktop safety gate"
                 )
             if (
-                self.host.get("ram_available_mib", float("inf"))
-                < settings["ram_headroom_mib"]
+                self.host.get("ram_available_mib") is not None
+                and self.host["ram_available_mib"] < settings["ram_headroom_mib"]
             ):
                 raise RuntimeError(
                     "Launch aborted: measured RAM below desktop safety gate"
@@ -720,6 +729,30 @@ class Manager:
             path.replace(path.with_suffix(".previous.log"))
         with path.open("a", encoding="utf-8") as f:
             f.write(f"{time.time():.3f} {line}\n")
+
+    def engine_failure(self, d, returncode=None):
+        path = self.store.root / "deployments" / d["id"] / "runtime.log"
+        tail = ""
+        with contextlib.suppress(OSError):
+            with path.open("rb") as stream:
+                stream.seek(max(0, path.stat().st_size - 4096))
+                tail = redact(stream.read().decode(errors="replace").strip())
+        if d.get("session_id"):
+            started_at = self.store.get("session", d["session_id"])["started_at"]
+            current = []
+            for line in tail.splitlines():
+                with contextlib.suppress(ValueError):
+                    if float(line.partition(" ")[0]) >= started_at - 0.001:
+                        current.append(line)
+            tail = "\n".join(current)
+        status = (
+            processes.exit_reason(returncode)
+            if returncode is not None
+            else "(exit status unavailable)"
+        )
+        return f"Runtime exited {status}" + (
+            f"\n{tail}" if tail else "; no engine output captured"
+        )
 
     async def ready(self, d):
         try:
@@ -930,6 +963,12 @@ class Manager:
                         data["gpu_mib"] = telemetry.gpu_process_usage(
                             self.host, data["pids"]
                         )
+                        data["gpu_by_device_mib"] = {
+                            str(g["index"]): telemetry.gpu_process_usage(
+                                self.host, data["pids"], g["index"]
+                            )
+                            for g in self.host.get("gpus", [])
+                        }
                         self.host.setdefault("deployments", {})[d["id"]] = data
                         if d.get("session_id"):
                             session = self.store.get("session", d["session_id"])
@@ -939,7 +978,7 @@ class Manager:
                             ):
                                 if measurement is not None:
                                     session[field] = max(
-                                        session.get(field, 0), measurement
+                                        session.get(field) or 0, measurement
                                     )
                             self.store.put("session", session, historical=False)
                     if d["state"] in {"READY", "DEGRADED"} and not self.lock.locked():
@@ -952,11 +991,18 @@ class Manager:
                                 self.transition(
                                     d["id"],
                                     "FAILED",
-                                    "Runtime process exited",
+                                    self.engine_failure(
+                                        d,
+                                        getattr(
+                                            self.processes.get(d["id"]),
+                                            "returncode",
+                                            None,
+                                        ),
+                                    ),
                                     reservation_active=0,
                                     pid=None,
                                 )
-                                self.finish_session(d, "failed", "Runtime exited")
+                                self.finish_session(d, "failed", self.engine_failure(d))
                                 continue
                             ready = await self.ready(d)
                             if ready != (d["state"] == "READY"):
@@ -990,13 +1036,16 @@ class Manager:
                         await self.unload_idle()
                 # Admission is not physical isolation: alert on pressure, never silently evict pinned models.
                 settings = self.settings()
-                pressure = (
-                    any(
-                        g["free_mib"] < settings["gpu_headroom_mib"]
-                        or (g["temperature"] or 0) > settings["temperature_limit"]
-                        for g in self.host["gpus"]
+                pressure = any(
+                    (
+                        g.get("free_mib") is not None
+                        and g["free_mib"] < settings["gpu_headroom_mib"]
                     )
-                    or self.host["ram_available_mib"] < settings["ram_headroom_mib"]
+                    or (g["temperature"] or 0) > settings["temperature_limit"]
+                    for g in self.host["gpus"]
+                ) or (
+                    self.host.get("ram_available_mib") is not None
+                    and self.host["ram_available_mib"] < settings["ram_headroom_mib"]
                 )
                 self.host["pressure"] = pressure
                 if pressure != self.was_pressure:
@@ -1035,6 +1084,7 @@ class Manager:
                         (self.host["ts"], encode(self.host)),
                     )
                     if time.time() - last_cleanup > 60:
+                        resource_history.prune(self.store, settings, c)
                         cutoff = time.time() - settings["retention_days"] * 86400
                         # Preserve memory and thermal extremes, rather than an arbitrary first sample.
                         c.execute(
