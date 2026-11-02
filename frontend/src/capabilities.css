@@ -1,7 +1,6 @@
 .capabilities-panel {
-  margin: 20px 0;
-  padding: 20px 0;
-  border-block: 1px solid var(--border);
+  margin: 0;
+  padding: 0;
   min-width: 0;
 }
 .capability-heading {

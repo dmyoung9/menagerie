@@ -27,8 +27,8 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
   ArrowUpRight,
-  Database,
-  Layers,
+  CpuAi,
+  Server,
   Plus,
   RefreshCw,
   Settings,
@@ -75,8 +75,8 @@ import type {
 
 const navigation = [
   { id: 'overview', label: 'Overview', icon: Activity },
-  { id: 'models', label: 'Models', icon: Database },
-  { id: 'deployments', label: 'Deployments', icon: Layers },
+  { id: 'models', label: 'Models', icon: CpuAi },
+  { id: 'deployments', label: 'Deployments', icon: Server },
   { id: 'activity', label: 'Activity', icon: RefreshCw },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
@@ -845,11 +845,11 @@ export default function App() {
                     <Tabs
                       items={[
                         `Enabled (${enabled.length})`,
-                        `Inactive (${inactive.length})`,
+                        `Disabled (${inactive.length})`,
                       ]}
                       value={
                         depView === 'inactive'
-                          ? `Inactive (${inactive.length})`
+                          ? `Disabled (${inactive.length})`
                           : `Enabled (${enabled.length})`
                       }
                       onChange={(t) =>

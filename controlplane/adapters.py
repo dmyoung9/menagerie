@@ -84,19 +84,61 @@ FIELDS = {
         "default": 1,
         "label": "Temperature",
     },
+    "top-p": {"type": "number", "min": 0, "max": 1, "label": "Top-p"},
+    "top-k": {"type": "integer", "min": 0, "max": 1048576, "label": "Top-k"},
+    "min-p": {"type": "number", "min": 0, "max": 1, "label": "Min-p"},
+    "presence-penalty": {
+        "type": "number",
+        "min": -2,
+        "max": 2,
+        "label": "Presence penalty",
+    },
+    "repeat-penalty": {
+        "type": "number",
+        "min": 0,
+        "max": 10,
+        "label": "Repetition penalty",
+    },
+    "spec-type": {"type": "string", "label": "Speculative decoding type (MTP)"},
+    "spec-draft-model": {"type": "string", "label": "MTP / draft model path"},
+    "model-draft": {"type": "string", "label": "Draft model path (legacy alias)"},
+    "spec-draft-n-max": {
+        "type": "integer",
+        "min": 1,
+        "max": 1048576,
+        "label": "Maximum draft tokens",
+    },
+    "spec-draft-n-min": {
+        "type": "integer",
+        "min": 0,
+        "max": 1048576,
+        "label": "Minimum draft tokens",
+    },
+    "draft-max": {
+        "type": "integer",
+        "min": 1,
+        "max": 1048576,
+        "label": "Maximum draft tokens (legacy)",
+    },
+    "draft-min": {
+        "type": "integer",
+        "min": 0,
+        "max": 1048576,
+        "label": "Minimum draft tokens (legacy)",
+    },
     "reasoning-budget": {
         "type": "integer",
         "min": -1,
         "max": 1048576,
         "default": 4096,
-        "label": "Reasoning budget",
+        "label": "Default reasoning budget",
     },
     "n-cpu-moe": {
         "type": "integer",
         "min": 0,
         "max": 256,
         "default": 0,
-        "label": "CPU expert layers (adapter-specific)",
+        "label": "MoE expert layers on CPU",
     },
 }
 OWNED = {
@@ -268,8 +310,18 @@ def option_schema(runtime, flags=None):
         flags if flags is not None else runtime.get("capabilities", {}).get("flags", [])
     )
     if runtime["engine"] in ("llama.cpp", "prism"):
+        retired = {
+            legacy
+            for legacy, modern in (
+                ("draft-max", "spec-draft-n-max"),
+                ("draft-min", "spec-draft-n-min"),
+            )
+            if modern in flags
+        }
         return {
-            k: v | {"restart_required": True} for k, v in FIELDS.items() if k in flags
+            k: v | {"restart_required": True}
+            for k, v in FIELDS.items()
+            if k in flags and k not in retired
         }
     return (
         {
@@ -487,6 +539,18 @@ def validate_profile(profile, artifact, runtime, selection=None):
         errors.append("Context pool must provide at least 32 tokens per parallel slot")
     if number("ubatch-size", 256) > number("batch-size", 512):
         errors.append("Physical batch must not exceed batch size")
+    for minimum, maximum in (
+        ("spec-draft-n-min", "spec-draft-n-max"),
+        ("draft-min", "draft-max"),
+    ):
+        if (
+            minimum in config
+            and maximum in config
+            and number(minimum, 0) > number(maximum, 0)
+        ):
+            errors.append(f"{minimum} must not exceed {maximum}")
+    if type(layers) is int and number("n-cpu-moe", 0) > layers:
+        errors.append("CPU expert layers must not exceed the model layer count")
     gpu_layers = config.get("gpu-layers", "all")
     if gpu_layers != "all":
         if not re.fullmatch(r"\d+", str(gpu_layers)) or (

@@ -62,12 +62,13 @@ def state(unit):
     return "STOPPED"
 
 
-def describe(unit, settings, inflight=None):
+def describe(unit, settings, inflight=None, request_totals=None):
     value = state(unit)
     members = [
         d
         | {
             "inflight": (inflight or {}).get(d["id"], 0),
+            "historical_requests": (request_totals or {}).get(d["id"], 0),
             "lifecycle": lifecycle.describe(d, settings)
             | {"serving": lifecycle.visible(d | {"state": value}, settings)},
         }
@@ -85,5 +86,6 @@ def describe(unit, settings, inflight=None):
     return effective | {
         "members": members,
         "inflight": sum((inflight or {}).get(d["id"], 0) for d in members),
+        "historical_requests": sum(d["historical_requests"] for d in members),
         "lifecycle": derived,
     }

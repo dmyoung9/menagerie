@@ -227,6 +227,7 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     unit_id: opt(d.string),
     lifecycle: opt(lifecycle),
     inflight: opt(d.number),
+    historical_requests: opt(d.number),
     template_override: opt(d.nullable(templateSelection)),
   })(value, path);
 export const servingDeployment: d.Decoder<T.ServingDeployment> = (
@@ -269,6 +270,7 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
     revision: d.number,
     lifecycle: opt(lifecycle),
     inflight: opt(d.number),
+    historical_requests: opt(d.number),
   })(value, path);
   return { ...common, multi_model: true, members, member_ids };
 };

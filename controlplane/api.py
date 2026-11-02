@@ -112,8 +112,9 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         return result
 
     def serving_rows():
+        totals = store.request_totals()
         return [
-            deployment_sets.describe(u, manager.settings(), manager.inflight)
+            deployment_sets.describe(u, manager.settings(), manager.inflight, totals)
             for u in deployment_sets.units(store)
         ]
 
@@ -1472,6 +1473,11 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 c.execute(
                     "INSERT INTO requests VALUES(?,?,?,?)",
                     (correlation, time.time(), d["id"], encode(record)),
+                )
+                c.execute(
+                    "INSERT INTO request_totals VALUES(?,1) "
+                    "ON CONFLICT(deployment_id) DO UPDATE SET completed=completed+1",
+                    (d["id"],),
                 )
             if d.get("session_id"):
                 with store.transaction() as c:

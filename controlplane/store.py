@@ -47,6 +47,18 @@ class Store:
               data TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS requests_time ON requests(ts);
             CREATE INDEX IF NOT EXISTS events_time ON events(ts);
+            CREATE TABLE IF NOT EXISTS request_totals(
+              deployment_id TEXT PRIMARY KEY, completed INTEGER NOT NULL);
+            INSERT INTO request_totals
+              SELECT deployment_id, max(completed) FROM (
+                SELECT deployment_id, count(*) AS completed FROM requests GROUP BY deployment_id
+                UNION ALL
+                SELECT json_extract(data,'$.deployment_id'), sum(coalesce(json_extract(data,'$.request_count'),0))
+                FROM objects WHERE kind='session' AND json_extract(data,'$.deployment_id') IS NOT NULL
+                GROUP BY json_extract(data,'$.deployment_id')
+              ) GROUP BY deployment_id
+              ON CONFLICT(deployment_id) DO UPDATE SET completed=max(completed,excluded.completed);
+            INSERT OR IGNORE INTO schema_version VALUES(2);
             """)
         self.path.chmod(0o600)
 
@@ -159,3 +171,12 @@ class Store:
                 dest.close()
         path.chmod(0o600)
         return path
+
+    def request_totals(self):
+        with self.connect() as c:
+            return {
+                r[0]: r[1]
+                for r in c.execute(
+                    "SELECT deployment_id, completed FROM request_totals"
+                )
+            }

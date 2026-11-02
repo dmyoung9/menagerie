@@ -8,6 +8,8 @@ import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Field } from './ui';
+import type { ReactNode } from 'react';
+import { SettingsSection } from '@/components/settings-section';
 import { memory } from '@/lib/formatters';
 import type {
   DeploymentDraft,
@@ -24,54 +26,64 @@ export function Placement({
   value,
   change,
   host = {},
+  part = 'all',
 }: {
   value: PlacementValue;
   change: (v: PlacementValue) => void;
   host?: HostSnapshot;
+  part?: 'all' | 'gpu' | 'network';
 }) {
   return (
     <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-      <Field label="GPU">
-        {host.gpus?.length ? (
-          <NativeSelect
-            value={value.gpu}
-            onChange={(e) => change({ ...value, gpu: Number(e.target.value) })}
-          >
-            {!host.gpus.some((g: GpuSnapshot) => g.index === value.gpu) && (
-              <NativeSelectOption value={value.gpu}>
-                GPU {value.gpu} (unavailable)
-              </NativeSelectOption>
-            )}
-            {host.gpus.map((g: GpuSnapshot) => (
-              <NativeSelectOption key={g.index} value={g.index}>
-                {g.name} · GPU {g.index} ·{' '}
-                {typeof g.free_mib === 'number'
-                  ? memory(g.free_mib) + ' free'
-                  : 'capacity unknown'}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        ) : (
+      {part !== 'network' && (
+        <Field label="GPU">
+          {host.gpus?.length ? (
+            <NativeSelect
+              value={value.gpu}
+              onChange={(e) =>
+                change({ ...value, gpu: Number(e.target.value) })
+              }
+            >
+              {!host.gpus.some((g: GpuSnapshot) => g.index === value.gpu) && (
+                <NativeSelectOption value={value.gpu}>
+                  GPU {value.gpu} (unavailable)
+                </NativeSelectOption>
+              )}
+              {host.gpus.map((g: GpuSnapshot) => (
+                <NativeSelectOption key={g.index} value={g.index}>
+                  {g.name} · GPU {g.index} ·{' '}
+                  {typeof g.free_mib === 'number'
+                    ? memory(g.free_mib) + ' free'
+                    : 'capacity unknown'}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ) : (
+            <Input
+              type="number"
+              required
+              min={0}
+              aria-label="GPU index"
+              value={value.gpu}
+              onChange={(e) =>
+                change({ ...value, gpu: Number(e.target.value) })
+              }
+            />
+          )}
+        </Field>
+      )}
+      {part !== 'gpu' && (
+        <Field label="Private port">
           <Input
             type="number"
             required
-            min={0}
-            aria-label="GPU index"
-            value={value.gpu}
-            onChange={(e) => change({ ...value, gpu: Number(e.target.value) })}
+            min={1024}
+            max={65535}
+            value={value.port}
+            onChange={(e) => change({ ...value, port: Number(e.target.value) })}
           />
-        )}
-      </Field>
-      <Field label="Private port">
-        <Input
-          type="number"
-          required
-          min={1024}
-          max={65535}
-          value={value.port}
-          onChange={(e) => change({ ...value, port: Number(e.target.value) })}
-        />
-      </Field>
+        </Field>
+      )}
     </FieldGroup>
   );
 }
@@ -161,12 +173,19 @@ export function RuntimeSettings({
   change,
   host = {},
   recommendation = {},
+  section,
+  before,
+  after,
 }: {
   schema: Record<string, RuntimeField>;
   value: Record<string, JsonValue>;
   change: (value: Record<string, JsonValue>) => void;
   host?: HostSnapshot;
   recommendation?: RuntimeRecommendation;
+  section?:
+    'model' | 'memory' | 'performance' | 'generation' | 'reasoning' | 'other';
+  before?: ReactNode;
+  after?: ReactNode;
 }) {
   const update = (key: string, v: JsonValue | undefined) => {
     const next = { ...value };
@@ -174,34 +193,54 @@ export function RuntimeSettings({
     else next[key] = v;
     change(next);
   };
-  const groups = [
-    ['Context & concurrency', ['ctx-size', 'max-model-len', 'parallel']],
+  const groups: [string, string, string[]][] = [
     [
-      'Memory & GPU',
-      ['gpu-layers', 'cache-type-k', 'cache-type-v', 'flash-attn', 'n-cpu-moe'],
+      'model',
+      'Model & engine',
+      [
+        'mmproj',
+        'spec-type',
+        'spec-draft-model',
+        'model-draft',
+        'spec-draft-n-max',
+        'spec-draft-n-min',
+        'draft-max',
+        'draft-min',
+      ],
     ],
-    ['Performance', ['threads', 'threads-batch', 'batch-size', 'ubatch-size']],
     [
+      'memory',
+      'Memory & placement',
+      [
+        'ctx-size',
+        'max-model-len',
+        'parallel',
+        'gpu-layers',
+        'n-cpu-moe',
+        'cache-type-k',
+        'cache-type-v',
+        'gpu-memory-utilization',
+      ],
+    ],
+    [
+      'performance',
+      'Performance',
+      ['flash-attn', 'threads', 'threads-batch', 'batch-size', 'ubatch-size'],
+    ],
+    [
+      'generation',
       'Generation',
-      Object.keys(schema).filter(
-        (k) =>
-          ![
-            'ctx-size',
-            'max-model-len',
-            'parallel',
-            'gpu-layers',
-            'cache-type-k',
-            'cache-type-v',
-            'flash-attn',
-            'n-cpu-moe',
-            'threads',
-            'threads-batch',
-            'batch-size',
-            'ubatch-size',
-          ].includes(k),
-      ),
+      ['temp', 'top-p', 'top-k', 'min-p', 'presence-penalty', 'repeat-penalty'],
     ],
-  ] as [string, string[]][];
+    ['reasoning', 'Reasoning', ['reasoning-budget']],
+  ];
+  groups.push([
+    'other',
+    'Other engine controls',
+    Object.keys(schema).filter(
+      (k) => !groups.some(([, , keys]) => keys.includes(k)),
+    ),
+  ]);
   function control(key: string) {
     const f = schema[key],
       current = value[key],
@@ -528,15 +567,46 @@ export function RuntimeSettings({
   return (
     <div className="runtime-settings">
       {groups
-        .filter(([, keys]) => keys.some((k) => schema[k]))
-        .map(([title, keys], index) => (
-          <details key={title} open={index === 0} className="settings-section">
-            <summary>{title}</summary>
-            <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-              {keys.filter((k) => schema[k]).map(control)}
-            </FieldGroup>
-          </details>
-        ))}
+        .filter(
+          ([name, , keys]) =>
+            (!section || section === name) &&
+            (keys.some((k) => schema[k]) || before || after),
+        )
+        .map(([name, title, keys]) => {
+          const fields = (
+            <>
+              {before}
+              {name === 'model' && schema['spec-type'] && (
+                <p className="muted">
+                  MTP requires compatible weights and engine support. Set the
+                  engine's MTP type (for example, draft-mtp); leave blank to
+                  keep its default.
+                </p>
+              )}
+              <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+                {keys
+                  .filter(
+                    (k) =>
+                      schema[k] &&
+                      !(
+                        k === 'model-draft' &&
+                        schema['spec-draft-model'] &&
+                        value[k] === undefined
+                      ),
+                  )
+                  .map(control)}
+              </FieldGroup>
+              {after}
+            </>
+          );
+          return section === 'model' || section === 'reasoning' ? (
+            <div key={name}>{fields}</div>
+          ) : (
+            <SettingsSection key={name} name={name} title={title}>
+              {fields}
+            </SettingsSection>
+          );
+        })}
     </div>
   );
 }

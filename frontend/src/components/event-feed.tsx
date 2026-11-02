@@ -2,6 +2,9 @@ import { Status, date, eventText } from '@/ui';
 import { activityEntries } from '@/lib/activity';
 import { OperationProgress } from './operation-progress';
 import type { Deployment, Job, OperationEvent } from '@/types';
+import { Server, Logs } from 'lucide-react';
+import { buttonVariants } from './ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
 
 export function EventFeed({
   events,
@@ -39,11 +42,32 @@ export function EventFeed({
               className="event-links"
               aria-label={`Resources for ${entry.title}`}
             >
-              {entry.links.map((link) => (
-                <a key={link.href} href={link.href}>
-                  {link.label}
-                </a>
-              ))}
+              {entry.links.map((link) =>
+                link.label === 'Deployment' || link.label === 'Logs' ? (
+                  <Tooltip key={link.href}>
+                    <TooltipTrigger
+                      role="link"
+                      aria-label={link.label}
+                      render={
+                        <a
+                          className={buttonVariants({
+                            variant: 'ghost',
+                            size: 'icon',
+                          })}
+                          href={link.href}
+                        />
+                      }
+                    >
+                      {link.label === 'Deployment' ? <Server /> : <Logs />}
+                    </TooltipTrigger>
+                    <TooltipContent>{link.label}</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <a key={link.href} href={link.href}>
+                    {link.label}
+                  </a>
+                ),
+              )}
             </nav>
           </div>
           {entry.steps.length > 1 && (

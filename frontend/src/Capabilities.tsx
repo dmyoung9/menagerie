@@ -4,11 +4,17 @@ import {
 } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { FieldSet, FieldLegend } from '@/components/ui/field';
-import { useId, useState } from 'react';
-import { AudioLines, Check, Image, Video, Wrench } from 'lucide-react';
+import { useId, useState, type ReactNode } from 'react';
+import {
+  AudioLines,
+  Brain,
+  Check,
+  Image,
+  Type,
+  Video,
+  Wrench,
+} from 'lucide-react';
 import { Field } from './ui';
 import { jsonObject } from './contracts';
 import type {
@@ -27,6 +33,32 @@ import {
   setReasoningOptions,
 } from './capabilityOptions';
 import './capabilities.css';
+
+export function OutputLimit({
+  catalog,
+  change,
+}: {
+  catalog: ModelCatalog;
+  change: (catalog: ModelCatalog) => void;
+}) {
+  const model = catalog.model || {};
+  return (
+    <Field label="Max output tokens">
+      <Input
+        type="number"
+        min={1}
+        value={model.limit?.output ?? ''}
+        placeholder="Default"
+        onChange={(e) => {
+          const limit = { ...model.limit };
+          if (e.target.value) limit.output = Number(e.target.value);
+          else delete limit.output;
+          change({ ...catalog, model: { ...model, limit } });
+        }}
+      />
+    </Field>
+  );
+}
 
 function RequestMapping({
   preset,
@@ -138,12 +170,16 @@ export function Capabilities({
   hints,
   runtime,
   valid,
+  reasoningControls,
+  showOutputLimit = true,
 }: {
   catalog: ModelCatalog;
   change: (v: ModelCatalog) => void;
   hints?: DiscoveredCapabilities;
   runtime?: Partial<Runtime>;
   valid: (key: string, ok: boolean) => void;
+  reasoningControls?: ReactNode;
+  showOutputLimit?: boolean;
 }) {
   const model = catalog.model || {};
   const caps = {
@@ -163,13 +199,20 @@ export function Capabilities({
   const unavailable = options.filter(
     (p) => p.id !== 'default' && !Object.keys(p.body || {}).length,
   );
-  const [advanced, setAdvanced] = useState(false);
   const features = [
+    { id: 'text', label: 'Text', icon: Type },
     { id: 'tools', label: 'Tools', icon: Wrench },
     { id: 'image', label: 'Images', icon: Image },
     { id: 'audio', label: 'Audio', icon: AudioLines },
     { id: 'video', label: 'Video', icon: Video },
+    { id: 'reasoning', label: 'Reasoning', icon: Brain },
   ];
+  const selected = (id: string) =>
+    id === 'tools'
+      ? caps.tools
+      : id === 'reasoning'
+        ? typeof caps.reasoning === 'object' && !!caps.reasoning.supported
+        : caps.input.includes(id);
   return (
     <section
       className="capabilities-panel"
@@ -184,35 +227,76 @@ export function Capabilities({
         variant="outline"
         className="flex-wrap"
         aria-label="Input capabilities"
-        value={features
-          .filter((f) =>
-            f.id === 'tools' ? caps.tools : caps.input.includes(f.id),
-          )
-          .map((f) => f.id)}
-        onValueChange={(next) =>
+        value={features.filter((f) => selected(f.id)).map((f) => f.id)}
+        onValueChange={(next) => {
+          const input = [
+            ...caps.input.filter(
+              (id: string) => !features.some((f) => f.id === id),
+            ),
+            ...next.filter((id) => id !== 'tools' && id !== 'reasoning'),
+          ];
+          valid('input-formats', input.length > 0);
           update({
             tools: next.includes('tools'),
-            input: [
-              ...caps.input.filter(
-                (id: string) => !features.some((f) => f.id === id),
-              ),
-              ...next.filter((id) => id !== 'tools'),
-            ],
-          })
-        }
+            reasoning: {
+              ...(typeof caps.reasoning === 'object' ? caps.reasoning : {}),
+              supported: next.includes('reasoning'),
+            },
+            input,
+          });
+        }}
       >
         {features.map(({ id, label, icon: Icon }) => {
-          const selected =
-            id === 'tools' ? caps.tools : caps.input.includes(id);
           return (
             <ToggleGroupItem key={id} value={id}>
               <Icon />
               {label}
-              {selected && <Check />}
+              {selected(id) && <Check />}
             </ToggleGroupItem>
           );
         })}
       </ToggleGroup>
+      {!caps.input.length && (
+        <p className="error-text" role="alert">
+          Select at least one input format.
+        </p>
+      )}
+      <FieldSet className="output-capabilities">
+        <FieldLegend>Output formats</FieldLegend>
+        <ToggleGroup
+          multiple
+          variant="outline"
+          className="flex-wrap"
+          aria-label="Output formats"
+          value={caps.output}
+          onValueChange={(next) => {
+            if (next.length)
+              update({
+                output: [
+                  ...caps.output.filter(
+                    (id) => !['text', 'image', 'audio', 'video'].includes(id),
+                  ),
+                  ...next,
+                ],
+              });
+          }}
+        >
+          {features
+            .filter((f) => ['text', 'image', 'audio', 'video'].includes(f.id))
+            .map(({ id, icon: Icon }) => (
+              <ToggleGroupItem
+                key={id}
+                value={id}
+                disabled={caps.output.length === 1 && caps.output.includes(id)}
+              >
+                <Icon />
+                {reasoningLabel(id)}
+                {caps.output.includes(id) && <Check />}
+              </ToggleGroupItem>
+            ))}
+        </ToggleGroup>
+      </FieldSet>
+      {showOutputLimit && <OutputLimit catalog={catalog} change={change} />}
       <div className="capability-heading reasoning-heading">
         <h3>Reasoning options</h3>
         <span>Select to expose</span>
@@ -250,52 +334,15 @@ export function Capabilities({
           {unavailable.length === 4
             ? 'Reasoning controls not detected.'
             : `${unavailable.map((p) => reasoningLabel(p.id)).join(', ')} not configured.`}{' '}
-          <Button
-            variant="ghost"
-            type="button"
-            onClick={() => setAdvanced(true)}
-          >
-            Set up
-          </Button>
+          Configure the controls below.
         </p>
       )}
-      <div className="capability-limit">
-        <Field label="Max output tokens">
-          <Input
-            type="number"
-            min={1}
-            value={model.limit?.output ?? ''}
-            placeholder="Default"
-            onChange={(e) => {
-              const limit = { ...model.limit };
-              if (e.target.value) limit.output = Number(e.target.value);
-              else delete limit.output;
-              change({ ...catalog, model: { ...model, limit } });
-            }}
-          />
-        </Field>
-      </div>
-      <details
-        className="capability-advanced"
-        open={advanced}
-        onToggle={(e) => setAdvanced(e.currentTarget.open)}
-      >
-        <summary>Advanced capabilities</summary>
+      <div className="capability-advanced">
         <p className="capability-hint">
           Only configure controls your engine supports. Default leaves its
           behavior unchanged; Instant must turn thinking off.
         </p>
-        <label className="check">
-          <Checkbox
-            checked={
-              typeof caps.reasoning === 'object' && !!caps.reasoning.supported
-            }
-            onCheckedChange={(checked) =>
-              update({ reasoning: { supported: checked } })
-            }
-          />
-          Model returns reasoning
-        </label>
+        {reasoningControls}
         <div className="reasoning-mappings">
           {options
             .filter((p) => p.id !== 'default')
@@ -323,45 +370,7 @@ export function Capabilities({
               />
             ))}
         </div>
-        <FieldSet className="output-capabilities">
-          <FieldLegend>Output formats</FieldLegend>
-          <ToggleGroup
-            multiple
-            variant="outline"
-            className="flex-wrap"
-            aria-label="Output formats"
-            value={caps.output}
-            onValueChange={(next) => {
-              if (next.length) update({ output: next });
-            }}
-          >
-            {['text', 'image', 'audio', 'video'].map((m) => (
-              <ToggleGroupItem
-                key={m}
-                value={m}
-                disabled={caps.output.length === 1 && caps.output.includes(m)}
-              >
-                {reasoningLabel(m)}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-        </FieldSet>
-        {hints && (
-          <div className="capability-evidence">
-            <span>Model metadata</span>
-            <p>
-              {hints.evidence?.join('; ') ||
-                'No conclusive capability metadata.'}
-            </p>
-            {!!hints.dependencies?.length && (
-              <p>
-                Companion candidates:{' '}
-                {hints.dependencies?.map((d) => d.name).join(', ')}
-              </p>
-            )}
-          </div>
-        )}
-      </details>
+      </div>
     </section>
   );
 }

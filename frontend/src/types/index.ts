@@ -196,6 +196,7 @@ export type Deployment = {
   unit_id?: string;
   lifecycle?: DeploymentLifecycle;
   inflight?: number;
+  historical_requests?: number;
   template_override?: TemplateSelection | null;
 };
 export type StandaloneServingDeployment = Deployment & {

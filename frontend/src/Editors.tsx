@@ -7,14 +7,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { SettingsSection } from '@/components/settings-section';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import { Field, JsonEdit, Menu, type Registry } from './ui';
 import { EngineCatalog } from './EngineCatalog';
 import { Duration, Placement, RuntimeSettings } from './FormControls';
 import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
-import { Capabilities } from './Capabilities';
+import { Capabilities, OutputLimit } from './Capabilities';
 import { useConfirmation } from '@/hooks/use-confirmation';
 import { readApi } from './ui';
 import {
@@ -48,12 +49,16 @@ export function ConfigurationFields({
   set,
   onValid,
   recommendation,
+  modelFields,
+  placementFields,
 }: {
   value: ProfileDraft;
   data: Registry;
   set: (value: ProfileDraft) => void;
   onValid: (valid: boolean) => void;
   recommendation?: RuntimeRecommendation;
+  modelFields?: ReactNode;
+  placementFields?: ReactNode;
 }) {
   const { confirm, confirmation } = useConfirmation();
   const runtime = data.runtimes?.find((r) => r.id === value.runtime_id);
@@ -88,6 +93,11 @@ export function ConfigurationFields({
     };
   if (schema['gpu-layers'] && runtime?.managed?.backend === 'cpu')
     schema['gpu-layers'] = { ...schema['gpu-layers'], cpu_only: true };
+  if (schema['n-cpu-moe'] && layers)
+    schema['n-cpu-moe'] = {
+      ...schema['n-cpu-moe'],
+      max: Math.min(schema['n-cpu-moe'].max ?? layers, layers),
+    };
   const [engineHint, setEngineHint] = useState<EngineRecommendation>({}),
     [installing, setInstalling] = useState(false);
   useEffect(() => {
@@ -124,149 +134,190 @@ export function ConfigurationFields({
   if (catalog.model) delete catalog.model.name;
   return (
     <FieldSet className="configuration-fields">
-      <FieldLegend>Model configuration</FieldLegend>
+      <FieldLegend className="sr-only">Model configuration</FieldLegend>
       {confirmation}
-      <Field label="Model">
-        <NativeSelect
-          required
-          value={value.artifact_id || ''}
-          onChange={async (e) => {
-            const id = e.target.value;
-            const next = data.models?.find((m) => m.id === id);
-            if (
-              next &&
-              !runtime?.capabilities?.formats?.includes(next.format)
-            ) {
-              if (
-                !(await confirm(
-                  'This model needs a different engine. Reset engine settings?',
-                ))
-              )
-                return;
-              let hint: EngineRecommendation = {};
-              try {
-                hint = await readApi(
-                  `/api/models/${next!.id}/engine-recommendation`,
-                  engineRecommendation,
-                );
-              } catch {
-                /* Manual selection remains available. */
-              }
-              const compatible = (data.runtimes || []).filter(
-                (r) =>
-                  next.format === 'unknown' ||
-                  r.capabilities?.formats?.includes(next.format),
-              );
-              const engine =
-                compatible.find((r) => r.engine === hint.engine) ||
-                compatible[0];
-              set({
-                ...value,
-                artifact_id: id,
-                runtime_id: engine?.id || '',
-                config: {},
-                raw_args: [],
-              });
-            } else set({ ...value, artifact_id: id });
-          }}
+      <SettingsSection name="model" title="Model & engine">
+        <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Model">
+            <NativeSelect
+              required
+              value={value.artifact_id || ''}
+              onChange={async (e) => {
+                const id = e.target.value;
+                const next = data.models?.find((m) => m.id === id);
+                if (
+                  next &&
+                  !runtime?.capabilities?.formats?.includes(next.format)
+                ) {
+                  if (
+                    !(await confirm(
+                      'This model needs a different engine. Reset engine settings?',
+                    ))
+                  )
+                    return;
+                  let hint: EngineRecommendation = {};
+                  try {
+                    hint = await readApi(
+                      `/api/models/${next!.id}/engine-recommendation`,
+                      engineRecommendation,
+                    );
+                  } catch {
+                    /* Manual selection remains available. */
+                  }
+                  const compatible = (data.runtimes || []).filter(
+                    (r) =>
+                      next.format === 'unknown' ||
+                      r.capabilities?.formats?.includes(next.format),
+                  );
+                  const engine =
+                    compatible.find((r) => r.engine === hint.engine) ||
+                    compatible[0];
+                  set({
+                    ...value,
+                    artifact_id: id,
+                    runtime_id: engine?.id || '',
+                    config: {},
+                    raw_args: [],
+                  });
+                } else set({ ...value, artifact_id: id });
+              }}
+            >
+              {(data.models || []).map((m) => (
+                <NativeSelectOption key={m.id} value={m.id}>
+                  {m.name}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field label="Engine">
+            <NativeSelect
+              required
+              value={value.runtime_id || ''}
+              onChange={async (e) => {
+                const id = e.target.value;
+                if (
+                  value.runtime_id &&
+                  !(await confirm(
+                    'Change engine? Engine-specific settings and arguments will be reset.',
+                  ))
+                )
+                  return;
+                const selected = engines.find((r) => r.id === id);
+                const schema: Record<string, import('./types').RuntimeField> =
+                  selected?.capabilities?.schema || {};
+                const config: Record<string, JsonValue> = {};
+                for (const [key, field] of Object.entries(schema)) {
+                  if (field.default !== undefined) config[key] = field.default;
+                }
+                if (selected?.managed?.backend === 'cpu')
+                  config['gpu-layers'] = '0';
+                const { context } = artifactLimits(artifact);
+                if (context)
+                  for (const key of ['ctx-size', 'max-model-len'])
+                    if (typeof config[key] === 'number')
+                      config[key] = Math.min(config[key], context);
+                setValidity({});
+                onValid(true);
+                set({ ...value, runtime_id: id, config, raw_args: [] });
+              }}
+            >
+              <NativeSelectOption value="" disabled>
+                Select compatible engine
+              </NativeSelectOption>
+              {engines.map((r) => (
+                <NativeSelectOption key={r.id} value={r.id}>
+                  {r.name}
+                  {engineHint.engine === r.engine ? ' · Recommended' : ''}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+        </FieldGroup>
+        {modelFields}
+        {engineHint.reason && <p className="muted">{engineHint.reason}</p>}
+        <Button
+          variant="outline"
+          type="button"
+          onClick={() => setInstalling(!installing)}
         >
-          {(data.models || []).map((m) => (
-            <NativeSelectOption key={m.id} value={m.id}>
-              {m.name}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </Field>
-      <Field label="Engine">
-        <NativeSelect
-          required
-          value={value.runtime_id || ''}
-          onChange={async (e) => {
-            const id = e.target.value;
-            if (
-              value.runtime_id &&
-              !(await confirm(
-                'Change engine? Engine-specific settings and arguments will be reset.',
-              ))
-            )
-              return;
-            const selected = engines.find((r) => r.id === id);
-            const schema: Record<string, import('./types').RuntimeField> =
-              selected?.capabilities?.schema || {};
-            const config: Record<string, JsonValue> = {};
-            for (const [key, field] of Object.entries(schema)) {
-              if (field.default !== undefined) config[key] = field.default;
-            }
-            if (selected?.managed?.backend === 'cpu')
-              config['gpu-layers'] = '0';
-            const { context } = artifactLimits(artifact);
-            if (context)
-              for (const key of ['ctx-size', 'max-model-len'])
-                if (typeof config[key] === 'number')
-                  config[key] = Math.min(config[key], context);
-            setValidity({});
-            onValid(true);
-            set({ ...value, runtime_id: id, config, raw_args: [] });
-          }}
-        >
-          <NativeSelectOption value="" disabled>
-            Select compatible engine
-          </NativeSelectOption>
-          {engines.map((r) => (
-            <NativeSelectOption key={r.id} value={r.id}>
-              {r.name}
-              {engineHint.engine === r.engine ? ' · Recommended' : ''}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </Field>
-      {engineHint.reason && <p className="muted">{engineHint.reason}</p>}
-      <Button
-        variant="outline"
-        type="button"
-        onClick={() => setInstalling(!installing)}
-      >
-        {installing ? 'Hide engine downloads' : 'Install an engine'}
-      </Button>
-      {installing && (
-        <EngineCatalog
-          runtimes={data.runtimes || []}
-          recommended={engineHint.engine ?? undefined}
-        />
-      )}
-      <RuntimeSettings
-        schema={schema}
-        value={value.config}
-        change={(config) => set({ ...value, config })}
-        host={data.host?.[0]}
-        recommendation={{ gpu_layers_max: layers, ...recommendation }}
-      />
-      {artifact?.metadata?.projector &&
-        runtime?.capabilities?.schema?.mmproj && (
-          <Button
-            variant="outline"
-            type="button"
-            onClick={() =>
-              set({
-                ...value,
-                config: {
-                  ...value.config,
-                  mmproj: artifact.metadata?.projector?.path || '',
-                },
-              })
-            }
-          >
-            Use downloaded projector: {artifact.metadata.projector.name}
-          </Button>
+          {installing ? 'Hide engine downloads' : 'Install an engine'}
+        </Button>
+        {installing && (
+          <EngineCatalog
+            runtimes={data.runtimes || []}
+            recommended={engineHint.engine ?? undefined}
+          />
         )}
-      <Capabilities
-        key={value.artifact_id + ':' + value.runtime_id}
-        catalog={catalog}
-        change={(catalog) => set({ ...value, catalog })}
-        hints={artifact?.discovered_capabilities}
-        runtime={runtime}
-        valid={valid}
-      />
+        <RuntimeSettings
+          section="model"
+          schema={schema}
+          value={value.config}
+          change={(config) => set({ ...value, config })}
+          host={data.host?.[0]}
+          recommendation={{ gpu_layers_max: layers, ...recommendation }}
+        />
+        {artifact?.metadata?.projector &&
+          runtime?.capabilities?.schema?.mmproj && (
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() =>
+                set({
+                  ...value,
+                  config: {
+                    ...value.config,
+                    mmproj: artifact.metadata?.projector?.path || '',
+                  },
+                })
+              }
+            >
+              Use downloaded projector: {artifact.metadata.projector.name}
+            </Button>
+          )}
+      </SettingsSection>
+      {(['memory', 'performance', 'generation', 'other'] as const).map(
+        (section) => (
+          <RuntimeSettings
+            key={section}
+            schema={schema}
+            value={value.config}
+            change={(config) => set({ ...value, config })}
+            host={data.host?.[0]}
+            recommendation={{ gpu_layers_max: layers, ...recommendation }}
+            {...(section === 'memory' ? { before: placementFields } : {})}
+            {...(section === 'generation'
+              ? {
+                  after: (
+                    <OutputLimit
+                      catalog={catalog}
+                      change={(catalog) => set({ ...value, catalog })}
+                    />
+                  ),
+                }
+              : {})}
+            section={section}
+          />
+        ),
+      )}
+      <SettingsSection name="capabilities" title="Capabilities & reasoning">
+        <Capabilities
+          key={value.artifact_id + ':' + value.runtime_id}
+          catalog={catalog}
+          change={(catalog) => set({ ...value, catalog })}
+          hints={artifact?.discovered_capabilities}
+          runtime={runtime}
+          valid={valid}
+          showOutputLimit={false}
+          reasoningControls={
+            <RuntimeSettings
+              section="reasoning"
+              schema={schema}
+              value={value.config}
+              change={(config) => set({ ...value, config })}
+            />
+          }
+        />
+      </SettingsSection>
       <details key={value.runtime_id}>
         <summary>Advanced model settings</summary>
         <JsonEdit
@@ -314,8 +365,11 @@ export function Editor(props: EditorProps) {
   const [value, setValue] = useState<EditorDraft>(initial.value),
     [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [baseline] = useState(() => JSON.stringify(initial.value));
+  const [epoch, setEpoch] = useState(0);
+  const changed =
+    JSON.stringify(value) !== baseline || Object.values(invalid).some(Boolean);
   const navigationGuard = useUnsavedChanges(
-    !!props.embedded && JSON.stringify(value) !== baseline,
+    !!props.embedded && changed,
     !!props.embedded && busy,
   );
   const profile = 'artifact_id' in value ? value : undefined;
@@ -422,6 +476,9 @@ export function Editor(props: EditorProps) {
   );
   return (
     <form
+      className={
+        deployment ? 'configuration-editor resource-editor' : undefined
+      }
       onSubmit={(e) => {
         e.preventDefault();
         if (!Object.values(invalid).some(Boolean)) {
@@ -434,8 +491,77 @@ export function Editor(props: EditorProps) {
       }}
     >
       {navigationGuard}
-      <FieldSet disabled={busy || props.disabled}>
-        {input('name', 'Display name')}
+      {deployment && (
+        <nav
+          aria-label="Configuration sections"
+          className="configuration-jumps"
+        >
+          {(
+            [
+              'identity',
+              'model',
+              'memory',
+              'performance',
+              'generation',
+              'capabilities',
+              'lifecycle',
+              'network',
+            ] as const
+          )
+            .filter(
+              (name) =>
+                name !== 'performance' ||
+                [
+                  'flash-attn',
+                  'threads',
+                  'threads-batch',
+                  'batch-size',
+                  'ubatch-size',
+                ].some(
+                  (key) =>
+                    data.runtimes.find(
+                      (r) => r.id === deployment.configuration?.runtime_id,
+                    )?.capabilities?.schema?.[key],
+                ),
+            )
+            .map((name) => (
+              <Button
+                key={name}
+                variant="ghost"
+                type="button"
+                onClick={(e) => {
+                  const target = e.currentTarget
+                    .closest('form')
+                    ?.querySelector<HTMLElement>(
+                      `[data-settings-section="${name}"]`,
+                    );
+                  target?.scrollIntoView({ block: 'start' });
+                  target?.focus({ preventScroll: true });
+                }}
+              >
+                {
+                  {
+                    identity: 'Identity',
+                    model: 'Model & engine',
+                    memory: 'Memory & placement',
+                    performance: 'Performance',
+                    generation: 'Generation',
+                    capabilities: 'Capabilities & reasoning',
+                    lifecycle: 'Lifecycle',
+                    network: 'Networking',
+                  }[name]
+                }
+              </Button>
+            ))}
+        </nav>
+      )}
+      <FieldSet key={epoch} disabled={busy || props.disabled}>
+        <SettingsSection name="identity" title="Identity">
+          <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {input('name', 'Display name')}
+            {deployment && input('alias', 'API model ID')}
+          </FieldGroup>
+        </SettingsSection>
         {kind === 'profiles' && profile && (
           <>
             {select('artifact_id', data.models || [], 'Model')}
@@ -462,17 +588,6 @@ export function Editor(props: EditorProps) {
         )}
         {kind === 'deployments' && deployment && (
           <>
-            {input('alias', 'API model ID')}
-            {deployment.configuration && (
-              <ChatTemplateSettings
-                label="Chat template"
-                model={data.models.find(
-                  (m) => m.id === deployment.configuration?.artifact_id,
-                )}
-                override={deployment.template_override || null}
-                onChange={(selection) => set('template_override', selection)}
-              />
-            )}
             {deployment.configuration && (
               <ConfigurationFields
                 value={deployment.configuration}
@@ -482,40 +597,84 @@ export function Editor(props: EditorProps) {
                   setInvalid((prev) => ({ ...prev, configuration: !valid }))
                 }
                 recommendation={preview.data?.members?.[0]?.recommendation}
+                modelFields={
+                  <ChatTemplateSettings
+                    label="Chat template"
+                    model={data.models.find(
+                      (m) => m.id === deployment.configuration?.artifact_id,
+                    )}
+                    override={deployment.template_override || null}
+                    onChange={(selection) =>
+                      set('template_override', selection)
+                    }
+                  />
+                }
+                placementFields={
+                  <Placement
+                    part="gpu"
+                    value={deployment}
+                    change={(placement) =>
+                      setValue((previous) =>
+                        decode({ ...previous, ...placement }),
+                      )
+                    }
+                    host={data.host?.[0]}
+                  />
+                }
               />
             )}
-            {deployment.configuration && (
-              <DraftResources preview={preview.data} error={preview.error} />
-            )}
-            {!memberOnly && (
-              <>
-                <Field label="Mode">
-                  <NativeSelect
-                    value={deployment.residency}
-                    onChange={(e) => set('residency', e.target.value)}
-                  >
-                    <NativeSelectOption value="on-demand">
-                      On demand
-                    </NativeSelectOption>
-                    <NativeSelectOption value="pinned">
-                      Pinned
-                    </NativeSelectOption>
-                    <NativeSelectOption value="evictable">
-                      Evictable
-                    </NativeSelectOption>
-                  </NativeSelect>
-                </Field>
-                {deployment.residency === 'on-demand' && (
-                  <Duration
-                    value={deployment.idle_timeout}
-                    change={(v) => set('idle_timeout', v)}
-                  />
+            <SettingsSection name="lifecycle" title="Lifecycle">
+              {!memberOnly && (
+                <>
+                  <Field label="Mode">
+                    <NativeSelect
+                      value={deployment.residency}
+                      onChange={(e) => set('residency', e.target.value)}
+                    >
+                      <NativeSelectOption value="on-demand">
+                        On demand
+                      </NativeSelectOption>
+                      <NativeSelectOption value="pinned">
+                        Pinned
+                      </NativeSelectOption>
+                      <NativeSelectOption value="evictable">
+                        Evictable
+                      </NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                  {deployment.residency === 'on-demand' && (
+                    <Duration
+                      value={deployment.idle_timeout}
+                      change={(v) => set('idle_timeout', v)}
+                    />
+                  )}
+                </>
+              )}
+              <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {!memberOnly && (
+                  <>
+                    {input('priority', 'Priority', 'number', 0, 100)}
+                    {input(
+                      'queue_timeout',
+                      'Queue timeout (seconds)',
+                      'number',
+                      1,
+                      1800,
+                    )}
+                  </>
                 )}
-              </>
-            )}
-            <details>
-              <summary>Placement</summary>
+              </FieldGroup>
+              {!memberOnly &&
+                deployment.residency !== 'pinned' &&
+                check(
+                  'allow_eviction',
+                  'Can unload to make room for another deployment',
+                )}
+              {!memberOnly && check('enabled', 'Enabled for clients')}
+            </SettingsSection>
+            <SettingsSection name="network" title="Networking">
               <Placement
+                part="network"
                 value={{
                   gpu: deployment.gpu,
                   port: deployment.port,
@@ -525,30 +684,7 @@ export function Editor(props: EditorProps) {
                 }
                 host={data.host?.[0]}
               />
-            </details>
-            <details>
-              <summary>Scheduling</summary>
-              {!memberOnly && (
-                <>
-                  <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-                    {input('priority', 'Priority', 'number', 0, 100)}
-                    {input(
-                      'queue_timeout',
-                      'Queue timeout (seconds)',
-                      'number',
-                      1,
-                      1800,
-                    )}
-                  </FieldGroup>
-                  {deployment.residency !== 'pinned' &&
-                    check(
-                      'allow_eviction',
-                      'Can unload to make room for another deployment',
-                    )}
-                </>
-              )}
-            </details>
-            {!memberOnly && check('enabled', 'Enabled for clients')}
+            </SettingsSection>
           </>
         )}
         {kind === 'runtimes' && runtime && (
@@ -598,27 +734,57 @@ export function Editor(props: EditorProps) {
             {check('trust', 'I trust this executable or image')}
           </>
         )}
-        <div className="dialog-actions">
-          {remove && (
-            <Menu label="More deployment actions">
-              <DropdownMenuItem
-                variant="destructive"
-                disabled={busy}
-                onClick={remove}
-              >
-                Remove
-              </DropdownMenuItem>
-            </Menu>
-          )}
-          <Button
-            variant="default"
-            type="submit"
-            disabled={busy || Object.values(invalid).some(Boolean)}
-          >
-            {busy ? 'Saving…' : kind === 'profiles' ? 'Save revision' : 'Save'}
-          </Button>
-        </div>
       </FieldSet>
+      {deployment?.configuration && (
+        <aside className="configuration-resources">
+          <DraftResources
+            compact
+            preview={preview.data}
+            error={preview.error}
+          />
+        </aside>
+      )}
+      <div className="dialog-actions configuration-save-bar">
+        {deployment && (
+          <>
+            <span className="muted" role="status">
+              {changed ? 'Unsaved changes' : 'All changes saved'}
+            </span>
+            <Button
+              variant="outline"
+              type="button"
+              disabled={busy || props.disabled || !changed}
+              onClick={() => {
+                setValue(initial.value);
+                setInvalid({});
+                setEpoch((e) => e + 1);
+              }}
+            >
+              Discard
+            </Button>
+          </>
+        )}
+        {remove && (
+          <Menu label="More deployment actions">
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={busy}
+              onClick={remove}
+            >
+              Remove
+            </DropdownMenuItem>
+          </Menu>
+        )}
+        <Button
+          variant="default"
+          type="submit"
+          disabled={
+            busy || props.disabled || Object.values(invalid).some(Boolean)
+          }
+        >
+          {busy ? 'Saving…' : kind === 'profiles' ? 'Save revision' : 'Save'}
+        </Button>
+      </div>
     </form>
   );
 }

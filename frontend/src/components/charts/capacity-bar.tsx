@@ -83,7 +83,7 @@ export function CapacityBar({
               hideLabel
               formatter={(value, name) => (
                 <span className="flex w-full justify-between gap-4">
-                  <span>{name}</span>
+                  <span>{config[String(name)]?.label ?? name}</span>
                   <span className="tabular-nums">{memory(Number(value))}</span>
                 </span>
               )}
@@ -94,6 +94,7 @@ export function CapacityBar({
           <Bar
             key={tile.id}
             dataKey={`s${i}`}
+            name={tile.label}
             stackId="memory"
             fill={`var(--color-s${i})`}
             isAnimationActive={false}
