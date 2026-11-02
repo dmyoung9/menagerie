@@ -1,3 +1,5 @@
+import sqlite3
+
 import httpx
 import pytest
 from test_controlplane import seed
@@ -91,6 +93,48 @@ def test_request_totals_seed_retained_history_once_and_survive_cleanup(tmp_path)
     assert described["inflight"] == 2
     assert described["historical_requests"] == 11
     assert [m["historical_requests"] for m in described["members"]] == [4, 7]
+
+
+def test_counter_seed_handles_large_session_snapshots_and_is_idempotent(
+    tmp_path, monkeypatch
+):
+    store = Store(tmp_path)
+    # Snapshot payloads must not become a temporary disk-backed sort. The same
+    # fixture can also be exercised under the service's read-only-temp sandbox.
+    for index in range(12):
+        store.put(
+            "session",
+            {
+                "id": str(index),
+                "deployment_id": f"fixture-{index % 2}",
+                "request_count": index,
+                "snapshot": {"metadata": "x" * (2 * 1024 * 1024)},
+            },
+            historical=False,
+        )
+    statements = []
+    connect = sqlite3.connect
+
+    def traced_connect(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", traced_connect)
+    assert Store(tmp_path).request_totals() == {"fixture-0": 30, "fixture-1": 36}
+    # Check the actual executed query plans, not source spelling: neither the
+    # scalar reads nor an INSERT...SELECT migration may need a temp B-tree.
+    reads = [
+        sql
+        for sql in statements
+        if "SELECT" in sql.upper() and not sql.lstrip().upper().startswith("CREATE")
+    ]
+    assert reads
+    with connect(store.path) as connection:
+        for sql in reads:
+            plan = connection.execute("EXPLAIN QUERY PLAN " + sql).fetchall()
+            assert not any("TEMP B-TREE" in row[-1] for row in plan)
+    assert Store(tmp_path).request_totals() == {"fixture-0": 30, "fixture-1": 36}
 
 
 @pytest.mark.asyncio
