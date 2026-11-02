@@ -10,6 +10,14 @@ export function memory(mib: unknown): string {
 }
 export const bytes = (value: unknown) =>
   finite(value) ? memory(value / 1048576) : 'Unavailable';
+
+/** Use one unit throughout a chart axis without rounding nonzero values to zero. */
+export function memoryTick(mib: number, extent: number) {
+  const divisor = extent >= 1024 ** 2 ? 1024 ** 2 : extent >= 1024 ? 1024 : 1;
+  const unit = divisor === 1024 ** 2 ? 'TiB' : divisor === 1024 ? 'GiB' : 'MiB';
+  const value = mib / divisor;
+  return `${value > 0 && value < 0.1 ? '<0.1' : value.toFixed(1)} ${unit}`;
+}
 export const percent = (value: unknown) =>
   finite(value) ? `${Math.round(value)}%` : 'Unavailable';
 export const temperature = (value: unknown) =>
@@ -33,4 +41,4 @@ export const budgetLabel = (remaining: unknown) =>
     ? 'Accounting unavailable'
     : remaining < 0
       ? `${memory(-remaining)} over budget`
-      : `${memory(remaining)} available under budget`;
+      : `${memory(remaining)} available`;

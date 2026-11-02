@@ -9,6 +9,7 @@ import {
   tokens,
   tokenRate,
   duration,
+  memoryTick,
 } from '../src/lib/formatters.ts';
 import { outputRate, seriesPaths } from '../src/lib/telemetry-series.ts';
 import { resourceEstimate, resourcePreview } from '../src/contracts.ts';
@@ -61,6 +62,8 @@ test('IEC formatting distinguishes unavailable, zero and tiny nonzero quantities
   assert.equal(memory(32), '32.0 MiB');
   assert.equal(bytes(1024 ** 3), '1.0 GiB');
   assert.equal(memory(1024 ** 2), '1.0 TiB');
+  assert.equal(memoryTick(32, 512), '32.0 MiB');
+  assert.equal(memoryTick(1, 16384), '<0.1 GiB');
   assert.equal(percent(99.7), '100%');
   assert.equal(temperature(71.5), '72 °C');
   assert.equal(tokens(32768), '32,768 tokens');

@@ -898,15 +898,6 @@ export function MultiDeploymentDetail({
       />
       {tab === 'Models' && (
         <>
-          {[
-            ...new Set(
-              d.members
-                .map((m) => m.profile_snapshot?.artifact_id)
-                .filter((id): id is string => !!id),
-            ),
-          ].map((id) => (
-            <ResourceHistory key={id} artifactId={id} />
-          ))}
           <div className="stats">
             <Card className="mb-5 min-w-0 gap-0 p-5 flex flex-col gap-3">
               <CardHeader className="p-0 pb-3">
@@ -991,6 +982,14 @@ export function MultiDeploymentDetail({
           </div>
         </>
       )}
+      {tab === 'Models' &&
+        [
+          ...new Set(
+            d.members
+              .map((m) => m.profile_snapshot?.artifact_id)
+              .filter((id): id is string => !!id),
+          ),
+        ].map((id) => <ResourceHistory key={id} artifactId={id} />)}
       {tab === 'Policy' && (
         <Card className="mb-5 min-w-0 gap-0 p-5">
           <CardContent className="p-0">

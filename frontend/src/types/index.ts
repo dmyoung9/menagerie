@@ -402,6 +402,7 @@ export type ResourcePreviewGpu = {
   status: 'within_budget' | 'over_budget' | 'unavailable';
 };
 export type ResourcePreview = {
+  ram_total_mib?: number | null;
   gpus: ResourcePreviewGpu[];
   members: ResourcePreviewMember[];
   ram_available_mib: number | null;
@@ -561,6 +562,9 @@ export type HistorySession = {
   outcome?: string;
 };
 export type ResourceHistoryGroup = {
+  configuration?: JsonObject;
+  runtime_name?: string | null;
+  gpu_index?: number | null;
   artifact_id: string | null;
   model_name: string;
   profile_hash: string;

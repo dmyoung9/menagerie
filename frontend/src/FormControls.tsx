@@ -8,6 +8,7 @@ import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Field } from './ui';
+import { memory } from '@/lib/formatters';
 import type {
   DeploymentDraft,
   GpuSnapshot,
@@ -45,7 +46,7 @@ export function Placement({
               <NativeSelectOption key={g.index} value={g.index}>
                 {g.name} · GPU {g.index} ·{' '}
                 {typeof g.free_mib === 'number'
-                  ? (g.free_mib / 1024).toFixed(1) + ' GiB free before reserve'
+                  ? memory(g.free_mib) + ' free'
                   : 'capacity unknown'}
               </NativeSelectOption>
             ))}

@@ -31,6 +31,11 @@ def summaries(store, settings, artifact_id=None):
                 "artifact_id": artifact.get("id"),
                 "model_name": artifact.get("name", "Unknown model"),
                 "profile_hash": fingerprint,
+                "configuration": run.get("deployment_snapshot", {})
+                .get("profile_snapshot", {})
+                .get("config", {}),
+                "runtime_name": run.get("runtime_identity", {}).get("name"),
+                "gpu_index": run.get("deployment_snapshot", {}).get("gpu"),
                 "runs": [],
             },
         )

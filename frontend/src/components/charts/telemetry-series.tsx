@@ -1,11 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from '@/components/ui/card';
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from '@/components/ui/chart';
 import {
   NativeSelect,
   NativeSelectOption,
@@ -16,64 +25,107 @@ import {
   temperature,
   tokenRate,
   timestamp,
+  memoryTick,
 } from '@/lib/formatters';
-import { outputRate, seriesPaths } from '@/lib/telemetry-series';
+import { outputRate } from '@/lib/telemetry-series';
+import { readApi, message } from '@/ui';
+import { array } from '@/decode';
+import { host as hostContract } from '@/contracts';
 import type { HostSnapshot, Deployment } from '@/types';
+import { ChartEmptyState } from './chart-empty-state';
 
 export function TelemetrySeries({
   samples,
   deployments,
   interval,
+  temperatureLimit,
 }: {
   samples: HostSnapshot[];
   deployments: Deployment[];
   interval: number;
+  temperatureLimit?: number;
 }) {
-  const [windowMinutes, setWindow] = useState(15);
+  const [minutes, setMinutes] = useState(15);
   const [gpuIndex, setGpu] = useState(0);
   const [deploymentId, setDeployment] = useState('');
-  const end = samples.at(-1)?.ts ?? 0;
-  const start = end - windowMinutes * 60;
-  const visible = samples.filter((s) => s.ts !== undefined && s.ts >= start);
-  const gpus = samples.at(-1)?.gpus || [];
+  const [history, setHistory] = useState<HostSnapshot[]>([]);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let alive = true;
+    readApi(
+      `/api/history/metrics?hours=${Math.max(1, Math.ceil(minutes / 60))}`,
+      array(hostContract),
+    )
+      .then((rows) => {
+        if (alive) {
+          setHistory(rows);
+          setError('');
+        }
+      })
+      .catch((e) => {
+        if (alive) setError(message(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [minutes]);
+  const merged = [
+    ...new Map(
+      [...history, ...samples]
+        .filter((s) => s.ts !== undefined)
+        .map((s) => [s.ts!, s]),
+    ).values(),
+  ].sort((a, b) => a.ts! - b.ts!);
+  const end = merged.at(-1)?.ts ?? 0;
+  const start = end - minutes * 60;
+  const visible = merged.filter((s) => s.ts! >= start);
+  const gpus = merged.at(-1)?.gpus || [];
+  const gpu = gpus.some((g) => g.index === gpuIndex)
+    ? gpuIndex
+    : (gpus[0]?.index ?? 0);
   const metrics: {
     label: string;
     value: (s: HostSnapshot) => number | null | undefined;
     format: (v: unknown) => string;
-    max?: number;
+    capacity?: number;
+    limit?: number;
+    percent?: boolean;
+    area?: boolean;
   }[] = [
     {
-      label: `GPU ${gpuIndex} memory`,
-      value: (s) => s.gpus?.find((g) => g.index === gpuIndex)?.used_mib,
+      label: `GPU ${gpu} memory`,
+      value: (s) => s.gpus?.find((g) => g.index === gpu)?.used_mib,
       format: memory,
-      max: gpus.find((g) => g.index === gpuIndex)?.total_mib ?? undefined,
+      capacity: gpus.find((g) => g.index === gpu)?.total_mib ?? undefined,
+      area: true,
     },
     {
-      label: `GPU ${gpuIndex} activity`,
-      value: (s) => s.gpus?.find((g) => g.index === gpuIndex)?.utilization,
+      label: `GPU ${gpu} activity`,
+      value: (s) => s.gpus?.find((g) => g.index === gpu)?.utilization,
       format: percent,
-      max: 100,
+      percent: true,
     },
     {
-      label: `GPU ${gpuIndex} temperature`,
-      value: (s) => s.gpus?.find((g) => g.index === gpuIndex)?.temperature,
+      label: `GPU ${gpu} temperature`,
+      limit: temperatureLimit,
+      value: (s) => s.gpus?.find((g) => g.index === gpu)?.temperature,
       format: temperature,
     },
     {
       label: 'System RAM used',
       value: (s) =>
-        typeof s.ram_total_mib === 'number' &&
-        typeof s.ram_available_mib === 'number'
+        s.ram_total_mib != null && s.ram_available_mib != null
           ? s.ram_total_mib - s.ram_available_mib
           : null,
       format: memory,
-      max: samples.at(-1)?.ram_total_mib,
+      capacity: merged.at(-1)?.ram_total_mib,
+      area: true,
     },
     {
       label: 'CPU activity',
       value: (s) => s.cpu_percent,
       format: percent,
-      max: 100,
+      percent: true,
     },
     {
       label: 'Decode throughput',
@@ -85,44 +137,47 @@ export function TelemetrySeries({
     <Card className="mb-5 min-w-0">
       <CardHeader>
         <CardTitle>Live resource trends</CardTitle>
-        <CardDescription>
-          Timestamped samples at the configured {interval}s interval. Gaps stay
-          gaps. Decode throughput requires a runtime-reported gauge; unsupported
-          engines show unavailable.
-        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="toolbar">
           <NativeSelect
             aria-label="Telemetry time window"
-            value={windowMinutes}
-            onChange={(e) => setWindow(Number(e.target.value))}
+            value={minutes}
+            onChange={(e) => setMinutes(Number(e.target.value))}
           >
-            <NativeSelectOption value={5}>5 minutes</NativeSelectOption>
-            <NativeSelectOption value={15}>15 minutes</NativeSelectOption>
-            <NativeSelectOption value={60}>
-              1 hour (loaded samples)
-            </NativeSelectOption>
+            {[
+              [5, '5 minutes'],
+              [15, '15 minutes'],
+              [60, '1 hour'],
+              [1440, '24 hours'],
+              [10080, '7 days'],
+            ].map(([value, label]) => (
+              <NativeSelectOption key={value} value={value}>
+                {label}
+              </NativeSelectOption>
+            ))}
           </NativeSelect>
           <NativeSelect
             aria-label="Telemetry GPU"
-            value={gpuIndex}
+            value={gpu}
             onChange={(e) => setGpu(Number(e.target.value))}
           >
-            {gpus.map((g) => (
-              <NativeSelectOption key={g.index} value={g.index}>
-                GPU {g.index} · {g.name}
-              </NativeSelectOption>
-            ))}
+            {gpus.length ? (
+              gpus.map((g) => (
+                <NativeSelectOption key={g.index} value={g.index}>
+                  GPU {g.index} · {g.name}
+                </NativeSelectOption>
+              ))
+            ) : (
+              <NativeSelectOption value={0}>No GPU</NativeSelectOption>
+            )}
           </NativeSelect>
           <NativeSelect
             aria-label="Throughput deployment"
             value={deploymentId}
             onChange={(e) => setDeployment(e.target.value)}
           >
-            <NativeSelectOption value="">
-              All measured deployments
-            </NativeSelectOption>
+            <NativeSelectOption value="">All deployments</NativeSelectOption>
             {deployments.map((d) => (
               <NativeSelectOption key={d.id} value={d.id}>
                 {d.name}
@@ -130,80 +185,173 @@ export function TelemetrySeries({
             ))}
           </NativeSelect>
         </div>
+        {error && <p role="status">History unavailable: {error}</p>}
         <div className="resource-grid">
           {metrics.map((metric) => {
-            const points = visible.map((s) => ({
-              ts: s.ts!,
-              value: metric.value(s) ?? null,
-            }));
-            const values = points.flatMap((p) =>
-              p.value === null ? [] : [p.value],
-            );
-            const max = metric.max ?? Math.max(1, ...values);
+            const points: {
+              ts: number;
+              value: number | null;
+              gap?: boolean;
+            }[] = [];
+            for (const sample of visible) {
+              const previous = points.at(-1);
+              if (
+                previous &&
+                sample.ts! - previous.ts >
+                  Math.max(interval * 3, ((minutes * 60) / 500) * 3)
+              )
+                points.push({
+                  ts: previous.ts + 0.001,
+                  value: null,
+                  gap: true,
+                });
+              points.push({
+                ts: sample.ts!,
+                value: metric.value(sample) ?? null,
+              });
+            }
+            const known = points.filter((p) => p.value !== null);
+            const Chart = metric.area ? AreaChart : LineChart;
+            const domain: [number, number | 'auto'] = [
+              0,
+              metric.percent ? 100 : (metric.capacity ?? 'auto'),
+            ];
             return (
               <section className="resource-card" key={metric.label}>
-                <h3>{metric.label}</h3>
-                <p className="numeric">{metric.format(points.at(-1)?.value)}</p>
-                {values.length < 2 ? (
-                  <p className="muted">
-                    Telemetry unavailable or collecting samples.
-                  </p>
+                <div className="section-heading">
+                  <h3>{metric.label}</h3>
+                  <strong className="tabular-nums" title={timestamp(end)}>
+                    {metric.format(points.at(-1)?.value)}
+                  </strong>
+                </div>
+                {!known.length ? (
+                  <ChartEmptyState />
                 ) : (
                   <>
-                    <svg
-                      className="chart telemetry-chart"
-                      viewBox="0 0 800 175"
-                      preserveAspectRatio="none"
-                      role="img"
-                      aria-label={`${metric.label}: ${metric.format(points.at(-1)?.value)}, ${windowMinutes} minute window`}
+                    <ChartContainer
+                      config={{
+                        value: { label: metric.label, color: 'var(--chart-1)' },
+                      }}
+                      className="h-48 w-full aspect-auto"
+                      aria-label={metric.label}
                     >
-                      <line
-                        x1="40"
-                        x2="760"
-                        y1="150"
-                        y2="150"
-                        stroke="var(--border)"
-                      />
-                      <path
-                        d={seriesPaths(points, start, end, max, interval)}
-                        fill="none"
-                        stroke="var(--chart-1)"
-                        strokeWidth="2"
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      {values.length < 10 &&
-                        points
-                          .filter((p) => p.value !== null)
-                          .map((p) => (
-                            <circle
-                              key={p.ts}
-                              cx={
-                                40 +
-                                ((p.ts - start) / Math.max(1, end - start)) *
-                                  720
+                      <Chart
+                        accessibilityLayer
+                        data={points}
+                        margin={{ left: 0, right: 16, top: 12 }}
+                      >
+                        <CartesianGrid vertical={false} />
+                        <XAxis
+                          type="number"
+                          dataKey="ts"
+                          domain={[start, end]}
+                          scale="time"
+                          tickLine={false}
+                          axisLine={false}
+                          minTickGap={40}
+                          tickFormatter={(v) =>
+                            minutes >= 1440
+                              ? new Date(v * 1000).toLocaleDateString([], {
+                                  month: 'short',
+                                  day: 'numeric',
+                                })
+                              : new Date(v * 1000).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                          }
+                        />
+                        <YAxis
+                          domain={domain}
+                          width={64}
+                          tickLine={false}
+                          axisLine={false}
+                          tickFormatter={(v) =>
+                            metric.area
+                              ? memoryTick(
+                                  v,
+                                  metric.capacity ??
+                                    Math.max(
+                                      0,
+                                      ...known.map((p) => p.value ?? 0),
+                                    ),
+                                )
+                              : metric.percent
+                                ? v + '%'
+                                : String(v)
+                          }
+                        />
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              labelFormatter={(_, payload) =>
+                                timestamp(payload[0]?.payload?.ts)
                               }
-                              cy={150 - (p.value! / Math.max(1, max)) * 130}
-                              r="3"
-                              fill="var(--chart-1)"
+                              formatter={(value) => (
+                                <span className="tabular-nums">
+                                  {metric.format(Number(value))}
+                                </span>
+                              )}
                             />
-                          ))}
-                    </svg>
-                    <div className="telemetry-axis">
-                      <span>{new Date(start * 1000).toLocaleTimeString()}</span>
-                      <span>{new Date(end * 1000).toLocaleTimeString()}</span>
-                    </div>
-                    <p className="muted">Scale: 0 – {metric.format(max)}</p>
+                          }
+                        />
+                        {metric.capacity !== undefined && (
+                          <ReferenceLine
+                            y={metric.capacity}
+                            stroke="var(--muted-foreground)"
+                            strokeDasharray="3 3"
+                          />
+                        )}
+                        {metric.limit !== undefined && (
+                          <ReferenceLine
+                            y={metric.limit}
+                            ifOverflow="extendDomain"
+                            stroke="var(--muted-foreground)"
+                            strokeDasharray="3 3"
+                            label={{
+                              value: temperature(metric.limit),
+                              position: 'insideTopRight',
+                              fill: 'var(--muted-foreground)',
+                              fontSize: 11,
+                            }}
+                          />
+                        )}
+                        {metric.area ? (
+                          <Area
+                            dot={known.length <= 10 ? { r: 2 } : false}
+                            type="linear"
+                            dataKey="value"
+                            stroke="var(--color-value)"
+                            fill="var(--color-value)"
+                            fillOpacity={0.15}
+                            connectNulls={false}
+                            isAnimationActive={false}
+                          />
+                        ) : (
+                          <Line
+                            type="linear"
+                            dataKey="value"
+                            stroke="var(--color-value)"
+                            connectNulls={false}
+                            dot={known.length <= 10 ? { r: 2 } : false}
+                            isAnimationActive={false}
+                          />
+                        )}
+                      </Chart>
+                    </ChartContainer>
                     <details>
-                      <summary>Exact samples and timestamps</summary>
+                      <summary>Samples</summary>
                       <ol className="telemetry-samples">
-                        {points.map((p) => (
-                          <li key={p.ts}>
-                            <time title={new Date(p.ts * 1000).toISOString()}>
-                              {timestamp(p.ts)}
-                            </time>{' '}
-                            · {metric.format(p.value)}
-                          </li>
-                        ))}
+                        {points
+                          .filter((p) => !p.gap)
+                          .map((p) => (
+                            <li key={p.ts}>
+                              <time title={new Date(p.ts * 1000).toISOString()}>
+                                {timestamp(p.ts)}
+                              </time>{' '}
+                              · {metric.format(p.value)}
+                            </li>
+                          ))}
                       </ol>
                     </details>
                   </>

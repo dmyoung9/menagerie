@@ -1,6 +1,43 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from './fixtures';
 
+test('resource preview pairs stacked capacity and allocation selection without policy copy', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/#/deployments');
+  await page
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
+  const preview = dialog.getByRole('complementary', {
+    name: 'Deployment resource preview',
+  });
+  await expect(preview.getByRole('heading', { name: /GPU 0/ })).toBeVisible();
+  await expect(preview.locator('.recharts-bar')).toHaveCount(4);
+  await expect(preview.getByText('Budget', { exact: true })).toBeVisible();
+  await expect(preview.getByText('Capacity', { exact: true })).toBeVisible();
+  await preview.getByRole('application').first().focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(
+    preview.locator('.recharts-tooltip-wrapper').first(),
+  ).toBeVisible();
+  const weights = preview
+    .locator('.resource-legend button')
+    .filter({ hasText: 'Weights' });
+  await weights.focus();
+  await page.keyboard.press('Enter');
+  await expect(weights).toHaveAttribute('aria-pressed', 'true');
+  await expect(preview.getByRole('status')).toContainText('Weights');
+  await expect(preview).not.toContainText('Advisory accounting only');
+  await expect(preview).not.toContainText('No memory is reserved');
+  await expect(preview).not.toContainText('Launch stops only');
+  await page.screenshot({
+    path: testInfo.outputPath('projected-capacity-pair.png'),
+    fullPage: true,
+  });
+});
+
 test('over-budget launch facts have no acknowledgment gate', async ({
   page,
 }) => {
@@ -97,9 +134,20 @@ test('history shows per-configuration measured counts, peaks and individual fail
           run_count: 2,
           first_run_at: now - 3600,
           last_run_at: now,
+          configuration: { 'ctx-size': 8192, parallel: 1 },
+          runtime_name: 'Fixture engine',
+          gpu_index: 0,
           gpu: { sample_count: 2, mean_peak_mib: 2048, max_peak_mib: 3072 },
           ram: { sample_count: 1, mean_peak_mib: 512, max_peak_mib: 512 },
           runs: [
+            {
+              id: 'earlier-run',
+              started_at: now - 3600,
+              ended_at: now - 3500,
+              outcome: 'stopped',
+              peak_gpu_mib: 1024,
+              peak_ram_mib: 512,
+            },
             {
               id: 'run',
               started_at: now,
@@ -118,7 +166,9 @@ test('history shows per-configuration measured counts, peaks and individual fail
     page.getByRole('heading', { name: 'Observed resource history' }),
   ).toBeVisible();
   await expect(
-    page.getByText('Fixture model · configuration abcdef012345 · 2 runs'),
+    page.getByText(
+      /Fixture model · Fixture engine · 8,192 tokens · 1 slot · 2 runs/,
+    ),
   ).toBeVisible();
   await page.getByText('Individual runs', { exact: true }).click();
   await expect(

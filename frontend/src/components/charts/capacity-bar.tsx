@@ -1,54 +1,135 @@
-import { capacityAccounting, type Allocation } from '@/lib/capacity-accounting';
-import { memory } from '@/lib/formatters';
+import {
+  Bar,
+  BarChart,
+  ReferenceLine,
+  ReferenceArea,
+  XAxis,
+  YAxis,
+  Cell,
+} from 'recharts';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from '@/components/ui/chart';
+import {
+  capacityAccounting,
+  allocationColor,
+  type Allocation,
+} from '@/lib/capacity-accounting';
+import { memory, memoryTick } from '@/lib/formatters';
 
 export function CapacityBar({
   budget,
+  physical = budget,
   components,
+  selection,
+  onSelect,
+  boundaryLabel = 'Budget',
 }: {
   budget: number;
+  physical?: number;
   components: Allocation[];
+  selection?: string;
+  onSelect?: (id: string) => void;
+  boundaryLabel?: string;
 }) {
-  const a = capacityAccounting(budget, components);
+  const accounting = capacityAccounting(budget, components);
+  const tiles = accounting.tiles;
+  const config = Object.fromEntries(
+    tiles.map((t, i) => [
+      `s${i}`,
+      { label: t.label, color: allocationColor(t) },
+    ]),
+  );
+  const data = [
+    {
+      pool: 'Memory',
+      ...Object.fromEntries(tiles.map((t, i) => [`s${i}`, t.mib])),
+    },
+  ];
+  const maximum = Math.max(1, physical, accounting.demand);
   return (
-    <div className="capacity-summary">
-      <p className="numeric">
-        {memory(a.demand)} / {memory(a.budget)} budget ·{' '}
-        {a.budget > 0
-          ? `${Math.round((a.demand / a.budget) * 100)}%`
-          : 'No usable budget'}
-        {a.over > 0 && ` · ${memory(a.over)} over budget`}
-      </p>
-      <svg
-        viewBox="0 0 100 10"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={`${memory(a.demand)} demand, ${memory(a.budget)} budget`}
+    <ChartContainer
+      config={config}
+      className="h-28 w-full aspect-auto"
+      aria-label="Memory capacity"
+    >
+      <BarChart
+        accessibilityLayer
+        layout="vertical"
+        data={data}
+        margin={{ top: 22, right: 28, bottom: 8, left: 28 }}
       >
-        <rect width="100" height="8" y="1" fill="var(--muted)" />
-        <rect
-          width={a.total ? (Math.min(a.demand, a.budget) / a.total) * 100 : 0}
-          height="8"
-          y="1"
-          fill="var(--chart-1)"
+        <XAxis
+          type="number"
+          domain={[0, maximum]}
+          tickLine={false}
+          axisLine={false}
+          tickFormatter={(v) => memoryTick(v, maximum)}
         />
-        {a.over > 0 && (
-          <rect
-            x={(a.budget / a.total) * 100}
-            width={(a.over / a.total) * 100}
-            height="8"
-            y="1"
-            fill="var(--destructive)"
+        <YAxis type="category" dataKey="pool" hide />
+        {physical > budget && (
+          <ReferenceArea
+            x1={budget}
+            x2={physical}
+            fill="var(--muted)"
+            fillOpacity={0.7}
           />
         )}
-        <line
-          x1={a.total ? (a.budget / a.total) * 100 : 100}
-          x2={a.total ? (a.budget / a.total) * 100 : 100}
-          y1="0"
-          y2="10"
-          stroke="var(--foreground)"
-          strokeWidth="0.5"
+        <ChartTooltip
+          content={
+            <ChartTooltipContent
+              hideLabel
+              formatter={(value, name) => (
+                <span className="flex w-full justify-between gap-4">
+                  <span>{name}</span>
+                  <span className="tabular-nums">{memory(Number(value))}</span>
+                </span>
+              )}
+            />
+          }
         />
-      </svg>
-    </div>
+        {tiles.map((tile, i) => (
+          <Bar
+            key={tile.id}
+            dataKey={`s${i}`}
+            stackId="memory"
+            fill={`var(--color-s${i})`}
+            isAnimationActive={false}
+            onClick={() => onSelect?.(tile.group || tile.id)}
+          >
+            <Cell
+              opacity={
+                !selection || selection === (tile.group || tile.id) ? 1 : 0.35
+              }
+            />
+          </Bar>
+        ))}
+        <ReferenceLine
+          x={budget}
+          stroke="var(--foreground)"
+          strokeDasharray="3 3"
+          label={{
+            value: boundaryLabel,
+            position: 'top',
+            fill: 'var(--muted-foreground)',
+            fontSize: 11,
+          }}
+        />
+        {physical > budget && (
+          <ReferenceLine
+            x={physical}
+            stroke="var(--muted-foreground)"
+            label={{
+              value: 'Capacity',
+              position: 'insideTopRight',
+              fill: 'var(--muted-foreground)',
+              fontSize: 11,
+            }}
+          />
+        )}
+      </BarChart>
+    </ChartContainer>
   );
 }

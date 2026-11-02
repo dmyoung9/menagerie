@@ -219,12 +219,12 @@ def preview(manager, drafts):
         "sample_ts": host.get("ts"),
         "sample_seconds": settings["sample_seconds"],
         "ram_available_mib": ram_free,
+        "ram_total_mib": host.get("ram_total_mib"),
         "ram_headroom_mib": settings["ram_headroom_mib"],
         "ram_draft_mib": ram_demand,
         "ram_remaining_mib": ram_free - settings["ram_headroom_mib"] - ram_demand
         if ram_free is not None and ram_demand is not None
         else None,
-        "note": "Advisory accounting only. No memory is reserved. Launch stops only at measured safety limits or a real runtime failure.",
     }
 
 

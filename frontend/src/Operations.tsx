@@ -28,7 +28,7 @@ import type {
   LaunchModal,
   LaunchPlan,
 } from './types';
-import { api, CopyButton, Dialog, Field, gib, Json, message, Tabs } from './ui';
+import { api, CopyButton, Dialog, Field, Json, message, Tabs } from './ui';
 
 export function LaunchReview({
   modal,
@@ -80,59 +80,60 @@ export function LaunchReview({
       {!plan && !error && <p className="muted">Checking capacity…</p>}
       {plan && (
         <>
-          <div className="table-wrap">
-            <Table
-              containerProps={{
-                tabIndex: 0,
-                role: 'region',
-                'aria-label': 'Launch resource facts',
-              }}
-            >
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Model</TableHead>
-                  <TableHead className="numeric">GPU peak</TableHead>
-                  <TableHead>Basis / runs</TableHead>
-                  <TableHead>File size</TableHead>
-                  <TableHead>RAM peak</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {Object.entries(plan.estimates).map(([id, estimate]) => (
-                  <TableRow key={id}>
-                    <TableCell>
-                      {deployments.find((d) => d.id === id)?.name ||
-                        modal.row.name}
-                    </TableCell>
-                    <TableCell className="numeric">
-                      {memory(estimate.peak_mib)}
-                    </TableCell>
-                    <TableCell title={estimate.provenance}>
-                      {estimate.basis} · {estimate.sample_count} runs
-                    </TableCell>
-                    <TableCell className="numeric">
-                      {bytes(estimate.file_size_bytes)}
-                    </TableCell>
-                    <TableCell className="numeric">
-                      {memory(estimate.ram_mib)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <dl className="properties">
-            {(host.gpus || []).map((g, index: number) => (
-              <div className="property-pair" key={g.index ?? index}>
-                <dt>GPU {g.index ?? index} free (GiB)</dt>
-                <dd>{gib(g.free_mib)}</dd>
+          {!plan.resources && (
+            <>
+              <div className="table-wrap">
+                <Table
+                  containerProps={{
+                    tabIndex: 0,
+                    role: 'region',
+                    'aria-label': 'Launch resource facts',
+                  }}
+                >
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Model</TableHead>
+                      <TableHead className="numeric">GPU peak</TableHead>
+                      <TableHead>Basis / runs</TableHead>
+                      <TableHead>File size</TableHead>
+                      <TableHead>RAM peak</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {Object.entries(plan.estimates).map(([id, estimate]) => (
+                      <TableRow key={id}>
+                        <TableCell>
+                          {deployments.find((d) => d.id === id)?.name ||
+                            modal.row.name}
+                        </TableCell>
+                        <TableCell className="numeric">
+                          {memory(estimate.peak_mib)}
+                        </TableCell>
+                        <TableCell title={estimate.provenance}>
+                          {estimate.basis} · {estimate.sample_count} runs
+                        </TableCell>
+                        <TableCell className="numeric">
+                          {bytes(estimate.file_size_bytes)}
+                        </TableCell>
+                        <TableCell className="numeric">
+                          {memory(estimate.ram_mib)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
-            ))}
-          </dl>
-          <p>
-            System RAM available: {memory(host.ram_available_mib)}. Capacity
-            accounting is advisory, not reserved memory.
-          </p>
+              <dl className="properties">
+                {(host.gpus || []).map((g, index: number) => (
+                  <div className="property-pair" key={g.index ?? index}>
+                    <dt>GPU {g.index ?? index} free</dt>
+                    <dd>{memory(g.free_mib)}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p>System RAM available: {memory(host.ram_available_mib)}</p>
+            </>
+          )}
           {plan.resources && <DraftResources preview={plan.resources} />}
           {plan.stops.length > 0 && (
             <div className="warning">
@@ -155,7 +156,7 @@ export function LaunchReview({
               </AlertDescription>
             </Alert>
           ))}
-          {plan.warnings.length > 0 && (
+          {plan.warnings.length > 0 && !plan.resources && (
             <details open>
               <summary>Launch facts ({plan.warnings.length})</summary>
               {plan.warnings.map((w: string) => (

@@ -8,6 +8,17 @@ export type Allocation = {
   kind?: string;
 };
 
+export function allocationColor(item: Allocation) {
+  if (item.kind === 'overflow') return 'var(--destructive)';
+  if (item.kind === 'free') return 'var(--muted)';
+  if (item.kind === 'external') return 'var(--secondary)';
+  const hash = [...(item.group || item.id)].reduce(
+    (n, c) => (n * 31 + c.charCodeAt(0)) % 997,
+    0,
+  );
+  return `var(--chart-${(hash % 5) + 1})`;
+}
+
 /** Split overflow, don't add it to unsplit demand. Area = max(budget, demand). */
 export function capacityAccounting(budget: number, components: Allocation[]) {
   const valid = components.filter((v) => Number.isFinite(v.mib) && v.mib > 0);

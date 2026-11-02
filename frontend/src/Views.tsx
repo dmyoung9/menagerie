@@ -50,6 +50,7 @@ import {
 } from './ui';
 import { ModelCard } from './ModelCard';
 import { ResourceHistory } from '@/components/resource-history';
+import { memory, percent, tokenRate } from '@/lib/formatters';
 import { EngineCatalog } from './EngineCatalog';
 import { byteSize, parameterSize, quantization } from './variants';
 import { useConfirmation } from '@/hooks/use-confirmation';
@@ -361,21 +362,13 @@ export function DeploymentDetail({
       />
       {tab === 'Overview' && (
         <>
-          {profile?.artifact_id && (
-            <ResourceHistory
-              key={profile.artifact_id}
-              artifactId={profile.artifact_id}
-            />
-          )}
           <div className="stats">
             <Card className="mb-5 min-w-0 gap-0 p-5 flex flex-col gap-3">
               <CardHeader className="p-0 pb-3">
                 <CardDescription>VRAM</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3 p-0">
-                <strong>
-                  {gib(process.gpu_mib)} <small>GiB</small>
-                </strong>
+                <strong>{memory(process.gpu_mib)}</strong>
               </CardContent>
             </Card>
             <Card className="mb-5 min-w-0 gap-0 p-5 flex flex-col gap-3">
@@ -448,24 +441,30 @@ export function DeploymentDetail({
                       rate('prompt_tokens_total', 'prompt_seconds_total'),
                     )}
                   </dd>
-                  <dt>Generation (tok/s)</dt>
+                  <dt>Generation</dt>
                   <dd>
-                    {number(
+                    {tokenRate(
                       rate(
                         'tokens_predicted_total',
                         'tokens_predicted_seconds_total',
                       ),
                     )}
                   </dd>
-                  <dt>Process RAM (GiB)</dt>
-                  <dd>{gib(process.rss_mib)}</dd>
-                  <dt>CPU (%)</dt>
-                  <dd>{number(process.cpu_percent)}</dd>
+                  <dt>Process RAM</dt>
+                  <dd>{memory(process.rss_mib)}</dd>
+                  <dt>CPU activity</dt>
+                  <dd>{percent(process.cpu_percent)}</dd>
                 </dl>
                 <small className="muted">Runtime averages since loading.</small>
               </CardContent>
             </Card>
           </div>
+          {profile?.artifact_id && (
+            <ResourceHistory
+              key={profile.artifact_id}
+              artifactId={profile.artifact_id}
+            />
+          )}
         </>
       )}
       {tab === 'Configuration' && (

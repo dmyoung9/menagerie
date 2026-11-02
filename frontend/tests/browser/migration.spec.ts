@@ -14,7 +14,9 @@ test('observed resources, SSE events, polling and exact preset stay integrated',
   await expect(
     page.getByRole('cell', { name: '—', exact: true }).first(),
   ).toBeVisible();
-  expect(await page.locator('.chart path').count()).toBeGreaterThan(0);
+  expect(
+    await page.locator('[data-slot="chart"] svg path').count(),
+  ).toBeGreaterThan(0);
   const tile = page.getByRole('link', { name: /^Example ready: 3.0 GiB/ });
   await tile.focus();
   await page.keyboard.press('Enter');

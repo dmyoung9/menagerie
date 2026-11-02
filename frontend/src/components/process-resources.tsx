@@ -49,11 +49,7 @@ export function ProcessResources({
     <Card className="mb-5 min-w-0">
       <CardHeader>
         <CardTitle>GPU processes</CardTitle>
-        <CardDescription>
-          Reported compute processes, with per-device attribution when
-          available; graphics/driver use may be unattributed. Missing
-          instrumentation is not zero.
-        </CardDescription>
+        <CardDescription>Device-reported compute processes</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="toolbar">

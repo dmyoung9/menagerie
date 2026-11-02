@@ -39,6 +39,7 @@ import * as contracts from './contracts';
 import { array } from './decode';
 import { DeploymentWizard } from './DeploymentWizard';
 import { LiveResources } from './Resources';
+import { memory, temperature } from '@/lib/formatters';
 import { ProcessResources } from '@/components/process-resources';
 import { TelemetrySeries } from '@/components/charts/telemetry-series';
 import { Editor } from './Editors';
@@ -653,16 +654,20 @@ export default function App() {
                         </CardHeader>
                         <CardContent className="flex flex-col gap-3 p-0">
                           <strong>
-                            {gib(g.used_mib)}{' '}
-                            <small>/ {gib(g.total_mib)} GiB</small>
+                            {memory(g.used_mib)}{' '}
+                            <small>/ {memory(g.total_mib)}</small>
                           </strong>
-                          <meter
-                            aria-label={
-                              'GPU ' + (g.index ?? index) + ' memory used'
-                            }
-                            value={g.used_mib || 0}
-                            max={g.total_mib || 1}
-                          />
+                          {g.used_mib != null &&
+                            g.total_mib != null &&
+                            g.total_mib > 0 && (
+                              <meter
+                                aria-label={
+                                  'GPU ' + (g.index ?? index) + ' memory used'
+                                }
+                                value={g.used_mib || 0}
+                                max={g.total_mib || 1}
+                              />
+                            )}
                         </CardContent>
                       </Card>
                     ))}
@@ -688,12 +693,13 @@ export default function App() {
                         <strong>
                           {typeof host.ram_total_mib === 'number' &&
                           typeof host.ram_available_mib === 'number'
-                            ? gib(host.ram_total_mib - host.ram_available_mib)
-                            : '—'}{' '}
-                          <small>GiB</small>
+                            ? memory(
+                                host.ram_total_mib - host.ram_available_mib,
+                              )
+                            : 'Unavailable'}
                         </strong>
                         <small>
-                          {gib(host.ram_available_mib)} GiB available
+                          {memory(host.ram_available_mib)} available
                         </small>
                       </CardContent>
                     </Card>
@@ -735,6 +741,7 @@ export default function App() {
                     deployments={data.deployments || []}
                   />
                   <TelemetrySeries
+                    temperatureLimit={status?.settings.temperature_limit}
                     samples={samples}
                     deployments={data.deployments || []}
                     interval={status?.settings.sample_seconds || 2}
@@ -751,7 +758,7 @@ export default function App() {
                               <dt>Utilization</dt>
                               <dd>{number(g.utilization, 0)}%</dd>
                               <dt>Temperature</dt>
-                              <dd>{number(g.temperature, 0)} °C</dd>
+                              <dd>{temperature(g.temperature)}</dd>
                               <dt>Power</dt>
                               <dd>{number(g.power_w, 0)} W</dd>
                             </dl>

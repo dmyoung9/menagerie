@@ -15,9 +15,10 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { readApi, message } from '@/ui';
-import { memory, timestamp } from '@/lib/formatters';
+import { memory, timestamp, tokens } from '@/lib/formatters';
 import { resourceHistory } from '@/contracts';
 import type { ResourceHistoryGroup } from '@/types';
+import { RunPeaks } from '@/components/charts/run-peaks';
 
 export function ResourceHistory({ artifactId }: { artifactId?: string }) {
   const [groups, setGroups] = useState<ResourceHistoryGroup[]>();
@@ -46,11 +47,7 @@ export function ResourceHistory({ artifactId }: { artifactId?: string }) {
     <Card className="mb-5 min-w-0">
       <CardHeader>
         <CardTitle>Observed resource history</CardTitle>
-        <CardDescription>
-          Per-process run peaks, grouped by execution configuration. Failed and
-          partial runs are included, not guarantees of a future workload. No
-          internal allocation split is measured.
-        </CardDescription>
+        <CardDescription>Per-run peaks by configuration</CardDescription>
       </CardHeader>
       <CardContent>
         {error ? (
@@ -60,11 +57,19 @@ export function ResourceHistory({ artifactId }: { artifactId?: string }) {
         ) : !groups.length ? (
           <p>No observed runs in the retained history.</p>
         ) : (
-          groups.map((group) => (
-            <details key={group.profile_hash} open>
-              <summary>
-                {group.model_name} · configuration{' '}
-                {group.profile_hash.slice(0, 12)} · {group.run_count} runs
+          groups.map((group, index) => (
+            <details key={group.profile_hash} open={index === 0}>
+              <summary title={group.profile_hash}>
+                {group.model_name} · {group.runtime_name || 'Configuration'}{' '}
+                {typeof (
+                  group.configuration?.['ctx-size'] ??
+                  group.configuration?.['max-model-len']
+                ) === 'number'
+                  ? `· ${tokens(group.configuration?.['ctx-size'] ?? group.configuration?.['max-model-len'])} `
+                  : `· ${group.profile_hash.slice(0, 8)} `}
+                {typeof group.configuration?.parallel === 'number' &&
+                  `· ${group.configuration.parallel} ${group.configuration.parallel === 1 ? 'slot' : 'slots'} `}
+                · {group.run_count} runs
               </summary>
               <p>
                 <time title={new Date(group.first_run_at * 1000).toISOString()}>
@@ -75,6 +80,13 @@ export function ResourceHistory({ artifactId }: { artifactId?: string }) {
                   {timestamp(group.last_run_at)}
                 </time>
               </p>
+              {group.gpu_index != null && (
+                <p className="muted">GPU {group.gpu_index}</p>
+              )}
+              <div className="resource-grid">
+                <RunPeaks group={group} pool="gpu" />
+                <RunPeaks group={group} pool="ram" />
+              </div>
               <div className="table-wrap">
                 <Table
                   containerProps={{

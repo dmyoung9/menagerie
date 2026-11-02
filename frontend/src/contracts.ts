@@ -443,6 +443,9 @@ const peakSummary = d.object<T.ResourceHistoryGroup['gpu']>({
 });
 export const resourceHistory = d.array(
   d.object<T.ResourceHistoryGroup>({
+    configuration: opt(jsonObject),
+    runtime_name: maybeString,
+    gpu_index: maybeNumber,
     artifact_id: d.nullable(d.string),
     model_name: d.string,
     profile_hash: d.string,
@@ -464,6 +467,7 @@ export const resourceHistory = d.array(
   }),
 );
 export const resourcePreview = d.object<T.ResourcePreview>({
+  ram_total_mib: maybeNumber,
   members: d.array(
     d.object<T.ResourcePreviewMember>({
       key: d.string,
