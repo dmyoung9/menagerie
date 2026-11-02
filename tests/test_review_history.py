@@ -164,6 +164,35 @@ async def test_performance_excludes_other_configuration_and_breaks_runs(tmp_path
                     ),
                 ),
             )
+    copy = deepcopy(d) | {"id": "another-instance", "alias": "another"}
+    store.put("deployment", copy)
+    store.put(
+        "session",
+        {
+            "id": "concurrent",
+            "deployment_id": copy["id"],
+            "deployment_snapshot": copy,
+            "artifact_identity": artifact,
+            "runtime_identity": runtime,
+            "started_at": now - 4,
+            "ended_at": now - 1,
+        },
+    )
+    with store.connect() as c:
+        c.execute(
+            "INSERT INTO samples VALUES(?,?)",
+            (
+                now - 2,
+                encode(
+                    {
+                        "ts": now - 2,
+                        "deployments": {
+                            copy["id"]: {"session_id": "concurrent", "rss_mib": 999}
+                        },
+                    }
+                ),
+            ),
+        )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     ) as client:

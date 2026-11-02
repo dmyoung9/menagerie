@@ -35,6 +35,8 @@ def performance_samples(store, ident, hours):
             s
             for s in all_runs
             if (s.get("ended_at") or now) >= cutoff
+            and (s.get("deployment_id") or s.get("deployment_snapshot", {}).get("id"))
+            == ident
             and run_profile_hash(s) == fingerprint
         ),
         key=lambda s: s["started_at"],

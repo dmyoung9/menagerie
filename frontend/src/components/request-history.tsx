@@ -73,9 +73,15 @@ export function RequestHistory({
                 <TableRow key={r.id}>
                   <TableCell>{timestamp(r.ts)}</TableCell>
                   <TableCell>
-                    <a href={`#/deployments/${d?.unit_id || r.deployment_id}`}>
-                      {r.data.model_alias || d?.name || '—'}
-                    </a>
+                    {r.deployment_id ? (
+                      <a
+                        href={`#/deployments/${d?.unit_id || r.deployment_id}`}
+                      >
+                        {r.data.model_alias || d?.name || '—'}
+                      </a>
+                    ) : (
+                      <span>{r.data.model_alias || '—'}</span>
+                    )}
                   </TableCell>
                   <TableCell className="numeric">
                     {number(r.data.latency, 2)}
