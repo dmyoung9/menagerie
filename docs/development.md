@@ -111,7 +111,7 @@ the wheel needs no Node. Create a fresh environment outside the checkout:
 uv build
 check_dir="$(mktemp -d)"
 uv venv "$check_dir/venv"
-uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-2.1.5-py3-none-any.whl
+uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-2.2.0-py3-none-any.whl
 "$check_dir/venv/bin/python" scripts/check_wheel.py
 ```
 
