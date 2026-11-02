@@ -169,3 +169,23 @@ test('legacy lifecycle boundaries batch steps, and legacy job IDs deduplicate', 
   assert.equal(rows[1].steps.length, 2);
   assert.equal(rows[2].steps.length, 4);
 });
+test('daemon and telemetry lifecycle events have concrete titles and outcomes', () => {
+  const rows = activityEntries(
+    [
+      { seq: 1, ts: 1, kind: 'daemon', data: { state: 'ready' } },
+      {
+        seq: 2,
+        ts: 2,
+        kind: 'collector_error',
+        data: { error: 'Fixture sample timed out' },
+      },
+      { seq: 3, ts: 3, kind: 'collector_recovered', data: {} },
+    ],
+    [],
+  );
+  assert.equal(rows[0].title, 'Hardware telemetry restored');
+  assert.equal(rows[1].detail, 'Fixture sample timed out');
+  assert.equal(rows[1].state, 'Errored');
+  assert.equal(rows[2].title, 'Menagerie started');
+  assert.equal(rows[2].state, 'Ready');
+});

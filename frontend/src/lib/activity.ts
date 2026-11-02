@@ -77,8 +77,26 @@ export function activityEntries(
         { label: 'Host policy', href: '#/settings/host' },
         { label: 'Samples', href: '#/settings/history/samples' },
       );
-    } else if (e.kind === 'deployment')
-      title = `${data.enabled ? 'Enable' : 'Disable'} ${d?.name || text(data.alias) || '—'}`;
+    } else if (e.kind === 'daemon') {
+      title = data.state === 'ready' ? 'Menagerie started' : 'Menagerie';
+      state = data.state === 'ready' ? 'Ready' : state;
+    } else if (e.kind === 'collector_error') {
+      title = 'Collect hardware telemetry';
+      state = 'Errored';
+      links.push({ label: 'Samples', href: '#/settings/history/samples' });
+    } else if (e.kind === 'collector_recovered') {
+      title = 'Hardware telemetry restored';
+      state = 'Resolved';
+      links.push({ label: 'Samples', href: '#/settings/history/samples' });
+    } else if (e.kind === 'recovery_required') {
+      title = `Restore ${d?.name || text(data.name) || '—'}`;
+      state = 'Errored';
+    } else if (e.kind === 'deployment_configuration')
+      title = `Save configuration · ${d?.name || text(data.name) || '—'}`;
+    else if (e.kind === 'deployment_separated')
+      title = `Separate models · ${text(data.name) || '—'}`;
+    else if (e.kind === 'deployment')
+      title = `${data.enabled ? 'Enable' : 'Disable'} ${d?.name || text(data.name) || text(data.alias) || '—'}`;
     else if (e.kind === 'delete')
       title = `Remove ${text(data.kind) || 'resource'}`;
     else if (e.kind === 'purge')
