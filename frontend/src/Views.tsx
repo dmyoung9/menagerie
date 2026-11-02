@@ -21,20 +21,16 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUpRight, Plus } from 'lucide-react';
+import { ArrowLeft, Plus } from 'lucide-react';
 import {
   active,
   api,
   CopyButton,
-  date,
   Dialog,
   Empty,
   Field,
-  eventText,
-  gib,
   Json,
   Menu,
   isRecord,
@@ -50,8 +46,15 @@ import {
 } from './ui';
 import { ModelCard } from './ModelCard';
 import { ResourceHistory } from '@/components/resource-history';
-import { OperationProgress } from '@/components/operation-progress';
-import { memory, percent, tokenRate } from '@/lib/formatters';
+import { InstalledVariants } from '@/components/installed-variants';
+import { CapabilityBadges } from '@/components/capability-badges';
+import { EventFeed } from '@/components/event-feed';
+import { DeploymentConfiguration } from '@/components/deployment-configuration';
+import { DeploymentPerformance } from '@/components/deployment-performance';
+import { RequestHistory } from '@/components/request-history';
+import { HistorySettings } from '@/components/history-settings';
+import { PolicyEditor } from './Operations';
+import { memory } from '@/lib/formatters';
 import { EngineCatalog } from './EngineCatalog';
 import { byteSize, parameterSize, quantization } from './variants';
 import { useConfirmation } from '@/hooks/use-confirmation';
@@ -60,9 +63,6 @@ import type {
   Artifact,
   Deployment,
   DeploymentActions,
-  HistoryActivation,
-  HistoryRequest,
-  HistorySession,
   HostSnapshot,
   Job,
   MetricSample,
@@ -77,7 +77,6 @@ import type {
 import { go } from './navigation';
 import { readApi } from './ui';
 import * as contracts from './contracts';
-import { array } from './decode';
 function InspectModel({ id }: { id: string }) {
   const [notice, setNotice] = useState(''),
     [busy, setBusy] = useState(false);
@@ -114,35 +113,21 @@ type Actions = DeploymentActions & {
 export function ActivityFeed({
   events,
   deployments,
+  jobs,
+  limit,
 }: {
   events: OperationEvent[];
   deployments: Pick<Deployment, 'id' | 'name'>[];
+  jobs?: Job[];
+  limit?: number;
 }) {
-  return events.length ? (
-    <ol className="activity-feed">
-      {events.map((e) => (
-        <li key={e.seq}>
-          <span
-            className={
-              'event-dot ' +
-              (e.data?.to === 'FAILED' || e.data?.error ? 'failed' : '')
-            }
-          />
-          <span>{eventText(e, deployments)}</span>
-          <time
-            dateTime={new Date(e.ts * 1000).toISOString()}
-            title={date(e.ts)}
-          >
-            {new Date(e.ts * 1000).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </time>
-        </li>
-      ))}
-    </ol>
-  ) : (
-    <p className="muted padded">No recent activity.</p>
+  return (
+    <EventFeed
+      events={events}
+      deployments={deployments}
+      jobs={jobs}
+      limit={limit}
+    />
   );
 }
 export function MemoryChart({ samples }: { samples: MetricSample[] }) {
@@ -250,6 +235,7 @@ export function DeploymentDetail({
   inflight,
   actions,
   events,
+  saved,
 }: {
   d: Deployment;
   tab: string;
@@ -258,15 +244,22 @@ export function DeploymentDetail({
   inflight: number;
   actions: Actions;
   events: OperationEvent[];
+  saved: () => void;
 }) {
   const profile = d.profile_snapshot;
   const [logs, setLogs] = useState(''),
     [error, setError] = useState('');
+  const logRun = new URLSearchParams(window.location.hash.split('?')[1]).get(
+    'run',
+  );
   useEffect(() => {
     if (tab !== 'Logs') return;
     let alive = true;
     const load = () =>
-      readApi(`/api/deployments/${d.id}/logs`, contracts.logs)
+      readApi(
+        `/api/deployments/${d.id}/logs${logRun ? '?session_id=' + encodeURIComponent(logRun) : ''}`,
+        contracts.logs,
+      )
         .then((r) => {
           if (alive) {
             setLogs(r.text || 'No logs yet.');
@@ -282,16 +275,8 @@ export function DeploymentDetail({
       alive = false;
       clearInterval(timer);
     };
-  }, [tab, d.id]);
-  const metrics = host.runtime_metrics?.[d.id] || {},
-    process = host.deployments?.[d.id] || {};
-  const rate = (tokens: string, seconds: string) => {
-    const sum = (name: string) =>
-      Object.entries(metrics)
-        .filter(([k]) => k.split('{')[0].replace(/^llamacpp:/, '') === name)
-        .reduce((n, [, v]) => n + Number(v), 0);
-    return sum(seconds) > 0 ? sum(tokens) / sum(seconds) : null;
-  };
+  }, [tab, d.id, logRun]);
+  const process = host.deployments?.[d.id] || {};
   return (
     <>
       <a className="back-link" href="#/deployments">
@@ -324,14 +309,6 @@ export function DeploymentDetail({
               Unload
             </Button>
           )}
-          <Button
-            variant="outline"
-            type="button"
-            disabled={active(d)}
-            onClick={() => actions.edit('deployments', d)}
-          >
-            Edit
-          </Button>
           {!d.enabled && (
             <Button
               variant="default"
@@ -351,7 +328,14 @@ export function DeploymentDetail({
         </Alert>
       )}
       <Tabs
-        items={['Overview', 'Configuration', 'Activity', 'Logs']}
+        items={[
+          'Overview',
+          'Configuration',
+          'Advanced',
+          'Activity',
+          'Requests',
+          'Logs',
+        ]}
         value={tab}
         onChange={(t) =>
           go(
@@ -369,7 +353,7 @@ export function DeploymentDetail({
                 <CardDescription>VRAM</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3 p-0">
-                <strong>{memory(process.gpu_mib)}</strong>
+                <strong>{active(d) ? memory(process.gpu_mib) : 'N/A'}</strong>
               </CardContent>
             </Card>
             <Card className="mb-5 min-w-0 gap-0 p-5 flex flex-col gap-3">
@@ -430,36 +414,8 @@ export function DeploymentDetail({
                 </dl>
               </CardContent>
             </Card>
-            <Card className="mb-5 min-w-0 gap-0 p-5">
-              <CardHeader className="p-0 pb-3">
-                <CardTitle>Performance</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3 p-0">
-                <dl className="properties">
-                  <dt>Prefill (tok/s)</dt>
-                  <dd>
-                    {number(
-                      rate('prompt_tokens_total', 'prompt_seconds_total'),
-                    )}
-                  </dd>
-                  <dt>Generation</dt>
-                  <dd>
-                    {tokenRate(
-                      rate(
-                        'tokens_predicted_total',
-                        'tokens_predicted_seconds_total',
-                      ),
-                    )}
-                  </dd>
-                  <dt>Process RAM</dt>
-                  <dd>{memory(process.rss_mib)}</dd>
-                  <dt>CPU activity</dt>
-                  <dd>{percent(process.cpu_percent)}</dd>
-                </dl>
-                <small className="muted">Runtime averages since loading.</small>
-              </CardContent>
-            </Card>
           </div>
+          <DeploymentPerformance deployment={d} />
           {profile?.artifact_id && (
             <ResourceHistory
               key={profile.artifact_id}
@@ -469,16 +425,14 @@ export function DeploymentDetail({
         </>
       )}
       {tab === 'Configuration' && (
+        <DeploymentConfiguration deployment={d} data={data} saved={saved} />
+      )}
+      {tab === 'Requests' && (
+        <RequestHistory deploymentId={d.id} deployments={data.deployments} />
+      )}
+      {tab === 'Advanced' && (
         <Card className="mb-5 min-w-0 gap-0 p-5">
           <CardContent className="p-0">
-            <Button
-              variant="outline"
-              type="button"
-              disabled={active(d)}
-              onClick={() => actions.edit('deployments', d)}
-            >
-              Edit configuration
-            </Button>
             <dl className="properties">
               <dt>Model</dt>
               <dd>
@@ -566,7 +520,9 @@ export function ModelLibrary({
 }) {
   const [format, setFormat] = useState(''),
     [capability, setCapability] = useState(''),
-    [selected, setSelected] = useState('');
+    [selected, setSelected] = useState(
+      () => window.location.hash.slice(2).split('/')[2] || '',
+    );
   const { confirm, confirmation } = useConfirmation();
   const [modelDefault, setModelDefault] = useState<
       TemplateSelection | null | undefined
@@ -596,9 +552,11 @@ export function ModelLibrary({
       quantLabel && `Quantization: ${quantLabel}`,
       m.architecture,
       byteSize(m.size_bytes ?? null),
-      hints.reasoning && 'reasoning',
+      (typeof hints.reasoning === 'object'
+        ? hints.reasoning.supported
+        : hints.reasoning) && 'reasoning',
       hints.tools && 'tools',
-      ...(hints.input || []).filter((v: string) => v !== 'text'),
+      ...(hints.input || []),
     ].filter((value): value is string => typeof value === 'string');
   }
   const rows = (data.models || []).filter(
@@ -775,10 +733,6 @@ export function ModelLibrary({
           ))}
         </NativeSelect>
       </div>
-      <p className="muted">
-        Capability badges are detected hints. Deployment settings control what
-        clients see.
-      </p>
       <div className="catalog-grid">
         {[...groups].map(([key, models]) => {
           const m = models[0];
@@ -824,48 +778,72 @@ export function ModelLibrary({
       {current && (
         <Dialog
           title={current.repo || current.name}
-          close={() => setSelected('')}
+          close={() => {
+            setSelected('');
+            if (window.location.hash.split('/')[3]) go('models/installed');
+          }}
           wide
         >
-          <label>
-            Installed variant
-            <NativeSelect
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              {siblings.map((m) => (
-                <NativeSelectOption key={m.id} value={m.id}>
-                  {m.name} · {byteSize(m.size_bytes ?? null)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </label>
+          <InstalledVariants
+            models={siblings}
+            selected={selected}
+            select={setSelected}
+          />
           <div className="catalog-chips">
-            {chips(current).map((c) => (
-              <Badge
-                variant="secondary"
-                className="max-w-full whitespace-normal break-words"
-                key={c}
-              >
-                {c}
-              </Badge>
-            ))}
+            {chips(current)
+              .filter(
+                (c) =>
+                  ![
+                    'text',
+                    'image',
+                    'audio',
+                    'video',
+                    'reasoning',
+                    'tools',
+                  ].includes(c),
+              )
+              .map((c) => (
+                <Badge
+                  variant="secondary"
+                  className="max-w-full whitespace-normal break-words"
+                  key={c}
+                >
+                  {c}
+                </Badge>
+              ))}
           </div>
-          <h3>Capabilities & dependencies</h3>
-          <p>
-            {current.discovered_capabilities?.evidence?.join('; ') ||
-              'No conclusive capability metadata. Configure declarations in the deployment.'}
-          </p>
-          <p>{current.discovered_capabilities?.note}</p>
-          {current.discovered_capabilities?.dependencies?.map((d) => (
-            <p key={d.name}>
-              {d.name} —{' '}
-              {current.metadata?.projector?.name === d.name
-                ? 'Downloaded; confirm compatibility'
-                : 'Candidate; compatibility unverified'}
-            </p>
-          ))}
-          <InspectModel key={current.id} id={current.id} />
+          <section className="model-section">
+            <h3>Capabilities</h3>
+            <CapabilityBadges hints={current.discovered_capabilities} />
+            {!!current.discovered_capabilities?.dependencies?.length && (
+              <>
+                <h3>Companion files</h3>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>File</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {current.discovered_capabilities.dependencies.map((d) => (
+                      <TableRow key={d.name}>
+                        <TableCell>{d.name}</TableCell>
+                        <TableCell>Projector</TableCell>
+                        <TableCell>
+                          {current.metadata?.projector?.name === d.name
+                            ? 'Downloaded'
+                            : 'Candidate'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </>
+            )}
+            <InspectModel key={current.id} id={current.id} />
+          </section>
           <ResourceHistory
             key={'history-' + current.id}
             artifactId={current.id}
@@ -1056,284 +1034,31 @@ export function ActivityPage({
   jobs,
   events,
   deployments,
-  inspect,
-  restore,
 }: {
   tab: string;
   jobs: Job[];
   events: OperationEvent[];
   deployments: Deployment[];
-  inspect: (title: string, value: unknown) => void;
-  restore: (path: string, notice: string) => void;
 }) {
-  const [sessions, setSessions] = useState<HistorySession[]>([]),
-    [requests, setRequests] = useState<HistoryRequest[]>([]),
-    [activations, setActivations] = useState<HistoryActivation[]>([]),
-    [selected, setSelected] = useState<string[]>([]),
-    [error, setError] = useState('');
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const path =
-          tab === 'Sessions'
-            ? 'sessions'
-            : tab === 'Requests'
-              ? 'requests'
-              : tab === 'Launches'
-                ? 'activations'
-                : null;
-        if (!path) return;
-        if (!alive) return;
-        if (path === 'sessions')
-          setSessions(
-            await readApi(
-              '/api/history/sessions',
-              array(contracts.historySession),
-            ),
-          );
-        else if (path === 'requests')
-          setRequests(
-            await readApi(
-              '/api/history/requests',
-              array(contracts.historyRequest),
-            ),
-          );
-        else
-          setActivations(
-            await readApi(
-              '/api/history/activations',
-              array(contracts.historyActivation),
-            ),
-          );
-        setError('');
-      } catch (e) {
-        if (alive) setError(message(e));
-      }
-    };
-    void load();
-    const timer = setInterval(load, 5000);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [tab]);
   return (
     <>
       <Tabs
-        items={['Events', 'Operations', 'Requests', 'Sessions', 'Launches']}
+        items={['Events', 'Requests']}
         value={tab}
         onChange={(t) => go('activity/' + t.toLowerCase())}
       />
-      {error && (
-        <Alert variant="destructive" className="mb-5" role="alert">
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-3 whitespace-pre-line">
-            {error}
-          </AlertDescription>
-        </Alert>
-      )}
       {tab === 'Events' && (
         <Card className="mb-5 min-w-0 gap-0 p-0">
           <CardContent className="p-0">
-            <ActivityFeed events={events} deployments={deployments} />
+            <ActivityFeed
+              events={events}
+              deployments={deployments}
+              jobs={jobs}
+            />
           </CardContent>
         </Card>
       )}
-      {tab === 'Operations' && (
-        <Card className="mb-5 min-w-0 gap-0 p-0">
-          <CardContent className="p-0">
-            {jobs.length ? (
-              [...jobs]
-                .sort((a, b) => b.created_at - a.created_at)
-                .map((j) => (
-                  <div className="operation" key={j.id}>
-                    <Status
-                      value={j.state.charAt(0) + j.state.slice(1).toLowerCase()}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <strong>{j.name}</strong>
-                      <OperationProgress job={j} />
-                    </div>
-                  </div>
-                ))
-            ) : (
-              <Empty title="No operations yet" />
-            )}
-          </CardContent>
-        </Card>
-      )}
-      {tab === 'Requests' && (
-        <Card className="mb-5 min-w-0 gap-0 p-0 table-wrap">
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Model</TableHead>
-                  <TableHead className="numeric">Latency (s)</TableHead>
-                  <TableHead className="numeric">First token (s)</TableHead>
-                  <TableHead className="numeric">Output tokens</TableHead>
-                  <TableHead>Outcome</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {requests.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>{r.data.model_alias}</TableCell>
-                    <TableCell className="numeric">
-                      {number(r.data.latency, 2)}
-                    </TableCell>
-                    <TableCell className="numeric">
-                      {number(r.data.ttft, 2)}
-                    </TableCell>
-                    <TableCell className="numeric">
-                      {number(r.data.output_tokens, 0)}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        type="button"
-                        onClick={() => inspect('Request', r)}
-                      >
-                        {r.data.error ? 'Failed' : 'Complete'}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            {!requests.length && <Empty title="No requests yet" />}
-          </CardContent>
-        </Card>
-      )}
-      {tab === 'Sessions' && (
-        <>
-          <ResourceHistory />
-          <div className="toolbar">
-            <Button
-              variant="outline"
-              type="button"
-              disabled={selected.length !== 2}
-              onClick={() =>
-                inspect(
-                  'Session comparison',
-                  sessions
-                    .filter((s) => selected.includes(s.id))
-                    .map((s) => ({
-                      deployment: s.deployment_snapshot.name,
-                      started: date(s.started_at),
-                      peak_gpu_mib: s.peak_gpu_mib,
-                      peak_ram_mib: s.peak_ram_mib,
-                      config: s.deployment_snapshot.profile_snapshot.config,
-                      outcome: s.outcome,
-                    })),
-                )
-              }
-            >
-              Compare {selected.length ? `(${selected.length}/2)` : ''}
-            </Button>
-          </div>
-          <Card className="mb-5 min-w-0 gap-0 p-0 table-wrap">
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>
-                      <span className="sr-only">Compare</span>
-                    </TableHead>
-                    <TableHead>Started</TableHead>
-                    <TableHead>Deployment</TableHead>
-                    <TableHead>Outcome</TableHead>
-                    <TableHead className="numeric">Peak VRAM (GiB)</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sessions.map((s) => (
-                    <TableRow key={s.id}>
-                      <TableCell>
-                        <Checkbox
-                          aria-label={
-                            'Compare ' + s.deployment_snapshot.name + ' ' + s.id
-                          }
-                          checked={selected.includes(s.id)}
-                          disabled={
-                            selected.length >= 2 && !selected.includes(s.id)
-                          }
-                          onCheckedChange={(checked) =>
-                            setSelected(
-                              checked
-                                ? [...selected, s.id]
-                                : selected.filter((id) => id !== s.id),
-                            )
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>{date(s.started_at)}</TableCell>
-                      <TableCell>{s.deployment_snapshot.name}</TableCell>
-                      <TableCell>{s.outcome}</TableCell>
-                      <TableCell className="numeric">
-                        {gib(s.peak_gpu_mib)}
-                      </TableCell>
-                      <TableCell>
-                        <Menu
-                          label={
-                            'Session actions for ' + s.deployment_snapshot.name
-                          }
-                        >
-                          <DropdownMenuItem
-                            onClick={() => inspect('Session', s)}
-                          >
-                            Details
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              restore(
-                                `/api/history/sessions/${s.id}/restore`,
-                                'Restore as an inactive deployment. Review it in Deployments → Inactive.',
-                              )
-                            }
-                          >
-                            Restore deployment
-                          </DropdownMenuItem>
-                        </Menu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {!sessions.length && <Empty title="No sessions yet" />}
-            </CardContent>
-          </Card>
-        </>
-      )}
-      {tab === 'Launches' && (
-        <Card className="mb-5 min-w-0 gap-0 p-0">
-          <CardContent className="p-0">
-            {activations.map((a) => (
-              <div className="operation" key={a.id}>
-                <Status value={a.state} />
-                <div>
-                  <strong>{a.deployment_name || 'Deployment launch'}</strong>
-                  <p className="muted">{date(a.started_at)}</p>
-                </div>
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() =>
-                    restore(
-                      `/api/history/activations/${a.id}/restore`,
-                      'Restore as an inactive deployment. Review it in Deployments → Inactive.',
-                    )
-                  }
-                >
-                  Restore deployment
-                </Button>
-              </div>
-            ))}
-            {!activations.length && <Empty title="No launches yet" />}
-          </CardContent>
-        </Card>
-      )}
+      {tab === 'Requests' && <RequestHistory deployments={deployments} />}
     </>
   );
 }
@@ -1343,7 +1068,8 @@ export function SettingsPage({
   data,
   status,
   actions,
-  policy,
+  savePolicy,
+  purge,
   backup,
   install,
   pull,
@@ -1352,13 +1078,15 @@ export function SettingsPage({
   data: Registry;
   status: AppStatus | null;
   actions: Actions;
-  policy: () => void;
+  savePolicy: (value: import('./types').HostPolicyDraft) => Promise<void>;
+  purge: () => void;
   backup: () => void;
   install: () => void;
   pull: () => void;
 }) {
   const { confirm, confirmation } = useConfirmation();
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState(''),
+    [policyBusy, setPolicyBusy] = useState(false);
   async function removeEngine(runtime: Runtime) {
     if (
       !(await confirm(
@@ -1380,110 +1108,105 @@ export function SettingsPage({
     <>
       {confirmation}
       <Tabs
-        items={['Engines', 'Host', 'Recovery']}
+        items={['Engines', 'Host', 'History', 'Recovery']}
         value={tab}
         onChange={(t) => go('settings/' + t.toLowerCase())}
       />
       {tab === 'Engines' && (
         <>
-          <EngineCatalog runtimes={data.runtimes || []} />
+          <EngineCatalog
+            runtimes={data.runtimes || []}
+            actions={
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => actions.edit('runtimes')}
+                >
+                  <Plus data-icon="inline-start" />
+                  Register existing engine
+                </Button>
+                <Button variant="outline" onClick={install}>
+                  Build from source
+                </Button>
+                <Button variant="outline" onClick={pull}>
+                  Pull image
+                </Button>
+              </>
+            }
+          />
           <h2>Installed engines</h2>
           {notice && <p role="status">{notice}</p>}
-          <div className="model-grid">
+          <div className="engine-list">
             {(data.runtimes || []).map((r) => (
-              <Card className="mb-5 min-w-0 gap-0 p-0 library-card" key={r.id}>
-                <CardContent className="p-0">
+              <section className="engine-row" key={r.id}>
+                <div>
+                  <h3>{r.name}</h3>
+                  <p className="muted">{r.engine}</p>
+                </div>
+                <div>
                   <Badge
                     variant="secondary"
                     className="max-w-full whitespace-normal break-words"
                   >
                     {r.managed ? 'Managed' : r.execution_kind}
                   </Badge>
-                  <h2>{r.name}</h2>
-                  <p className="muted">{r.engine}</p>
-                  <div className="card-actions">
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={() => actions.inspect(r.name, r)}
+                </div>
+                <div className="card-actions">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={() => actions.inspect(r.name, r)}
+                  >
+                    Details
+                  </Button>
+                  <Menu label={'Actions for ' + r.name}>
+                    <DropdownMenuItem
+                      onClick={() => actions.edit('runtimes', r)}
                     >
-                      Details
-                    </Button>
-                    <Menu label={'Actions for ' + r.name}>
-                      <DropdownMenuItem
-                        onClick={() => actions.edit('runtimes', r)}
-                      >
-                        Edit
+                      Edit
+                    </DropdownMenuItem>
+                    {r.managed ? (
+                      <DropdownMenuItem onClick={() => removeEngine(r)}>
+                        Remove engine files
                       </DropdownMenuItem>
-                      {r.managed ? (
-                        <DropdownMenuItem onClick={() => removeEngine(r)}>
-                          Remove engine files
-                        </DropdownMenuItem>
-                      ) : (
-                        <DropdownMenuItem
-                          onClick={() => actions.edit('runtimes', r, true)}
-                        >
-                          Duplicate
-                        </DropdownMenuItem>
-                      )}
-                    </Menu>
-                  </div>
-                </CardContent>
-              </Card>
+                    ) : (
+                      <DropdownMenuItem
+                        onClick={() => actions.edit('runtimes', r, true)}
+                      >
+                        Duplicate
+                      </DropdownMenuItem>
+                    )}
+                  </Menu>
+                </div>
+              </section>
             ))}
           </div>
           {!data.runtimes?.length && <Empty title="No engines installed" />}
-          <details>
-            <summary>Advanced engine sources</summary>
-            <div className="toolbar">
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => actions.edit('runtimes')}
-              >
-                <Plus size={16} />
-                Register existing engine
-              </Button>
-              <Button variant="outline" type="button" onClick={install}>
-                Build from source
-              </Button>
-              <Button variant="outline" type="button" onClick={pull}>
-                Pull image
-              </Button>
-            </div>
-          </details>
         </>
       )}
-      {tab === 'Host' && (
+      {tab === 'History' && <HistorySettings />}
+      {tab === 'Host' && status && (
         <Card className="mb-5 min-w-0 gap-0 p-5">
           <CardContent className="p-0">
-            <div className="section-heading">
-              <h2>Capacity & history</h2>
-              <Button variant="outline" type="button" onClick={policy}>
-                Edit policy
-              </Button>
-            </div>
-            <dl className="properties">
-              <dt>GPU reserve</dt>
-              <dd>{gib(status?.settings.gpu_headroom_mib)} GiB</dd>
-              <dt>RAM reserve</dt>
-              <dd>{gib(status?.settings.ram_headroom_mib)} GiB</dd>
-              <dt>Temperature limit</dt>
-              <dd>{status?.settings.temperature_limit} °C</dd>
-              <dt>Sampling</dt>
-              <dd>{status?.settings.sample_seconds} seconds</dd>
-              <dt>Detailed history</dt>
-              <dd>{status?.settings.retention_days} days</dd>
-              <dt>Summary history</dt>
-              <dd>{status?.settings.summary_days} days</dd>
-            </dl>
-            <Button
-              nativeButton={false}
-              variant="outline"
-              render={<a href="/metrics" target="_blank" rel="noreferrer" />}
-            >
-              Prometheus metrics <ArrowUpRight size={14} />
-            </Button>
+            {notice && <p role="status">{notice}</p>}
+            <PolicyEditor
+              initial={status.settings}
+              busy={policyBusy}
+              purge={purge}
+              embedded
+              save={async (value) => {
+                setPolicyBusy(true);
+                setNotice('');
+                try {
+                  await savePolicy(value);
+                  setNotice('Policy saved');
+                } catch (e) {
+                  setNotice(message(e));
+                } finally {
+                  setPolicyBusy(false);
+                }
+              }}
+            />
           </CardContent>
         </Card>
       )}

@@ -10,8 +10,8 @@ export type Allocation = {
 
 export function allocationColor(item: Allocation) {
   if (item.kind === 'overflow') return 'var(--destructive)';
-  if (item.kind === 'free') return 'var(--muted)';
-  if (item.kind === 'external') return 'var(--secondary)';
+  if (item.kind === 'free') return 'var(--resource-free)';
+  if (item.kind === 'external') return 'var(--resource-external)';
   const hash = [...(item.group || item.id)].reduce(
     (n, c) => (n * 31 + c.charCodeAt(0)) % 997,
     0,

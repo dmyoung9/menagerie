@@ -54,9 +54,9 @@ test('capacity composition never double counts overflow and keeps raw quantities
 });
 
 test('IEC formatting distinguishes unavailable, zero and tiny nonzero quantities', () => {
-  assert.equal(memory(null), 'Unavailable');
-  assert.equal(memory(NaN), 'Unavailable');
-  assert.equal(memory(-1), 'Unavailable');
+  assert.equal(memory(null), '—');
+  assert.equal(memory(NaN), '—');
+  assert.equal(memory(-1), '—');
   assert.equal(memory(0), '0 MiB');
   assert.equal(memory(0.001), '<0.1 MiB');
   assert.equal(memory(32), '32.0 MiB');

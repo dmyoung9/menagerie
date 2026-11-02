@@ -1,6 +1,7 @@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { CapabilityBadges } from '@/components/capability-badges';
 import {
   NativeSelect,
   NativeSelectOption,
@@ -218,24 +219,10 @@ export function VariantDialog({
                 </p>
               )}
               {data.capabilities && (
-                <details>
-                  <summary>Detected capabilities & dependencies</summary>
-                  <p>
-                    {[
-                      ...data.capabilities.input,
-                      ...(data.capabilities.tools ? ['tools'] : []),
-                      ...(data.capabilities.reasoning ? ['reasoning'] : []),
-                    ].join(' · ')}
-                  </p>
-                  <p>
-                    {data.capabilities.evidence.join('; ') ||
-                      'No conclusive structured metadata.'}
-                  </p>
-                  <p>{data.capabilities.note}</p>
-                  {data.capabilities.warnings?.map((w: string) => (
-                    <p key={w}>{w}</p>
-                  ))}
-                </details>
+                <section className="model-section">
+                  <h3>Detected capabilities</h3>
+                  <CapabilityBadges hints={data.capabilities} />
+                </section>
               )}
               {dimensions.map((d, index) => {
                 if (
@@ -443,8 +430,8 @@ export function VariantDialog({
                 )}
               </div>
               {source === 'hf' && (
-                <details className="variant-related">
-                  <summary>Other quantized repositories</summary>
+                <section className="variant-related">
+                  <h3>Other quantized repositories</h3>
                   <p>
                     Some suppliers publish quantizations in separate
                     repositories.
@@ -489,7 +476,7 @@ export function VariantDialog({
                       {r.id}
                     </Button>
                   ))}
-                </details>
+                </section>
               )}
             </>
           )

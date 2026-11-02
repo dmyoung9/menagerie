@@ -9,7 +9,7 @@ test('observed resources, SSE events, polling and exact preset stay integrated',
 }) => {
   await page.goto('/#/overview');
   await expect(
-    page.getByText('Example idle unloaded · Idle unload', { exact: true }),
+    page.getByText('Unload Example idle', { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole('cell', { name: '—', exact: true }).first(),
@@ -79,13 +79,12 @@ test('dialogs trap and restore focus; menus use keyboard navigation and fit the 
   await expect(trigger).toBeFocused();
   await trigger.click();
   await menu.getByRole('menuitem', { name: 'Edit', exact: true }).click();
-  await expect(dialog).toBeVisible();
+  await expect(page).toHaveURL(/\/idle\/configuration$/);
+  await expect(page.getByLabel('Display name', { exact: true })).toBeVisible();
   await expect
     .poll(() => fixture.writes.some((w) => w.path === '/api/resources/preview'))
     .toBe(true);
-  await page.keyboard.press('Escape');
-  await expect(dialog).toBeHidden();
-  await expect(trigger).toBeFocused();
+  await navigate(page, 'Deployments');
   await trigger.click();
   await menu.getByRole('menuitem', { name: 'Details', exact: true }).click();
   await page
@@ -367,16 +366,18 @@ test('engine-reset confirmation is cancellable and recovery retains its existing
     id: 'engine-two',
     name: 'Second engine',
   });
-  await page.goto('/#/deployments/idle');
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.goto('/#/deployments/idle/configuration');
+  const editor = page.locator('main');
   const dialog = page.getByRole('dialog');
-  const engine = dialog.getByLabel('Engine', { exact: true });
+  const engine = editor.getByLabel('Engine', { exact: true });
   await engine.selectOption('engine-two');
   const confirm = page.getByRole('alertdialog');
   await expect(confirm).toContainText('Engine-specific settings');
   await page.keyboard.press('Escape');
   await expect(confirm).toBeHidden();
-  await expect(dialog).toBeVisible();
+  await expect(
+    editor.getByRole('button', { name: 'Save', exact: true }),
+  ).toBeVisible();
   await expect(engine).toHaveValue('engine');
   await engine.selectOption('engine-two');
   await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -384,8 +385,12 @@ test('engine-reset confirmation is cancellable and recovery retains its existing
   await engine.selectOption('engine-two');
   await confirm.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(engine).toHaveValue('engine-two');
-  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(dialog).toBeHidden();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect
+    .poll(
+      () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
+    )
+    .toBe(2);
   expect(
     contracts.deploymentDraft(
       fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
@@ -405,10 +410,7 @@ test('engine-reset confirmation is cancellable and recovery retains its existing
   );
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Host', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit policy' }).click();
-  await expect(
-    dialog.getByRole('heading', { name: 'Host policy' }),
-  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save policy' })).toBeVisible();
 });
 
 test('empty installation and connection errors remain actionable', async ({

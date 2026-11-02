@@ -85,20 +85,23 @@ test('process ownership, RAM residency and per-GPU telemetry stay explicit', asy
     page.getByRole('heading', { name: 'GPU processes', exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole('cell', { name: 'external-worker · 202' }),
+    page.getByRole('cell', { name: 'external-worker', exact: true }),
   ).toBeVisible();
   await page.getByLabel('Process ownership').selectOption('menagerie');
   await expect(
-    page.getByRole('cell', { name: 'external-worker · 202' }),
+    page.getByRole('cell', { name: 'external-worker', exact: true }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole('cell', { name: 'fixture-engine · 101' }),
+    page.getByRole('cell', { name: 'fixture-engine', exact: true }),
   ).toBeVisible();
   await page.getByLabel('Filter GPU processes').fill('not-a-process');
   await expect(page.getByText('No matching processes.')).toBeVisible();
-  await page.getByLabel('Telemetry GPU').selectOption('1');
   await expect(
-    page.getByRole('heading', { name: 'GPU 1 memory', exact: true }),
+    page.getByRole('columnheader', { name: 'PID', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Telemetry GPU')).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'GPU memory', exact: true }),
   ).toBeVisible();
   await page.getByLabel('Telemetry time window').selectOption('5');
   await expect(
@@ -170,12 +173,15 @@ test('history shows per-configuration measured counts, peaks and individual fail
       /Fixture model · Fixture engine · 8,192 tokens · 1 slot · 2 runs/,
     ),
   ).toBeVisible();
-  await page.getByText('Individual runs', { exact: true }).click();
+  await expect(page.getByText('Individual runs', { exact: true })).toHaveCount(
+    0,
+  );
+  await page.getByRole('link', { name: 'View individual runs' }).last().click();
   await expect(
     page.getByRole('cell', { name: 'failed', exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole('cell', { name: 'Unavailable', exact: true }),
+    page.getByRole('cell', { name: '—', exact: true }).first(),
   ).toBeVisible();
 });
 

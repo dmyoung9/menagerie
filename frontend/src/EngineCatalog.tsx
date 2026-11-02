@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { api, readApi, message } from './ui';
 import { engineCatalog } from './contracts';
@@ -8,9 +8,11 @@ import type { EngineCatalogEntry, EngineRelease, Runtime } from './types';
 export function EngineCatalog({
   runtimes,
   recommended,
+  actions,
 }: {
   runtimes: Runtime[];
   recommended?: string;
+  actions?: ReactNode;
 }) {
   const [engines, setEngines] = useState<EngineCatalogEntry[]>([]),
     [busy, setBusy] = useState(false),
@@ -51,40 +53,47 @@ export function EngineCatalog({
     <section aria-label="Install engines">
       <div className="section-heading">
         <h2>Install an engine</h2>
-        <Button
-          variant="outline"
-          type="button"
-          disabled={busy}
-          onClick={refresh}
-        >
-          {busy ? 'Working…' : 'Check for updates'}
-        </Button>
+        <div className="actions">
+          {actions}
+          <Button
+            variant="outline"
+            type="button"
+            disabled={busy}
+            onClick={refresh}
+          >
+            {busy ? 'Working…' : 'Check for updates'}
+          </Button>
+        </div>
       </div>
       <p className="muted">
         Updates install alongside existing versions. Choose the new version in
         your deployment when ready.
       </p>
       {notice && <p role="status">{notice}</p>}
-      <div className="model-grid">
+      <div className="engine-list">
         {engines.map((engine) => (
-          <Card className="mb-5 min-w-0 gap-0 p-0 library-card" key={engine.id}>
-            <CardContent className="p-0">
+          <section className="engine-row" key={engine.id}>
+            <div>
               <h3>
                 {engine.name}
                 {recommended === engine.id ? ' · Recommended' : ''}
               </h3>
               <p>{engine.description}</p>
               {engine.note && <p>{engine.note}</p>}
+            </div>
+            <div className="engine-builds">
               {engine.releases.map((recipe) => {
                 const installed = runtimes.some(
                   (r) => r.managed?.recipe_id === recipe.id,
                 );
                 return (
-                  <div key={recipe.id}>
-                    <p>
-                      {recipe.version} · {recipe.backend.toUpperCase()}
-                    </p>
-                    <p className="muted">{recipe.requirements}</p>
+                  <div className="engine-build" key={recipe.id}>
+                    <div>
+                      <p>
+                        {recipe.version} · {recipe.backend.toUpperCase()}
+                      </p>
+                      <p className="muted">{recipe.requirements}</p>
+                    </div>
                     <Button
                       variant="outline"
                       type="button"
@@ -100,8 +109,8 @@ export function EngineCatalog({
                   </div>
                 );
               })}
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         ))}
       </div>
     </section>
