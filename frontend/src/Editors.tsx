@@ -231,49 +231,73 @@ export function ConfigurationFields({
                 </NativeSelectOption>
               ))}
             </NativeSelect>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setInstalling(!installing)}
+            >
+              {installing ? 'Hide engine downloads' : 'Install an engine'}
+            </Button>
           </Field>
         </FieldGroup>
-        {modelFields}
-        {engineHint.reason && <p className="muted">{engineHint.reason}</p>}
-        <Button
-          variant="outline"
-          type="button"
-          onClick={() => setInstalling(!installing)}
-        >
-          {installing ? 'Hide engine downloads' : 'Install an engine'}
-        </Button>
         {installing && (
           <EngineCatalog
             runtimes={data.runtimes || []}
             recommended={engineHint.engine ?? undefined}
           />
         )}
-        <RuntimeSettings
-          section="model"
-          schema={schema}
-          value={value.config}
-          change={(config) => set({ ...value, config })}
-          host={data.host?.[0]}
-          recommendation={{ gpu_layers_max: layers, ...recommendation }}
-        />
-        {artifact?.metadata?.projector &&
-          runtime?.capabilities?.schema?.mmproj && (
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() =>
-                set({
-                  ...value,
-                  config: {
-                    ...value.config,
-                    mmproj: artifact.metadata?.projector?.path || '',
-                  },
-                })
-              }
-            >
-              Use downloaded projector: {artifact.metadata.projector.name}
-            </Button>
-          )}
+        {modelFields}
+        {schema.mmproj && (
+          <FieldSet className="model-settings-group">
+            <FieldLegend>Multimodal</FieldLegend>
+            <RuntimeSettings
+              section="multimodal"
+              schema={schema}
+              value={value.config}
+              change={(config) => set({ ...value, config })}
+              host={data.host?.[0]}
+              recommendation={{ gpu_layers_max: layers, ...recommendation }}
+            />
+            {artifact?.metadata?.projector &&
+              runtime?.capabilities?.schema?.mmproj && (
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() =>
+                    set({
+                      ...value,
+                      config: {
+                        ...value.config,
+                        mmproj: artifact.metadata?.projector?.path || '',
+                      },
+                    })
+                  }
+                >
+                  Use downloaded projector: {artifact.metadata.projector.name}
+                </Button>
+              )}
+          </FieldSet>
+        )}
+        {[
+          'spec-type',
+          'spec-draft-model',
+          'model-draft',
+          'spec-draft-n-max',
+          'spec-draft-n-min',
+          'draft-max',
+          'draft-min',
+        ].some((key) => schema[key]) && (
+          <FieldSet className="model-settings-group">
+            <FieldLegend>MTP</FieldLegend>
+            <RuntimeSettings
+              section="mtp"
+              schema={schema}
+              value={value.config}
+              change={(config) => set({ ...value, config })}
+              host={data.host?.[0]}
+            />
+          </FieldSet>
+        )}
       </SettingsSection>
       {(['memory', 'performance', 'generation', 'other'] as const).map(
         (section) => (

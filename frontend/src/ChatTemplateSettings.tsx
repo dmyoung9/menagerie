@@ -46,19 +46,14 @@ export function ChatTemplateSettings({
     if (t) onChange({ source: t.kind, asset_id: t.id });
   }
 
-  const effectiveDetail = effective.asset
-    ? ` — ${effective.asset.name}${
-        effective.asset.status === 'missing' || effective.asset.error
-          ? ` (${effective.asset.error || 'not available'})`
-          : ''
-      }`
-    : ' (engine default, no template file)';
+  const unavailable =
+    effective.source !== 'automatic' &&
+    (!effective.asset ||
+      effective.asset.status === 'missing' ||
+      !!effective.asset.error);
 
   return (
-    <Field
-      label={label}
-      hint="Deployment override, then model default, then engine default."
-    >
+    <Field label={label}>
       <NativeSelect
         value={
           override && override.source !== 'automatic'
@@ -74,10 +69,11 @@ export function ChatTemplateSettings({
           </NativeSelectOption>
         ))}
       </NativeSelect>
-      <p className="mb-4 text-xs text-muted-foreground">
-        Effective: {templateSourceLabel(effective.source)}
-        {effectiveDetail}
-      </p>
+      {unavailable && (
+        <p className="error-text" role="alert">
+          Selected template is unavailable. Choose another template.
+        </p>
+      )}
     </Field>
   );
 }

@@ -183,7 +183,13 @@ export function RuntimeSettings({
   host?: HostSnapshot;
   recommendation?: RuntimeRecommendation;
   section?:
-    'model' | 'memory' | 'performance' | 'generation' | 'reasoning' | 'other';
+    | 'multimodal'
+    | 'mtp'
+    | 'memory'
+    | 'performance'
+    | 'generation'
+    | 'reasoning'
+    | 'other';
   before?: ReactNode;
   after?: ReactNode;
 }) {
@@ -194,11 +200,11 @@ export function RuntimeSettings({
     change(next);
   };
   const groups: [string, string, string[]][] = [
+    ['multimodal', 'Multimodal', ['mmproj']],
     [
-      'model',
-      'Model & engine',
+      'mtp',
+      'MTP',
       [
-        'mmproj',
         'spec-type',
         'spec-draft-model',
         'model-draft',
@@ -576,7 +582,7 @@ export function RuntimeSettings({
           const fields = (
             <>
               {before}
-              {name === 'model' && schema['spec-type'] && (
+              {name === 'mtp' && schema['spec-type'] && (
                 <p className="muted">
                   MTP requires compatible weights and engine support. Set the
                   engine's MTP type (for example, draft-mtp); leave blank to
@@ -599,7 +605,9 @@ export function RuntimeSettings({
               {after}
             </>
           );
-          return section === 'model' || section === 'reasoning' ? (
+          return section === 'multimodal' ||
+            section === 'mtp' ||
+            section === 'reasoning' ? (
             <div key={name}>{fields}</div>
           ) : (
             <SettingsSection key={name} name={name} title={title}>

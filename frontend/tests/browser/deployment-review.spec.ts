@@ -58,6 +58,22 @@ for (const width of [1440, 576, 320]) {
     };
     const idle = fixture.registry.deployments.find((d) => d.id === 'idle')!;
     idle.profile_snapshot!.config.extension = 'preserved';
+    fixture.registry.models[0].metadata = {
+      ...fixture.registry.models[0].metadata,
+      projector: {
+        name: 'example-mmproj.gguf',
+        path: '/models/example-mmproj.gguf',
+      },
+    };
+    await page.route('**/api/models/model/engine-recommendation', (route) =>
+      route.fulfill({
+        json: {
+          engine: 'prism',
+          reason:
+            'This ternary artifact needs specialized kernels; use the Prism build rather than stock llama.cpp.',
+        },
+      }),
+    );
     await page.goto('/#/deployments/idle/configuration');
     const config = page.locator('form.configuration-editor');
     for (const title of [
@@ -83,27 +99,123 @@ for (const width of [1440, 576, 320]) {
     await expect(page.getByText('Model metadata', { exact: true })).toHaveCount(
       0,
     );
+    await expect(config.getByText(/^Effective:/)).toHaveCount(0);
+    await expect(
+      config.getByText(
+        'Deployment override, then model default, then engine default.',
+        { exact: true },
+      ),
+    ).toHaveCount(0);
+    await expect(
+      config.getByText(/This ternary artifact needs specialized kernels/),
+    ).toHaveCount(0);
+    const model = config.locator('[data-settings-section="model"]');
+    const engineField = model.locator('[data-slot="field"]').filter({
+      has: page.getByRole('combobox', { name: 'Engine', exact: true }),
+    });
+    await expect(
+      engineField.getByRole('button', {
+        name: 'Install an engine',
+        exact: true,
+      }),
+    ).toBeVisible();
+    const multimodal = model.getByRole('group', {
+      name: 'Multimodal',
+      exact: true,
+    });
+    const mtp = model.getByRole('group', { name: 'MTP', exact: true });
+    await expect(
+      multimodal.getByLabel('Multimodal projector path', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      multimodal.getByLabel('Speculative decoding type (MTP)', { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      mtp.getByLabel('Speculative decoding type (MTP)', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      mtp.getByLabel('Multimodal projector path', { exact: true }),
+    ).toHaveCount(0);
+    await multimodal
+      .getByRole('button', {
+        name: 'Use downloaded projector: example-mmproj.gguf',
+        exact: true,
+      })
+      .click();
+    await expect(
+      multimodal.getByLabel('Multimodal projector path', { exact: true }),
+    ).toHaveValue('/models/example-mmproj.gguf');
+    await expect(
+      mtp.getByLabel('Speculative decoding type (MTP)', { exact: true }),
+    ).toHaveValue('');
+    expect(
+      await model
+        .getByRole('button', { name: 'Install an engine', exact: true })
+        .evaluate(
+          (button) =>
+            !!(
+              button.compareDocumentPosition(
+                button
+                  .closest('[data-settings-section="model"]')!
+                  .querySelector('select[id]:not([required])')!,
+              ) & Node.DOCUMENT_POSITION_FOLLOWING
+            ),
+        ),
+    ).toBe(true);
     await expect(
       config.getByLabel('Default reasoning budget', { exact: true }),
     ).toBeVisible();
-    const inputs = config.getByRole('group', {
-      name: 'Input capabilities',
+    const inputs = config
+      .getByRole('group', {
+        name: 'Input modalities',
+        exact: true,
+      })
+      .first();
+    const capabilities = config.getByRole('group', {
+      name: 'Capabilities',
       exact: true,
     });
+    await expect(inputs.getByRole('button')).toHaveCount(4);
+    await expect(
+      inputs.getByRole('button', { name: 'Tools', exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      inputs.getByRole('button', { name: 'Reasoning', exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      inputs.getByRole('button', { name: 'Text', exact: true }),
+    ).toBeDisabled();
     await expect(
       inputs.getByRole('button', { name: 'Text', exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
     await inputs.getByRole('button', { name: 'Images', exact: true }).click();
+    await expect(
+      inputs.getByRole('button', { name: 'Text', exact: true }),
+    ).toBeEnabled();
     await inputs.getByRole('button', { name: 'Text', exact: true }).click();
-    await inputs
+    await expect(
+      inputs.getByRole('button', { name: 'Images', exact: true }),
+    ).toBeDisabled();
+    await capabilities
+      .getByRole('button', { name: 'Tools', exact: true })
+      .click();
+    await capabilities
       .getByRole('button', { name: 'Reasoning', exact: true })
       .click();
-    const outputs = config.getByRole('group', {
-      name: 'Output formats',
-      exact: true,
-    });
+    await expect(
+      inputs.getByRole('button', { name: 'Images', exact: true }),
+    ).toBeDisabled();
+    const outputs = config
+      .getByRole('group', {
+        name: 'Output modalities',
+        exact: true,
+      })
+      .first();
     await outputs.getByRole('button', { name: 'Image', exact: true }).click();
     await outputs.getByRole('button', { name: 'Text', exact: true }).click();
+    await expect(
+      outputs.getByRole('button', { name: 'Image', exact: true }),
+    ).toBeDisabled();
     for (const [key, value] of Object.entries({
       temp: '0.8',
       'top-p': '0.9',
@@ -130,6 +242,24 @@ for (const width of [1440, 576, 320]) {
     await expect(
       page.getByRole('complementary', { name: 'Deployment resource preview' }),
     ).toContainText('GPU 0');
+    const footer = config.locator('.configuration-save-bar');
+    const padding = await footer.evaluate((el) => ({
+      left: parseFloat(getComputedStyle(el).paddingLeft),
+      right: parseFloat(getComputedStyle(el).paddingRight),
+    }));
+    expect(padding.left).toBeGreaterThanOrEqual(16);
+    expect(padding.right).toBeGreaterThanOrEqual(16);
+    if (width < 1100) {
+      const networkBox = (await config
+        .locator('[data-settings-section="network"]')
+        .boundingBox())!;
+      const resourceBox = (await config
+        .locator('.configuration-resources')
+        .boundingBox())!;
+      expect(
+        resourceBox.y - networkBox.y - networkBox.height,
+      ).toBeGreaterThanOrEqual(16);
+    }
     await page.getByRole('button', { name: 'Identity', exact: true }).click();
     await page.screenshot({
       path: testInfo.outputPath(`configuration-${width}.png`),
@@ -167,14 +297,40 @@ for (const width of [1440, 576, 320]) {
       'n-cpu-moe': 4,
       'reasoning-budget': 8192,
       extension: 'preserved',
+      mmproj: '/models/example-mmproj.gguf',
     });
     expect(saved.configuration!.catalog.model?.capabilities).toMatchObject({
       input: ['image'],
       output: ['image'],
       reasoning: { supported: true },
+      tools: true,
     });
   });
 }
+
+test('template defaults stay quiet while missing selected templates remain actionable', async ({
+  page,
+  fixture,
+}) => {
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.template_override =
+    { source: 'custom', asset_id: 'missing-template' };
+  await page.goto('/#/deployments/idle/configuration');
+  const warning = page
+    .getByRole('alert')
+    .filter({ hasText: 'Selected template is unavailable.' });
+  await expect(warning).toBeVisible();
+  await page
+    .getByRole('combobox', { name: 'Chat template', exact: true })
+    .selectOption('inherit-model');
+  await expect(warning).toHaveCount(0);
+  await expect(page.getByText(/^Effective:/)).toHaveCount(0);
+  await expect(
+    page.getByText(
+      'Deployment override, then model default, then engine default.',
+      { exact: true },
+    ),
+  ).toHaveCount(0);
+});
 
 test('discard resets typed controls, invalid raw edits and the navigation guard', async ({
   page,

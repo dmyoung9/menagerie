@@ -58,7 +58,11 @@ const allowed: Record<string, string[]> = {
     'raw_args',
     'catalog',
   ],
-  deployments: ['id', ...Object.keys(defaults.deployments)],
+  deployments: [
+    'id',
+    ...Object.keys(defaults.deployments),
+    'template_override',
+  ],
   runtimes: [
     'id',
     ...Object.keys(defaults.runtimes),

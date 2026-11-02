@@ -721,6 +721,15 @@ meter::-moz-meter-bar {
 .configuration-fields {
   gap: 20px;
 }
+.model-settings-group {
+  margin-top: 20px;
+}
+.configuration-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 20px;
+  align-items: start;
+}
 .configuration-editor > fieldset {
   gap: 20px;
 }
@@ -729,7 +738,7 @@ meter::-moz-meter-bar {
   flex-wrap: wrap;
   gap: 4px;
   grid-column: 1 / -1;
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 .configuration-save-bar {
   position: sticky;
@@ -742,6 +751,10 @@ meter::-moz-meter-bar {
 }
 .configuration-save-bar > [role='status'] {
   margin-right: auto;
+}
+.dialog-actions.configuration-save-bar {
+  padding-inline: max(16px, env(safe-area-inset-left))
+    max(16px, env(safe-area-inset-right));
 }
 .configuration-resources {
   min-width: 0;
@@ -795,6 +808,9 @@ meter::-moz-meter-bar {
     grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
     gap: 0 32px;
     align-items: start;
+  }
+  .configuration-editor.resource-editor {
+    row-gap: 20px;
   }
   .resource-editor > .draft-resources {
     position: sticky;

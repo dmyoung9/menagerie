@@ -199,12 +199,14 @@ export function Capabilities({
   const unavailable = options.filter(
     (p) => p.id !== 'default' && !Object.keys(p.body || {}).length,
   );
-  const features = [
+  const modalities = [
     { id: 'text', label: 'Text', icon: Type },
-    { id: 'tools', label: 'Tools', icon: Wrench },
     { id: 'image', label: 'Images', icon: Image },
     { id: 'audio', label: 'Audio', icon: AudioLines },
     { id: 'video', label: 'Video', icon: Video },
+  ];
+  const features = [
+    { id: 'tools', label: 'Tools', icon: Wrench },
     { id: 'reasoning', label: 'Reasoning', icon: Brain },
   ];
   const selected = (id: string) =>
@@ -212,7 +214,7 @@ export function Capabilities({
       ? caps.tools
       : id === 'reasoning'
         ? typeof caps.reasoning === 'object' && !!caps.reasoning.supported
-        : caps.input.includes(id);
+        : false;
   return (
     <section
       className="capabilities-panel"
@@ -226,23 +228,15 @@ export function Capabilities({
         multiple
         variant="outline"
         className="flex-wrap"
-        aria-label="Input capabilities"
+        aria-label="Capabilities"
         value={features.filter((f) => selected(f.id)).map((f) => f.id)}
         onValueChange={(next) => {
-          const input = [
-            ...caps.input.filter(
-              (id: string) => !features.some((f) => f.id === id),
-            ),
-            ...next.filter((id) => id !== 'tools' && id !== 'reasoning'),
-          ];
-          valid('input-formats', input.length > 0);
           update({
             tools: next.includes('tools'),
             reasoning: {
               ...(typeof caps.reasoning === 'object' ? caps.reasoning : {}),
               supported: next.includes('reasoning'),
             },
-            input,
           });
         }}
       >
@@ -256,44 +250,75 @@ export function Capabilities({
           );
         })}
       </ToggleGroup>
-      {!caps.input.length && (
-        <p className="error-text" role="alert">
-          Select at least one input format.
-        </p>
-      )}
       <FieldSet className="output-capabilities">
-        <FieldLegend>Output formats</FieldLegend>
+        <FieldLegend>Input modalities</FieldLegend>
         <ToggleGroup
           multiple
           variant="outline"
           className="flex-wrap"
-          aria-label="Output formats"
+          aria-label="Input modalities"
+          value={caps.input}
+          onValueChange={(next) => {
+            if (!next.length) return;
+            valid('input-formats', true);
+            update({
+              input: [
+                ...new Set([
+                  ...caps.input.filter(
+                    (id) => !modalities.some((m) => m.id === id),
+                  ),
+                  ...next,
+                ]),
+              ],
+            });
+          }}
+        >
+          {modalities.map(({ id, label, icon: Icon }) => (
+            <ToggleGroupItem
+              key={id}
+              value={id}
+              disabled={caps.input.length === 1 && caps.input.includes(id)}
+            >
+              <Icon />
+              {label}
+              {caps.input.includes(id) && <Check />}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </FieldSet>
+      <FieldSet className="output-capabilities">
+        <FieldLegend>Output modalities</FieldLegend>
+        <ToggleGroup
+          multiple
+          variant="outline"
+          className="flex-wrap"
+          aria-label="Output modalities"
           value={caps.output}
           onValueChange={(next) => {
             if (next.length)
               update({
                 output: [
-                  ...caps.output.filter(
-                    (id) => !['text', 'image', 'audio', 'video'].includes(id),
-                  ),
-                  ...next,
+                  ...new Set([
+                    ...caps.output.filter(
+                      (id) => !['text', 'image', 'audio', 'video'].includes(id),
+                    ),
+                    ...next,
+                  ]),
                 ],
               });
           }}
         >
-          {features
-            .filter((f) => ['text', 'image', 'audio', 'video'].includes(f.id))
-            .map(({ id, icon: Icon }) => (
-              <ToggleGroupItem
-                key={id}
-                value={id}
-                disabled={caps.output.length === 1 && caps.output.includes(id)}
-              >
-                <Icon />
-                {reasoningLabel(id)}
-                {caps.output.includes(id) && <Check />}
-              </ToggleGroupItem>
-            ))}
+          {modalities.map(({ id, icon: Icon }) => (
+            <ToggleGroupItem
+              key={id}
+              value={id}
+              disabled={caps.output.length === 1 && caps.output.includes(id)}
+            >
+              <Icon />
+              {reasoningLabel(id)}
+              {caps.output.includes(id) && <Check />}
+            </ToggleGroupItem>
+          ))}
         </ToggleGroup>
       </FieldSet>
       {showOutputLimit && <OutputLimit catalog={catalog} change={change} />}
