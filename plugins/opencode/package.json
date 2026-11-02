@@ -1,6 +1,6 @@
 {
   "name": "menagerie-opencode-plugin",
-  "version": "2.1.5",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "exports": "./index.ts",

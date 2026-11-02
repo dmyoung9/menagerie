@@ -1,3 +1,3 @@
 """Application/plugin distribution version; catalog schema versions are separate."""
 
-VERSION = "2.1.5"
+VERSION = "2.2.0"
