@@ -409,6 +409,15 @@ export const job = d.object<T.Job>({
   state: d.string,
   created_at: d.number,
   progress: opt(d.string),
+  transfer: opt(
+    d.nullable(
+      d.object({
+        done_bytes: d.number,
+        total_bytes: maybeNumber,
+        rate_bytes_per_second: maybeNumber,
+      }),
+    ),
+  ),
   error: opt(d.string),
 });
 export const recommendation = d.object<T.RuntimeRecommendation>({

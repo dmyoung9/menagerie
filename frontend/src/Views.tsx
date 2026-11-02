@@ -50,6 +50,7 @@ import {
 } from './ui';
 import { ModelCard } from './ModelCard';
 import { ResourceHistory } from '@/components/resource-history';
+import { OperationProgress } from '@/components/operation-progress';
 import { memory, percent, tokenRate } from '@/lib/formatters';
 import { EngineCatalog } from './EngineCatalog';
 import { byteSize, parameterSize, quantization } from './variants';
@@ -1149,11 +1150,9 @@ export function ActivityPage({
                     <Status
                       value={j.state.charAt(0) + j.state.slice(1).toLowerCase()}
                     />
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <strong>{j.name}</strong>
-                      <p className={j.error ? 'error-text' : 'muted'}>
-                        {j.error || j.progress}
-                      </p>
+                      <OperationProgress job={j} />
                     </div>
                   </div>
                 ))

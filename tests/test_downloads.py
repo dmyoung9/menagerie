@@ -13,6 +13,17 @@ def files(*names):
     return [{"name": name, "size": 100, "sha256": None} for name in names]
 
 
+def test_progress_keeps_byte_facts_and_clears_them_between_phases(tmp_path):
+    store = Store(tmp_path / "state")
+    job = store.put("job", {"id": "download", "state": "RUNNING"})
+    jobs = Jobs(SimpleNamespace(store=store))
+    transfer = {"done_bytes": 512, "total_bytes": 1024, "rate_bytes_per_second": 128}
+    jobs.progress(job["id"], "Downloading", transfer=transfer)
+    assert store.get("job", job["id"])["transfer"] == transfer
+    jobs.progress(job["id"], "Verifying checksums")
+    assert store.get("job", job["id"])["transfer"] is None
+
+
 def test_single_gguf_download():
     selected = selected_download(files("model-Q4_K_M.gguf"), "model-Q4_K_M.gguf")
     assert [f["name"] for f in selected] == ["model-Q4_K_M.gguf"]

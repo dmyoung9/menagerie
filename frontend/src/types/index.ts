@@ -348,6 +348,11 @@ export type Job = {
   state: string;
   created_at: number;
   progress?: string;
+  transfer?: {
+    done_bytes: number;
+    total_bytes?: number | null;
+    rate_bytes_per_second?: number | null;
+  } | null;
   error?: string;
 };
 export type MetricSample = HostSnapshot;
