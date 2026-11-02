@@ -243,6 +243,8 @@ export type GpuSnapshot = {
   clock_mhz?: number | null;
 };
 export type HostDeploymentMetrics = {
+  session_id?: string;
+  profile_hash?: string;
   gpu_by_device_mib?: Record<string, number | null>;
   gpu_mib?: number | null;
   rss_mib?: number | null;
@@ -342,6 +344,13 @@ export type SourceBuildPlan = {
   token: string;
 };
 export type Job = {
+  operation?: string;
+  deployment_id?: string;
+  model_id?: string;
+  repo?: string;
+  filename?: string;
+  result?: unknown;
+  ended_at?: number;
   id: string;
   revision: number;
   name: string;
@@ -547,6 +556,8 @@ export type LaunchPlan = {
 };
 
 export type HistoryRequest = {
+  ts?: number;
+  deployment_id?: string;
   id: string;
   data: {
     model_alias?: string;

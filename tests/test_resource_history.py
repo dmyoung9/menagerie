@@ -184,7 +184,12 @@ async def test_only_measured_limits_abort_an_in_progress_launch(
 
     monkeypatch.setattr(manager, "ready", loading)
     try:
-        with pytest.raises(RuntimeError, match="measured"):
+        expected = {
+            "gpu": "GPU 0 free memory 100 MiB below 2048 MiB",
+            "ram": "System RAM available memory 100 MiB below 4096 MiB",
+            "temperature": "GPU 0 temperature 99 °C above 85 °C",
+        }
+        with pytest.raises(RuntimeError, match=expected[limit]):
             await manager.activate(["a"])
         d = store.get("deployment", "a")
         assert d["state"] == "FAILED" and not manager.owned(d)

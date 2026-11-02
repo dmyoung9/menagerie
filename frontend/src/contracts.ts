@@ -311,6 +311,8 @@ export const gpu = d.object<T.GpuSnapshot>({
   clock_mhz: maybeNumber,
 });
 const deploymentMetrics = d.object<T.HostDeploymentMetrics>({
+  session_id: opt(d.string),
+  profile_hash: opt(d.string),
   gpu_by_device_mib: opt(d.record(d.nullable(d.number))),
   gpu_mib: maybeNumber,
   rss_mib: maybeNumber,
@@ -403,6 +405,13 @@ export const operationEvent: d.Decoder<T.OperationEvent> = (value, path) => {
   return event;
 };
 export const job = d.object<T.Job>({
+  operation: opt(d.string),
+  deployment_id: opt(d.string),
+  model_id: opt(d.string),
+  repo: opt(d.string),
+  filename: opt(d.string),
+  result: opt(d.unknown),
+  ended_at: opt(d.number),
   id: d.string,
   revision: d.number,
   name: d.string,
@@ -597,6 +606,8 @@ export const historySession = d.object<T.HistorySession>({
   outcome: opt(d.string),
 });
 export const historyRequest = d.object<T.HistoryRequest>({
+  ts: opt(d.number),
+  deployment_id: opt(d.string),
   id: d.string,
   data: d.object({
     model_alias: opt(d.string),

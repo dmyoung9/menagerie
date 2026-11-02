@@ -39,7 +39,8 @@ import * as contracts from './contracts';
 import { array } from './decode';
 import { DeploymentWizard } from './DeploymentWizard';
 import { LiveResources } from './Resources';
-import { memory, temperature } from '@/lib/formatters';
+import { memory } from '@/lib/formatters';
+import { Downloads } from '@/components/downloads';
 import { ProcessResources } from '@/components/process-resources';
 import { TelemetrySeries } from '@/components/charts/telemetry-series';
 import { Editor } from './Editors';
@@ -57,18 +58,8 @@ import {
   ModelLibrary,
   SettingsPage,
 } from './Views';
-import { go } from './navigation';
-import {
-  api,
-  Dialog,
-  Empty,
-  Field,
-  gib,
-  Json,
-  message,
-  number,
-  Tabs,
-} from './ui';
+import { go, canNavigate } from './navigation';
+import { api, Dialog, Empty, Field, Json, message, number, Tabs } from './ui';
 import brandLogo from './assets/logo-mono.png';
 import type {
   AppStatus,
@@ -127,11 +118,22 @@ function MainNavigation({
 const titleCase = (s: string) =>
   s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 function useRoute() {
-  const [route, setRoute] = useState(() =>
-    window.location.hash.slice(2).split('/'),
-  );
+  const readRoute = () =>
+    window.location.hash.slice(2).split('?')[0].split('/');
+  const [route, setRoute] = useState(() => readRoute());
   useEffect(() => {
-    const change = () => setRoute(window.location.hash.slice(2).split('/'));
+    let previous = window.location.hash,
+      pending = false;
+    const change = async () => {
+      if (pending) return;
+      const next = window.location.hash;
+      pending = true;
+      if (await canNavigate()) {
+        previous = next;
+        setRoute(readRoute());
+      } else window.history.replaceState(null, '', previous || '#/overview');
+      pending = false;
+    };
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
@@ -461,20 +463,27 @@ export default function App() {
   const selected = detail
     ? serving.find((d) => d.id === depView || d.member_ids?.includes(depView))
     : undefined;
-  const modelTab = route[1] === 'discover' ? 'Discover' : 'Installed';
-  const activityTab = [
-    'events',
-    'operations',
-    'requests',
-    'sessions',
-    'launches',
-  ].includes(route[1])
-    ? titleCase(route[1])
-    : 'Events';
-  const settingsTab = ['engines', 'host', 'recovery'].includes(route[1])
+  const modelTab =
+    route[1] === 'discover'
+      ? 'Discover'
+      : route[1] === 'downloads'
+        ? 'Downloads'
+        : 'Installed';
+  const activityTab = route[1] === 'requests' ? 'Requests' : 'Events';
+  const settingsTab = ['engines', 'host', 'history', 'recovery'].includes(
+    route[1],
+  )
     ? titleCase(route[1])
     : 'Engines';
   const busyJobs = jobs.filter((j) => ['QUEUED', 'RUNNING'].includes(j.state));
+  useEffect(() => {
+    if (page === 'activity' && ['operations', 'launches'].includes(route[1]))
+      go('activity/events');
+    if (page === 'activity' && route[1] === 'sessions')
+      go('settings/history/runs');
+    if (page === 'deployments' && route[2] === 'policy')
+      go(`deployments/${route[1]}/configuration`);
+  }, [page, route]);
   return (
     <SidebarProvider>
       <a
@@ -718,20 +727,9 @@ export default function App() {
                   <Card className="mb-5 min-w-0 gap-0 p-0">
                     <CardContent className="p-0">
                       <ActivityFeed
-                        events={events
-                          .filter(
-                            (e) =>
-                              ![
-                                'QUEUED',
-                                'VALIDATING',
-                                'STARTING',
-                                'LOADING',
-                                'STOPPING',
-                              ].includes(
-                                typeof e.data?.to === 'string' ? e.data.to : '',
-                              ),
-                          )
-                          .slice(0, 4)}
+                        events={events}
+                        jobs={jobs}
+                        limit={4}
                         deployments={deployments}
                       />
                     </CardContent>
@@ -746,50 +744,18 @@ export default function App() {
                     deployments={data.deployments || []}
                     interval={status?.settings.sample_seconds || 2}
                   />
-                  <Card>
-                    <CardContent>
-                      <details className="m-0">
-                        <summary>Hardware</summary>
-                        <div className="hardware-grid">
-                          {(host.gpus || []).map((g, i: number) => (
-                            <dl className="properties" key={g.index ?? i}>
-                              <dt>GPU {g.index ?? i}</dt>
-                              <dd>{g.name}</dd>
-                              <dt>Utilization</dt>
-                              <dd>{number(g.utilization, 0)}%</dd>
-                              <dt>Temperature</dt>
-                              <dd>{temperature(g.temperature)}</dd>
-                              <dt>Power</dt>
-                              <dd>{number(g.power_w, 0)} W</dd>
-                            </dl>
-                          ))}
-                        </div>
-                        <dl className="properties">
-                          <dt>Disk free</dt>
-                          <dd>{number(host.disk_free_gib)} GiB</dd>
-                          <dt>CPU</dt>
-                          <dd>{number(host.cpu_percent)}%</dd>
-                          <dt>Swap used</dt>
-                          <dd>{gib(host.swap_used_mib)} GiB</dd>
-                        </dl>
-                        <details>
-                          <summary>GPU processes</summary>
-                          <Json value={host.processes || []} />
-                        </details>
-                      </details>
-                    </CardContent>
-                  </Card>
                 </>
               )}
               {page === 'models' && (
                 <>
                   <Tabs
-                    items={['Installed', 'Discover']}
+                    items={['Installed', 'Discover', 'Downloads']}
                     value={modelTab}
                     onChange={(t) => go('models/' + t.toLowerCase())}
                   />
                   {modelTab === 'Installed' ? (
                     <ModelLibrary
+                      key={route[2] || 'library'}
                       data={data}
                       query={query}
                       setQuery={setQuery}
@@ -802,6 +768,8 @@ export default function App() {
                       }
                       discover={() => go('models/discover')}
                     />
+                  ) : modelTab === 'Downloads' ? (
+                    <Downloads jobs={jobs} models={data.models} />
                   ) : (
                     <ModelCatalog
                       api={api}
@@ -821,7 +789,14 @@ export default function App() {
                         key={selected.id}
                         d={selected}
                         tab={
-                          ['policy', 'activity', 'logs'].includes(route[2])
+                          [
+                            'configuration',
+                            'advanced',
+                            'requests',
+                            'policy',
+                            'activity',
+                            'logs',
+                          ].includes(route[2])
                             ? titleCase(route[2])
                             : 'Models'
                         }
@@ -829,15 +804,20 @@ export default function App() {
                         host={host}
                         actions={actions}
                         events={events}
+                        saved={() => void reload()}
                       />
                     ) : (
                       <DeploymentDetail
                         key={selected.id}
                         d={selected}
                         tab={
-                          ['configuration', 'activity', 'logs'].includes(
-                            route[2],
-                          )
+                          [
+                            'configuration',
+                            'advanced',
+                            'requests',
+                            'activity',
+                            'logs',
+                          ].includes(route[2])
                             ? titleCase(route[2])
                             : 'Overview'
                         }
@@ -846,6 +826,7 @@ export default function App() {
                         inflight={selected.inflight || 0}
                         actions={actions}
                         events={events}
+                        saved={() => void reload()}
                       />
                     )
                   ) : (
@@ -924,10 +905,6 @@ export default function App() {
                   jobs={jobs}
                   events={events}
                   deployments={deployments}
-                  inspect={inspect}
-                  restore={(path, text) =>
-                    open({ type: 'restore', path, text })
-                  }
                 />
               )}
               {page === 'settings' && (
@@ -936,7 +913,11 @@ export default function App() {
                   data={data}
                   status={status}
                   actions={actions}
-                  policy={() => open({ type: 'policy' })}
+                  savePolicy={async (value) => {
+                    await api('/api/settings', value);
+                    await refresh();
+                  }}
+                  purge={() => open({ type: 'purge', days: 7 })}
                   backup={() => open({ type: 'backup' })}
                   install={() => open({ type: 'source' })}
                   pull={() =>
@@ -957,7 +938,7 @@ export default function App() {
             </>
           )}
           {busyJobs.length > 0 && (
-            <a className="operation-indicator" href="#/activity/operations">
+            <a className="operation-indicator" href="#/activity/events">
               <RefreshCw size={14} className="spin" />
               {busyJobs.length === 1
                 ? busyJobs[0].name

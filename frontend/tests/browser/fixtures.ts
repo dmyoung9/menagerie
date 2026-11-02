@@ -222,6 +222,8 @@ export const test = base.extend<{ fixture: Fixture }>({
             { ...fixture.host, ts: fixture.host.ts - 60 },
             fixture.host,
           ]);
+        if (path.endsWith('/performance')) return send([]);
+        if (path === '/api/settings' && body) return send(body);
         if (path === '/api/history/sessions')
           return send([
             {
@@ -343,6 +345,9 @@ export const test = base.extend<{ fixture: Fixture }>({
             return send(saved);
           }
           const saved = member(input, id);
+          saved.revision =
+            (fixture.registry.deployments.find((d) => d.id === id)?.revision ||
+              0) + 1;
           fixture.registry.deployments = [
             ...fixture.registry.deployments.filter((d) => d.id !== id),
             saved,

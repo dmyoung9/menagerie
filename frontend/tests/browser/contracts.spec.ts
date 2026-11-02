@@ -57,9 +57,8 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
     vendor: { retain: true },
     model: { compatibility: { reasoningField: 'reasoning_content' } },
   });
-  await page.goto('/#/deployments/idle');
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
-  const dialog = page.getByRole('dialog');
+  await page.goto('/#/deployments/idle/configuration');
+  const dialog = page.locator('main');
   await dialog.getByText('Advanced model settings', { exact: true }).click();
   await dialog.getByText('Engine arguments', { exact: true }).click();
   const args = dialog.getByRole('textbox', {
@@ -76,7 +75,11 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
   ).toEqual([]);
   await args.fill('["--fixture-control"]');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(dialog).toBeHidden();
+  await expect
+    .poll(
+      () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
+    )
+    .toBe(2);
   const write = fixture.writes.find((entry) =>
     entry.path.startsWith('/api/deployments'),
   );

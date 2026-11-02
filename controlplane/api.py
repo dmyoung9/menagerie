@@ -457,7 +457,9 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.post("/api/models/{ident}/refresh-templates")
     async def refresh_templates_endpoint(ident: str):
         return jobs.submit(
-            "Refresh chat templates", lambda j: jobs.refresh_templates(ident)
+            "Refresh chat templates",
+            lambda j: jobs.refresh_templates(ident),
+            model_id=ident,
         )
 
     @app.post("/api/models/{ident}/template-default")
@@ -599,12 +601,19 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             lambda job: manager.activate(
                 [ident], body.get("override", False), token=body["plan_token"]
             ),
+            deployment_id=ident,
+            operation="load",
         )
 
     @app.post("/api/serving-deployments/{ident}/stop")
     async def stop_serving(ident: str):
         unit = manager.unit(ident)
-        return jobs.submit("Unload " + unit["name"], lambda job: manager.stop(ident))
+        return jobs.submit(
+            "Unload " + unit["name"],
+            lambda job: manager.stop(ident),
+            deployment_id=ident,
+            operation="unload",
+        )
 
     @app.post("/api/serving-deployments/{ident}/enabled")
     async def enable_serving(ident: str, request: Request):
@@ -890,14 +899,40 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             return store.get("deployment", ident)
 
     @app.get("/api/deployments/{ident}/logs")
-    async def logs(ident: str):
+    async def logs(ident: str, session_id: str | None = None):
         d = store.get("deployment", ident)
         path = Path(d.get("log_path", str(store.root / "missing")))
         if not path.is_file():
             return {"text": "No runtime log yet"}
-        with path.open("rb") as f:
-            f.seek(max(0, path.stat().st_size - 65536))
-            return {"text": f.read().decode(errors="replace")}
+        session = store.get("session", session_id) if session_id else None
+        if session and session.get("deployment_id") != ident:
+            raise ValueError("Run does not belong to this deployment")
+        chunks = []
+        for candidate in (path.with_suffix(".previous.log"), path):
+            if not candidate.is_file():
+                continue
+            with candidate.open("rb") as f:
+                f.seek(max(0, candidate.stat().st_size - 65536))
+                chunks.extend(f.read().decode(errors="replace").splitlines())
+        if session:
+            selected = []
+            for line in chunks:
+                try:
+                    ts = float(line.partition(" ")[0])
+                except ValueError:
+                    continue
+                if session["started_at"] <= ts and (
+                    session.get("ended_at") is None or ts <= session["ended_at"]
+                ):
+                    selected.append(line)
+            chunks = selected
+        return {"text": "\n".join(chunks)[-65536:] or "—"}
+
+    @app.get("/api/deployments/{ident}/performance")
+    async def performance(ident: str, hours: int = 24):
+        from .resource_history import performance_samples
+
+        return performance_samples(store, ident, max(1, min(hours, 2160)))
 
     @app.get("/api/events")
     async def events(after: int = 0):
@@ -1103,11 +1138,21 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         }
 
     @app.get("/api/history/requests")
-    async def requests():
+    async def requests(deployment_id: str | None = None):
+        ids = manager.unit(deployment_id)["member_ids"] if deployment_id else []
         with store.connect() as c:
             return [
                 dict(r) | {"data": json.loads(r["data"])}
-                for r in c.execute("SELECT * FROM requests ORDER BY ts DESC LIMIT 300")
+                for r in c.execute(
+                    "SELECT * FROM requests "
+                    + (
+                        "WHERE deployment_id IN (" + ",".join("?" for _ in ids) + ") "
+                        if ids
+                        else ""
+                    )
+                    + "ORDER BY ts DESC LIMIT 300",
+                    ids,
+                )
             ]
 
     @app.post("/api/registry/{kind}/{ident}/delete")
@@ -1232,7 +1277,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     async def download(request: Request):
         body = await request.json()
         return jobs.submit(
-            "Download model",
+            "Download " + body["repo"] + " · " + body["filename"],
             lambda job: jobs.download(
                 job,
                 body["repo"],
@@ -1240,6 +1285,9 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 body["filename"],
                 body.get("projector"),
             ),
+            operation="download",
+            repo=body["repo"],
+            filename=body["filename"],
         )
 
     @app.post("/api/runtimes/install/preview")

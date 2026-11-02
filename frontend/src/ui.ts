@@ -154,14 +154,15 @@ export function effectiveTemplate(
   return first(modelDefault);
 }
 export function state(d: Pick<Deployment, 'enabled' | 'state'>): string {
+  if (d.state === 'FAILED' || d.state === 'ERROR') return 'Errored';
   if (!d.enabled) return 'Inactive';
   return (
     (
       {
         READY: 'Ready',
         DEGRADED: 'Degraded',
-        FAILED: 'Failed',
-        ERROR: 'Failed',
+        FAILED: 'Errored',
+        ERROR: 'Errored',
         STOPPED: 'Unloaded',
         QUEUED: 'Queued',
         STARTING: 'Starting',

@@ -11,6 +11,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import './catalog.css';
+import { CapabilityBadge } from '@/components/capability-badges';
 
 export function ModelCard({
   name,
@@ -50,15 +51,21 @@ export function ModelCard({
       </CardHeader>
       <CardContent>
         <div className="catalog-chips">
-          {[...new Set(chips)].map((chip) => (
-            <Badge
-              variant="secondary"
-              className="max-w-full whitespace-normal break-words"
-              key={chip}
-            >
-              {chip}
-            </Badge>
-          ))}
+          {[...new Set(chips)].map((chip) =>
+            ['text', 'image', 'audio', 'video', 'reasoning', 'tools'].includes(
+              chip,
+            ) ? (
+              <CapabilityBadge key={chip} name={chip} />
+            ) : (
+              <Badge
+                variant="secondary"
+                className="max-w-full whitespace-normal break-words"
+                key={chip}
+              >
+                {chip}
+              </Badge>
+            ),
+          )}
         </div>
       </CardContent>
       <CardFooter className="mt-auto flex-wrap justify-between gap-3">

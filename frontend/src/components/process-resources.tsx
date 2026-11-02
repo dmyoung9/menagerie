@@ -82,7 +82,8 @@ export function ProcessResources({
           >
             <TableHeader>
               <TableRow>
-                <TableHead>Process / PID</TableHead>
+                <TableHead>Process</TableHead>
+                <TableHead className="numeric">PID</TableHead>
                 <TableHead>Owner</TableHead>
                 <TableHead>Device</TableHead>
                 <TableHead className="numeric">Observed VRAM</TableHead>
@@ -91,9 +92,8 @@ export function ProcessResources({
             <TableBody>
               {filtered.map((p, index) => (
                 <TableRow key={`${p.pid}-${p.gpu_index ?? index}`}>
-                  <TableCell>
-                    {p.name} · {p.pid}
-                  </TableCell>
+                  <TableCell>{p.name}</TableCell>
+                  <TableCell className="numeric">{p.pid}</TableCell>
                   <TableCell>
                     {p.deployment ? (
                       <a
@@ -126,41 +126,6 @@ export function ProcessResources({
               : 'Process telemetry unavailable or no compute processes reported.'}
           </p>
         )}
-        <h3>Deployment residency</h3>
-        <div className="table-wrap">
-          <Table
-            containerProps={{
-              tabIndex: 0,
-              role: 'region',
-              'aria-label': 'Deployment residency table',
-            }}
-          >
-            <TableHeader>
-              <TableRow>
-                <TableHead>Deployment</TableHead>
-                <TableHead className="numeric">Process VRAM</TableHead>
-                <TableHead className="numeric">System RAM (RSS)</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {deployments.map((d) => (
-                <TableRow key={d.id}>
-                  <TableCell>
-                    <a href={'#/deployments/' + (d.unit_id || d.id)}>
-                      {d.name}
-                    </a>
-                  </TableCell>
-                  <TableCell className="numeric">
-                    {memory(host.deployments?.[d.id]?.gpu_mib)}
-                  </TableCell>
-                  <TableCell className="numeric">
-                    {memory(host.deployments?.[d.id]?.rss_mib)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
       </CardContent>
     </Card>
   );

@@ -125,47 +125,9 @@ export function ResourceHistory({ artifactId }: { artifactId?: string }) {
                   </TableBody>
                 </Table>
               </div>
-              <details>
-                <summary>Individual runs</summary>
-                <div className="table-wrap">
-                  <Table
-                    containerProps={{
-                      tabIndex: 0,
-                      role: 'region',
-                      'aria-label': 'Individual resource runs',
-                    }}
-                  >
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Started</TableHead>
-                        <TableHead>Outcome</TableHead>
-                        <TableHead className="numeric">GPU peak</TableHead>
-                        <TableHead className="numeric">RAM peak</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {group.runs.map((run) => (
-                        <TableRow key={run.id}>
-                          <TableCell
-                            title={new Date(
-                              run.started_at * 1000,
-                            ).toISOString()}
-                          >
-                            {timestamp(run.started_at)}
-                          </TableCell>
-                          <TableCell>{run.outcome}</TableCell>
-                          <TableCell className="numeric">
-                            {memory(run.peak_gpu_mib)}
-                          </TableCell>
-                          <TableCell className="numeric">
-                            {memory(run.peak_ram_mib)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </details>
+              <a href={`#/settings/history/runs/${group.artifact_id || ''}`}>
+                View individual runs
+              </a>
             </details>
           ))
         )}

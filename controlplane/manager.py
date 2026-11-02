@@ -183,15 +183,44 @@ class Manager:
         return task
 
     def transition(self, ident, state, reason=None, **extra):
+        from .activity import operation_id
+
         with self.store.transaction() as c:
             d = self.store.get("deployment", ident, c)
             if state != d["state"] and state not in TRANSITIONS.get(d["state"], set()):
                 raise Conflict(f"Invalid transition {d['state']} → {state}")
             old = d["state"]
-            d.update(extra, state=state, state_since=time.time(), failure_reason=reason)
+            correlation = operation_id.get() or (
+                uid()
+                if (
+                    state in {"VALIDATING", "STOPPING"}
+                    and state != old
+                    or old in {"READY", "DEGRADED"}
+                    and state in {"READY", "DEGRADED", "FAILED"}
+                    and state != old
+                )
+                else d.get("operation_id") or uid()
+            )
+            d.update(
+                extra,
+                state=state,
+                state_since=time.time(),
+                failure_reason=reason,
+                operation_id=correlation,
+            )
             self.store.put("deployment", d, historical=False, c=c)
             self.store.event(
-                "state", {"from": old, "to": state, "reason": reason}, ident, c
+                "state",
+                {
+                    "from": old,
+                    "to": state,
+                    "reason": reason,
+                    "operation_id": correlation,
+                    "session_id": d.get("session_id"),
+                    "name": d["name"],
+                },
+                ident,
+                c,
             )
         return d
 
@@ -511,6 +540,9 @@ class Manager:
                 "state": "STARTING",
             },
         )
+        from .activity import operation_id
+
+        operation_token = operation_id.set(operation_id.get() or activation["id"])
         try:
             for i in authorized_stops or []:
                 d = self.store.get("deployment", i)
@@ -526,12 +558,21 @@ class Manager:
                     if d["state"] in ACTIVE:
                         raise Conflict(f"{d['alias']} is already transitioning")
                     self.store.event(
-                        "state", {"from": d["state"], "to": "VALIDATING"}, i, c
+                        "state",
+                        {
+                            "from": d["state"],
+                            "to": "VALIDATING",
+                            "operation_id": operation_id.get(),
+                            "name": d["name"],
+                        },
+                        i,
+                        c,
                     )
                     d.update(
                         state="QUEUED",
                         session_id=None,
                         failure_reason=None,
+                        operation_id=operation_id.get(),
                     )
                     self.store.put("deployment", d, historical=False, c=c)
                     self.store.event(
@@ -539,6 +580,8 @@ class Manager:
                         {
                             "from": "VALIDATING",
                             "to": "QUEUED",
+                            "operation_id": operation_id.get(),
+                            "name": d["name"],
                         },
                         i,
                         c,
@@ -580,6 +623,8 @@ class Manager:
                         "recovery_required", {"error": redact(str(restore_error))}, i
                     )
             raise
+        finally:
+            operation_id.reset(operation_token)
         self.store.put(
             "activation",
             activation | {"state": "SUCCEEDED", "ended_at": time.time()},
@@ -677,22 +722,14 @@ class Manager:
             gpu = next(
                 (g for g in self.host.get("gpus", []) if g["index"] == d["gpu"]), None
             )
-            if gpu and (
-                (
-                    gpu.get("free_mib") is not None
-                    and gpu["free_mib"] < settings["gpu_headroom_mib"]
-                )
-                or (gpu.get("temperature") or 0) > settings["temperature_limit"]
-            ):
+            from .activity import condition_text, pressure_conditions
+
+            conditions = pressure_conditions(
+                self.host | {"gpus": [gpu] if gpu else []}, settings
+            )
+            if conditions:
                 raise RuntimeError(
-                    "Launch aborted: measured GPU headroom/temperature crossed the desktop safety gate"
-                )
-            if (
-                self.host.get("ram_available_mib") is not None
-                and self.host["ram_available_mib"] < settings["ram_headroom_mib"]
-            ):
-                raise RuntimeError(
-                    "Launch aborted: measured RAM below desktop safety gate"
+                    "Launch aborted: " + "; ".join(map(condition_text, conditions))
                 )
             if await self.ready(d):
                 self.last_use[ident] = time.monotonic()
@@ -972,6 +1009,8 @@ class Manager:
                         self.host.setdefault("deployments", {})[d["id"]] = data
                         if d.get("session_id"):
                             session = self.store.get("session", d["session_id"])
+                            data["session_id"] = session["id"]
+                            data["profile_hash"] = resources.run_profile_hash(session)
                             for field, measurement in (
                                 ("peak_gpu_mib", data["gpu_mib"]),
                                 ("peak_ram_mib", data["rss_mib"]),
@@ -1036,27 +1075,23 @@ class Manager:
                         await self.unload_idle()
                 # Admission is not physical isolation: alert on pressure, never silently evict pinned models.
                 settings = self.settings()
-                pressure = any(
-                    (
-                        g.get("free_mib") is not None
-                        and g["free_mib"] < settings["gpu_headroom_mib"]
-                    )
-                    or (g["temperature"] or 0) > settings["temperature_limit"]
-                    for g in self.host["gpus"]
-                ) or (
-                    self.host.get("ram_available_mib") is not None
-                    and self.host["ram_available_mib"] < settings["ram_headroom_mib"]
-                )
+                from .activity import pressure_conditions
+
+                conditions = pressure_conditions(self.host, settings)
+                pressure = bool(conditions)
                 self.host["pressure"] = pressure
                 if pressure != self.was_pressure:
                     self.store.event(
                         "pressure",
                         {
                             "active": pressure,
+                            "conditions": conditions,
+                            "previous_conditions": getattr(self, "last_conditions", []),
                             "note": "Pinned deployments are never automatically evicted",
                         },
                     )
                     self.was_pressure = pressure
+                self.last_conditions = conditions
                 if pressure and not self.lock.locked():
                     async with self.lock:
                         candidates = [

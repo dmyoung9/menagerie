@@ -38,11 +38,15 @@ import {
   state,
   Status,
   Tabs,
+  Json,
   telemetryStale,
   type Registry,
 } from './ui';
 import { ActivityFeed } from './Views';
 import { ResourceHistory } from '@/components/resource-history';
+import { EmbeddedEditor } from '@/components/embedded-editor';
+import { RequestHistory } from '@/components/request-history';
+import { DeploymentPerformance } from '@/components/deployment-performance';
 import { go } from './navigation';
 import { ConfigurationFields } from './Editors';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
@@ -183,12 +187,20 @@ export function ServingTable({
                       )}
                     </div>
                   </div>
-                  {d.lifecycle?.failure && (
-                    <small className="error-text">{d.lifecycle.failure}</small>
-                  )}
                 </TableCell>
                 <TableCell>
-                  <Status value={state(d)} />
+                  <Status
+                    value={
+                      d.state === 'FAILED' || d.lifecycle?.failure
+                        ? 'Errored'
+                        : state(d)
+                    }
+                  />
+                  {(d.state === 'FAILED' || d.lifecycle?.failure) && (
+                    <a className="block" href={`#/deployments/${d.id}/logs`}>
+                      View logs
+                    </a>
+                  )}
                 </TableCell>
                 <TableCell>{mode(d)}</TableCell>
                 <TableCell className="numeric">
@@ -209,10 +221,7 @@ export function ServingTable({
                         <DropdownMenuItem
                           disabled={active(d)}
                           onClick={() =>
-                            actions.edit(
-                              d.multi_model ? 'deployment_sets' : 'deployments',
-                              d,
-                            )
+                            go(`deployments/${d.id}/configuration`)
                           }
                         >
                           Edit
@@ -279,12 +288,14 @@ export function DeploymentSetEditor({
   data,
   close,
   saved,
+  embedded = false,
 }: {
   initial?: DeploymentSet;
   modelId?: string;
   data: Registry;
   close: () => void;
   saved: (id: string) => void;
+  embedded?: boolean;
 }) {
   const { confirm, confirmation } = useConfirmation();
   const [value, setValue] = useState<DeploymentSetDraft>({
@@ -499,8 +510,9 @@ export function DeploymentSetEditor({
       setBusy(false);
     }
   };
+  const Shell = embedded ? EmbeddedEditor : Dialog;
   return (
-    <Dialog
+    <Shell
       title={initial ? initial.name : 'New deployment'}
       close={close}
       busy={busy}
@@ -800,7 +812,7 @@ export function DeploymentSetEditor({
           </Button>
         </section>
       )}
-    </Dialog>
+    </Shell>
   );
 }
 
@@ -811,6 +823,7 @@ export function MultiDeploymentDetail({
   host,
   actions,
   events,
+  saved,
 }: {
   d: DeploymentSet;
   tab: string;
@@ -818,15 +831,28 @@ export function MultiDeploymentDetail({
   host: HostSnapshot;
   actions: DeploymentActions;
   events: OperationEvent[];
+  saved: () => void;
 }) {
-  const [logMember, setLogMember] = useState(d.member_ids[0] || ''),
+  const logQuery = new URLSearchParams(window.location.hash.split('?')[1]);
+  const logRun = logQuery.get('run');
+  const memberParam = logQuery.get('member');
+  const requestedMember =
+    memberParam && d.member_ids.includes(memberParam) ? memberParam : null;
+  const [logMember, setLogMember] = useState(
+      requestedMember && d.member_ids.includes(requestedMember)
+        ? requestedMember
+        : d.member_ids[0] || '',
+    ),
     [logs, setLogs] = useState(''),
     [error, setError] = useState('');
   useEffect(() => {
     if (tab !== 'Logs') return;
     let alive = true;
     const load = () =>
-      readApi(`/api/deployments/${logMember}/logs`, contracts.logs)
+      readApi(
+        `/api/deployments/${requestedMember || logMember}/logs${logRun ? '?session_id=' + encodeURIComponent(logRun) : ''}`,
+        contracts.logs,
+      )
         .then((r) => {
           if (alive) {
             setLogs(r.text);
@@ -843,7 +869,7 @@ export function MultiDeploymentDetail({
       alive = false;
       clearInterval(timer);
     };
-  }, [logMember, tab]);
+  }, [logMember, tab, logRun, requestedMember]);
   return (
     <>
       <a className="back-link" href="#/deployments">
@@ -874,14 +900,6 @@ export function MultiDeploymentDetail({
               Unload
             </Button>
           )}
-          <Button
-            variant="outline"
-            type="button"
-            disabled={active(d)}
-            onClick={() => actions.edit('deployment_sets', d)}
-          >
-            Edit
-          </Button>
         </div>
       </div>
       {d.lifecycle?.failure && (
@@ -892,10 +910,43 @@ export function MultiDeploymentDetail({
         </Alert>
       )}
       <Tabs
-        items={['Models', 'Policy', 'Activity', 'Logs']}
+        items={[
+          'Models',
+          'Configuration',
+          'Advanced',
+          'Activity',
+          'Requests',
+          'Logs',
+        ]}
         value={tab}
         onChange={(t) => go(`deployments/${d.id}/${t.toLowerCase()}`)}
       />
+      {(tab === 'Configuration' || tab === 'Policy') && (
+        <>
+          {active(d) ? (
+            <p>Unload this deployment before changing its configuration.</p>
+          ) : (
+            <DeploymentSetEditor
+              key={`${d.id}-${d.revision}`}
+              initial={d}
+              data={data}
+              close={() => {}}
+              saved={saved}
+              embedded
+            />
+          )}
+        </>
+      )}
+      {tab === 'Advanced' && (
+        <Card>
+          <CardContent>
+            <Json value={d} />
+          </CardContent>
+        </Card>
+      )}
+      {tab === 'Requests' && (
+        <RequestHistory deploymentId={d.id} deployments={data.deployments} />
+      )}
       {tab === 'Models' && (
         <>
           <div className="stats">
@@ -954,20 +1005,6 @@ export function MultiDeploymentDetail({
                     <Button
                       variant="outline"
                       type="button"
-                      disabled={active(d)}
-                      onClick={() =>
-                        actions.edit('deployments', {
-                          ...m,
-                          unit_id: d.id,
-                          member_only: true,
-                        })
-                      }
-                    >
-                      Edit model
-                    </Button>
-                    <Button
-                      variant="outline"
-                      type="button"
                       onClick={() => {
                         setLogMember(m.id);
                         go(`deployments/${d.id}/logs`);
@@ -982,6 +1019,10 @@ export function MultiDeploymentDetail({
           </div>
         </>
       )}
+      {tab === 'Models' &&
+        d.members.map((m) => (
+          <DeploymentPerformance key={m.id} deployment={m} />
+        ))}
       {tab === 'Models' &&
         [
           ...new Set(
@@ -1040,8 +1081,11 @@ export function MultiDeploymentDetail({
           <CardContent className="p-0">
             <Field label="Model">
               <NativeSelect
-                value={logMember}
-                onChange={(e) => setLogMember(e.target.value)}
+                value={requestedMember || logMember}
+                onChange={(e) => {
+                  setLogMember(e.target.value);
+                  go(`deployments/${d.id}/logs`);
+                }}
               >
                 {d.members.map((m) => (
                   <NativeSelectOption key={m.id} value={m.id}>

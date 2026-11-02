@@ -1,9 +1,89 @@
 """Retained per-run resource summaries; configuration restoration stays independent."""
 
+import json
 import time
 
 from .resources import run_profile_hash
 from .store import encode
+
+
+def performance_samples(store, ident, hours):
+    """Match retained samples to execution identity, never alias or mutable names."""
+    from .resources import profile_hash
+
+    deployment = store.get("deployment", ident)
+    profile = deployment["profile_snapshot"]
+    fingerprint = profile_hash(
+        profile,
+        store.get("artifact", profile["artifact_id"]),
+        store.get("runtime", profile["runtime_id"]),
+        deployment["gpu"],
+    )
+    now = time.time()
+    cutoff = now - hours * 3600
+    all_runs = store.list("session")
+    next_start = {}
+    seen = {}
+    for run in sorted(all_runs, key=lambda s: s.get("started_at", 0), reverse=True):
+        source = run.get("deployment_id") or run.get("deployment_snapshot", {}).get(
+            "id"
+        )
+        next_start[run["id"]] = seen.get(source, now)
+        seen[source] = run.get("started_at", now)
+    runs = sorted(
+        (
+            s
+            for s in all_runs
+            if (s.get("ended_at") or now) >= cutoff
+            and (s.get("deployment_id") or s.get("deployment_snapshot", {}).get("id"))
+            == ident
+            and run_profile_hash(s) == fingerprint
+        ),
+        key=lambda s: s["started_at"],
+        reverse=True,
+    )[:1000]
+    result = []
+    # Bound database reads as well as the response. Downsample inside each matched
+    # run, not across configurations (which can hide short runs completely).
+    budget = max(1, 1000 // max(1, len(runs)))
+    with store.connect() as c:
+        for run in runs:
+            source_id = run.get("deployment_id") or run["deployment_snapshot"]["id"]
+            start = max(cutoff, run["started_at"])
+            end = min(now, run.get("ended_at") or now, next_start[run["id"]] - 0.000001)
+            bucket = max(2, (end - start) / budget)
+            metric_path = "$.deployments." + json.dumps(source_id)
+            rows = c.execute(
+                "SELECT ts,data FROM samples WHERE ts IN ("
+                "SELECT max(ts) FROM samples WHERE ts>=? AND ts<=? "
+                "AND json_extract(data,?) IS NOT NULL "
+                "AND (json_extract(data,?) IS NULL OR json_extract(data,?)=?) "
+                "GROUP BY CAST((ts-?)/? AS INTEGER)) ORDER BY ts LIMIT ?",
+                (
+                    start,
+                    end,
+                    metric_path,
+                    metric_path + ".session_id",
+                    metric_path + ".session_id",
+                    run["id"],
+                    start,
+                    bucket,
+                    budget,
+                ),
+            ).fetchall()
+            for row in rows:
+                sample = json.loads(row["data"])
+                observed = sample["deployments"][source_id]
+                result.append(
+                    {
+                        "ts": row["ts"],
+                        "deployments": {ident: observed | {"session_id": run["id"]}},
+                        "runtime_metrics": {
+                            ident: sample.get("runtime_metrics", {}).get(source_id, {})
+                        },
+                    }
+                )
+    return sorted(result, key=lambda s: s["ts"])
 
 
 def retained(store, settings):

@@ -3,7 +3,7 @@
 ## Daily workflow
 
 Overview shows deployments, capacity, and recent activity. GPU/RAM treemaps split
-deployment usage, unattributed usage, protected reserve, and available capacity.
+deployment usage, unattributed usage, and free capacity.
 Select a block/legend to inspect it. Stale telemetry is labeled. GPU process
 attribution is shown only on single-GPU hosts because process samples aggregate devices.
 
@@ -16,9 +16,10 @@ Settings → Engines installs versioned llama.cpp/Prism release binaries or an
 isolated vLLM environment. Downloads, verification, and probing appear in Activity.
 Updates install alongside existing engines; deployments retain their chosen version.
 Referenced engines cannot be removed. Existing executables, source builds, and
-digest-pinned OCI images remain under Advanced engine sources.
+digest-pinned OCI images are available from the engine toolbar.
 
-Deployments have independent model settings and stable API aliases. Editing a
+Deployments have independent model settings and stable API aliases. The
+**Configuration** tab is the editor; **Advanced** contains raw settings. Editing a
 loaded deployment requires unloading. Duplicate creates an independent, inactive
 configuration. Renaming does not change its alias; changing the alias requires
 updating clients. Immutable revisions remain internal for history/recovery.
@@ -38,9 +39,23 @@ overhead or margin is invented. Launch review rechecks actual admission.
 Overview shows each GPU separately, OS-available RAM, a process ownership filter,
 and live memory/activity/temperature trends. Decode throughput appears only when
 reported by the runtime. Select a deployment block or its label to open its detail
-page. Deployment/model details and Activity → Sessions show retained per-run GPU
-and RSS peaks, grouped by configuration, with measured counts, mean/max and dates.
+page. GPU trend charts identify each device with a legend. Deployment performance
+charts include retained runs of the same configuration, with gaps between runs.
+Deployment/model details show retained GPU and RSS peak summaries, grouped by
+configuration, with measured counts, mean/max and dates. **Settings → History**
+contains formatted individual-run and telemetry-sample tables.
 Failed/partial runs are included; history is not a promise of future memory fit.
+
+**Activity → Events** groups lifecycle steps into expandable operations with links
+to their resources and logs. **Requests** records individual inference calls;
+deployment details also offer a scoped Requests tab. **Models → Downloads** shows
+model transfer progress and history. Historical configuration-copy actions are
+not part of these views. Older measurements or event details that were not
+recorded appear as an em dash. Unloaded deployment VRAM is **N/A**.
+
+External monitoring systems can scrape **`/metrics`** in Prometheus text format.
+It reports GPU measurements, gateway waiting count, deployment readiness and active
+requests. This integration endpoint is separate from the built-in dashboard charts.
 
 ## Admission and lifecycle
 

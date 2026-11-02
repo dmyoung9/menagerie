@@ -16,6 +16,7 @@ import {
 import { FieldGroup, FieldSet } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useEffect, useState } from 'react';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import { readApi } from './ui';
 import { memory, bytes } from '@/lib/formatters';
 import { DraftResources } from './Resources';
@@ -343,8 +344,8 @@ const policyFields: [
   number,
   number,
 ][] = [
-  ['gpu_headroom_mib', 'GPU reserve (MiB)', 2048, 1048576],
-  ['ram_headroom_mib', 'RAM reserve (MiB)', 4096, 1048576],
+  ['gpu_headroom_mib', 'Minimum free GPU memory (MiB)', 2048, 1048576],
+  ['ram_headroom_mib', 'Minimum available RAM (MiB)', 4096, 1048576],
   ['temperature_limit', 'Temperature limit (°C)', 60, 85],
   ['max_queue', 'Queued requests', 1, 256],
   ['sample_seconds', 'Sample interval (seconds)', 1, 60],
@@ -357,13 +358,23 @@ export function PolicyEditor({
   save,
   busy,
   purge,
+  embedded = false,
 }: {
   initial: HostSettings;
   save: (v: HostPolicyDraft) => void;
   busy: boolean;
   purge: () => void;
+  embedded?: boolean;
 }) {
   const [value, setValue] = useState<HostPolicyDraft>({ ...initial });
+  const [baseline, setBaseline] = useState(JSON.stringify(initial));
+  const guard = useUnsavedChanges(
+    embedded && JSON.stringify(value) !== baseline,
+    embedded && busy,
+  );
+  useEffect(() => {
+    setBaseline(JSON.stringify(initial));
+  }, [initial]);
   return (
     <form
       onSubmit={(e) => {
@@ -371,67 +382,70 @@ export function PolicyEditor({
         save(value);
       }}
     >
-      {[
-        ['Capacity & requests', policyFields.slice(0, 4)],
-        ['Telemetry & retention', policyFields.slice(4)],
-      ].map(([title, fields]) => (
-        <section key={String(title)}>
-          <h3>{String(title)}</h3>
-          <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-            {(fields as typeof policyFields).map(([key, label, min, max]) => {
-              const memory = key.endsWith('_mib'),
-                scale = memory ? 1024 : 1;
-              return (
-                <Field
-                  label={memory ? label.replace('MiB', 'GiB') : label}
-                  key={key}
-                >
-                  <Input
-                    type="number"
-                    required
-                    min={min / scale}
-                    max={max / scale}
-                    step={
-                      memory ? 1 / 1024 : key === 'sample_seconds' ? 'any' : 1
-                    }
-                    value={Number(value[key] ?? 0) / scale}
-                    onChange={(e) =>
-                      setValue({
-                        ...value,
-                        [key]: memory
-                          ? Math.round(Number(e.target.value) * scale)
-                          : Number(e.target.value),
-                      })
-                    }
-                  />
-                </Field>
-              );
-            })}
-          </FieldGroup>
-        </section>
-      ))}
-      <label className="check">
-        <Checkbox
-          checked={value.expose_on_demand}
-          onCheckedChange={(checked) =>
-            setValue({ ...value, expose_on_demand: checked })
-          }
-        />
-        List unloaded on-demand models for clients
-      </label>
-      <div className="dialog-actions">
-        <Button
-          variant="destructive"
-          type="button"
-          disabled={busy}
-          onClick={purge}
-        >
-          Purge telemetry…
-        </Button>
-        <Button variant="default" type="submit" disabled={busy}>
-          Save policy
-        </Button>
-      </div>
+      {guard}
+      <FieldSet disabled={busy}>
+        {[
+          ['Capacity & requests', policyFields.slice(0, 4)],
+          ['Telemetry & retention', policyFields.slice(4)],
+        ].map(([title, fields]) => (
+          <section key={String(title)}>
+            <h3>{String(title)}</h3>
+            <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+              {(fields as typeof policyFields).map(([key, label, min, max]) => {
+                const memory = key.endsWith('_mib'),
+                  scale = memory ? 1024 : 1;
+                return (
+                  <Field
+                    label={memory ? label.replace('MiB', 'GiB') : label}
+                    key={key}
+                  >
+                    <Input
+                      type="number"
+                      required
+                      min={min / scale}
+                      max={max / scale}
+                      step={
+                        memory ? 1 / 1024 : key === 'sample_seconds' ? 'any' : 1
+                      }
+                      value={Number(value[key] ?? 0) / scale}
+                      onChange={(e) =>
+                        setValue({
+                          ...value,
+                          [key]: memory
+                            ? Math.round(Number(e.target.value) * scale)
+                            : Number(e.target.value),
+                        })
+                      }
+                    />
+                  </Field>
+                );
+              })}
+            </FieldGroup>
+          </section>
+        ))}
+        <label className="check">
+          <Checkbox
+            checked={value.expose_on_demand}
+            onCheckedChange={(checked) =>
+              setValue({ ...value, expose_on_demand: checked })
+            }
+          />
+          List unloaded on-demand models for clients
+        </label>
+        <div className="dialog-actions">
+          <Button
+            variant="destructive"
+            type="button"
+            disabled={busy}
+            onClick={purge}
+          >
+            Purge telemetry…
+          </Button>
+          <Button variant="default" type="submit" disabled={busy}>
+            Save policy
+          </Button>
+        </div>
+      </FieldSet>
     </form>
   );
 }

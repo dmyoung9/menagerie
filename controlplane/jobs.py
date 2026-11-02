@@ -67,7 +67,7 @@ class Jobs:
         self.manager = manager
         self.store = manager.store
 
-    def submit(self, name, action):
+    def submit(self, name, action, **context):
         job = self.store.put(
             "job",
             {
@@ -76,10 +76,14 @@ class Jobs:
                 "state": "QUEUED",
                 "created_at": time.time(),
                 "progress": "Queued",
+                **context,
             },
         )
 
         async def run():
+            from .activity import operation_id
+
+            token = operation_id.set(job["id"])
             current = job | {"state": "RUNNING"}
             self.store.put("job", current, historical=False)
             try:
@@ -95,7 +99,19 @@ class Jobs:
             finally:
                 current["ended_at"] = time.time()
                 self.store.put("job", current, historical=False)
-                self.store.event("job", {"id": job["id"], "state": current["state"]})
+                self.store.event(
+                    "job",
+                    {
+                        "id": job["id"],
+                        "operation_id": job["id"],
+                        "name": name,
+                        "state": current["state"],
+                        "error": current.get("error"),
+                        **context,
+                    },
+                    context.get("deployment_id"),
+                )
+                operation_id.reset(token)
 
         self.manager.spawn(run())
         return job
