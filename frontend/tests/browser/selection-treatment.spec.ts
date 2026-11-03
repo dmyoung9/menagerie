@@ -28,6 +28,122 @@ async function expectPrimary(
 }
 
 for (const width of [1440, 576, 320]) {
+  test(`catalog variant selections use primary color without checkmarks at ${width}px`, async ({
+    page,
+    fixture,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.route('**/api/catalog/hf/files?*', (route) =>
+      route.fulfill({
+        json: {
+          revision: 'fixture-primary-commit',
+          files: [
+            'model-7B-Q4_K_M.gguf',
+            'model-7B-Q4_K_S.gguf',
+            'model-14B-Q8_0.gguf',
+            'model.safetensors',
+            'config.json',
+          ].map((name) => ({ name, size: 1024 })),
+        },
+      }),
+    );
+    await page.goto('/#/models/discover');
+    await page.getByRole('textbox', { name: 'Catalog search' }).fill('fixture');
+    await page.getByRole('button', { name: 'Search catalog' }).click();
+    await page.getByRole('button', { name: 'Choose variant' }).click();
+    const dialog = page.getByRole('dialog');
+    const colors = await primaryColors(page);
+    const format = dialog.getByRole('group', { name: 'Format', exact: true });
+    const parameters = dialog.getByRole('group', {
+      name: 'Parameter size',
+      exact: true,
+    });
+    const quant = dialog.getByRole('group', {
+      name: 'Quantization',
+      exact: true,
+    });
+    const suffix = dialog.getByRole('group', {
+      name: 'Size / quality suffix',
+      exact: true,
+    });
+    const download = dialog.getByRole('button', {
+      name: 'Download',
+      exact: true,
+    });
+    await expect(download).toBeDisabled();
+    await expect(
+      quant.getByRole('button', { name: 'Q4_K', exact: true }),
+    ).toBeDisabled();
+    await format.getByRole('button', { name: 'GGUF', exact: true }).click();
+    await parameters.getByRole('button', { name: '7B', exact: true }).click();
+    await expect(download).toBeDisabled();
+    const medium = suffix.getByRole('button', { name: 'M', exact: true });
+    await medium.focus();
+    await page.keyboard.press('Space');
+    await page.mouse.move(0, 0);
+    await expect(download).toBeEnabled();
+    const selected = dialog.locator(
+      '[data-slot="toggle-group-item"][aria-pressed="true"]',
+    );
+    await expect(selected).toHaveCount(4);
+    for (const button of await selected.all())
+      await expectPrimary(button, colors);
+    await expect(
+      dialog.locator('[data-slot="toggle-group-item"] svg'),
+    ).toHaveCount(0);
+    await expect(
+      quant.getByRole('button', { name: 'Q5_K', exact: true }),
+    ).toBeDisabled();
+    await parameters.getByRole('button', { name: '14B', exact: true }).click();
+    await page.mouse.move(0, 0);
+    await expectPrimary(
+      quant.getByRole('button', { name: 'Q8_0', exact: true }),
+      colors,
+    );
+    await expectPrimary(
+      suffix.getByRole('button', { name: 'No suffix', exact: true }),
+      colors,
+    );
+    await expect(
+      quant.getByRole('button', { name: 'Q4_K', exact: true }),
+    ).not.toHaveCSS('background-color', colors.background);
+    await expect(medium).toBeDisabled();
+    await format
+      .getByRole('button', { name: 'Safetensors', exact: true })
+      .click();
+    await page.mouse.move(0, 0);
+    for (const button of await selected.all())
+      await expectPrimary(button, colors);
+    await expectPrimary(
+      quant.getByRole('button', { name: 'As published', exact: true }),
+      colors,
+    );
+    await expect(download).toBeEnabled();
+    await expect(download).toHaveCSS('opacity', '1');
+    expect(
+      await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth),
+    ).toBe(true);
+    expect(
+      (
+        await new AxeBuilder({ page })
+          .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+          .analyze()
+      ).violations,
+    ).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath(`primary-catalog-variant-${width}.png`),
+    });
+    await download.click();
+    await expect(dialog).toBeHidden();
+    expect(
+      fixture.writes.find((w) => w.path === '/api/downloads')?.body,
+    ).toMatchObject({
+      repo: 'fixture/model',
+      revision: 'fixture-primary-commit',
+      filename: '__safetensors__',
+    });
+  });
+
   test(`capability selections use primary color without checkmarks at ${width}px`, async ({
     page,
     fixture,
