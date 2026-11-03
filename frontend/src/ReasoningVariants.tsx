@@ -128,12 +128,12 @@ export function Variants({
             className="flex-nowrap"
             data-variant={mode.id}
           >
-            <ItemContent className="min-w-0">
-              <ItemTitle className="w-full min-w-0 line-clamp-none">
+            <ItemContent className="min-w-0 flex-row items-center gap-2">
+              <ItemTitle className="min-w-0 max-w-full line-clamp-none">
                 <Button
                   type="button"
                   variant="ghost"
-                  className="variant-name shrink"
+                  className="variant-name"
                   ref={(node) => {
                     names.current[mode.id] = node;
                   }}
@@ -141,13 +141,13 @@ export function Variants({
                 >
                   {modeLabel(mode)}
                 </Button>
-                {!standardReasoningIds.includes(mode.id) &&
-                  mode.id !== 'default' && (
-                    <Badge variant="secondary" className="ml-auto">
-                      Custom
-                    </Badge>
-                  )}
               </ItemTitle>
+              {!standardReasoningIds.includes(mode.id) &&
+                mode.id !== 'default' && (
+                  <Badge variant="secondary" className="ml-auto">
+                    Custom
+                  </Badge>
+                )}
             </ItemContent>
             <ItemActions className="shrink-0">
               <Switch
