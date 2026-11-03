@@ -287,6 +287,41 @@ for (const width of [1440, 576, 320]) {
     await page.goto('/#/deployments/idle/configuration');
     const section = page.getByRole('region', { name: 'Variants', exact: true });
     const variants = section.getByRole('list', { name: 'Variants' });
+    const header = section.locator('[data-slot="card-header"]');
+    const add = header
+      .locator('[data-slot="card-action"]')
+      .getByRole('button', { name: 'Add variant', exact: true });
+    await expect(add).toBeVisible();
+    await expect(
+      section
+        .locator('[data-slot="card-content"]')
+        .getByRole('button', { name: 'Add variant', exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      section.locator(
+        '[data-slot="card-description"], [data-slot="field-description"], .capability-hint',
+      ),
+    ).toHaveCount(0);
+    await expect(
+      section.getByText(
+        /Named reasoning and prompt configurations|Used when a request does not select a variant|Switches expose variants to clients/,
+      ),
+    ).toHaveCount(0);
+    const titleBox = (await header
+      .getByRole('heading', { name: 'Variants', exact: true })
+      .boundingBox())!;
+    const addBox = (await add.boundingBox())!;
+    expect(addBox.x).toBeGreaterThan(titleBox.x + titleBox.width);
+    await add.click();
+    const addDrawer = page.getByRole('dialog', {
+      name: 'Add variant',
+      exact: true,
+    });
+    await expect(addDrawer).toBeVisible();
+    await addDrawer
+      .getByRole('button', { name: 'Cancel', exact: true })
+      .click();
+    await expect(add).toBeFocused();
     await expect(section.getByRole('table')).toHaveCount(0);
     await expect(variants.locator('[draggable]')).toHaveCount(0);
     await expect(

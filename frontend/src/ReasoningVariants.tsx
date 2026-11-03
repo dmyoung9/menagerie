@@ -74,31 +74,7 @@ export function Variants({
     <SettingsSection
       name="variants"
       title="Variants"
-      description="Named reasoning and prompt configurations exposed to clients. Enable only controls supported by your runtime."
-    >
-      <div className="variants-toolbar">
-        <Field
-          label="Default variant"
-          hint="Used when a request does not select a variant. It may remain disabled for client selection."
-        >
-          <NativeSelect
-            value={catalog.reasoning?.default_mode || ''}
-            onChange={(e) => {
-              const next = setReasoningOptions(catalog, levels);
-              next.reasoning.default_mode = e.target.value || null;
-              change(next);
-            }}
-          >
-            <NativeSelectOption value="">
-              Model default (no overrides)
-            </NativeSelectOption>
-            {saved.map((mode) => (
-              <NativeSelectOption key={mode.id} value={mode.id}>
-                {modeLabel(mode)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
+      action={
         <Button
           type="button"
           variant="outline"
@@ -117,7 +93,27 @@ export function Variants({
           <Plus data-icon="inline-start" />
           Add variant
         </Button>
-      </div>
+      }
+    >
+      <Field label="Default variant">
+        <NativeSelect
+          value={catalog.reasoning?.default_mode || ''}
+          onChange={(e) => {
+            const next = setReasoningOptions(catalog, levels);
+            next.reasoning.default_mode = e.target.value || null;
+            change(next);
+          }}
+        >
+          <NativeSelectOption value="">
+            Model default (no overrides)
+          </NativeSelectOption>
+          {saved.map((mode) => (
+            <NativeSelectOption key={mode.id} value={mode.id}>
+              {modeLabel(mode)}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </Field>
       <ItemGroup aria-label="Variants">
         {levels.map((mode, index) => (
           <Item
@@ -198,10 +194,6 @@ export function Variants({
       </ItemGroup>
       <p role="status" className="sr-only">
         {announcement}
-      </p>
-      <p className="capability-hint">
-        Switches expose variants to clients. Use each variant’s menu to edit or
-        change its order.
       </p>
       {editing && (
         <VariantDrawer

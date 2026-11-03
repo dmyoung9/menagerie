@@ -31,16 +31,6 @@
 .capabilities-panel > .output-capabilities:first-child {
   margin-top: 0;
 }
-.variants-toolbar {
-  display: flex;
-  align-items: start;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 16px;
-}
-.variants-toolbar > [data-slot='field'] {
-  flex: 1 1 220px;
-}
 .variant-name {
   min-width: 0;
   max-width: 100%;

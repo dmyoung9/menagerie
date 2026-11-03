@@ -100,8 +100,11 @@ without improving its existing time-series behavior.
 
 ## Verification
 
-The Variants editor composes shadcn Item rows in an ItemGroup. Each row has its
-name in ItemContent and the enablement Switch and overflow menu in ItemActions.
+The Variants editor composes shadcn Item rows in an ItemGroup. Its Add variant
+button is in the CardHeader's CardAction, with the default selector in
+CardContent and no introductory, default-selector or footer advisory text.
+Rows have their name in ItemContent and the enablement Switch and overflow menu
+in ItemActions.
 Custom entries have a secondary Custom badge anchored to the right edge of the
 name cell, independent of name length; built-ins and legacy Default do not.
 Configuration summaries and drag handles are deliberately omitted; editing and
