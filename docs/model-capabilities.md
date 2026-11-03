@@ -69,8 +69,10 @@ support; it does not force thinking on or off. The separate **Variants** card is
 always available. Its settings, exposure and default selection work independently
 of that declaration, including when Reasoning is disabled.
 
-Use each row's **Enabled** switch to select variants exposed to clients. Common
-choices, in default order, are **Instant, Low, Medium, High, XHigh and Max**.
+Use each row's **Enabled** switch to select variants exposed to clients.
+Legacy **Default** entries remain editable but have no enablement switch: the
+client's built-in Default/no-variant choice is not controlled by that row.
+Common choices, in default order, are **Instant, Low, Medium, High, XHigh and Max**.
 Merely opening the editor
 does not save presets or change model behavior. Existing saved presets retain
 their IDs, order, settings and exposure choices, including custom settings on a

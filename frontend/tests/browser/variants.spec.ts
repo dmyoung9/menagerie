@@ -4,6 +4,73 @@ import { deploymentDraft } from '../../src/contracts';
 import { defaultReasoningOptions } from '../../src/capabilityOptions';
 import type { ModelCatalog } from '../../src/types';
 
+for (const enabled of [true, false]) {
+  test(`legacy Default stays editable without an exposure switch when saved enabled=${enabled}`, async ({
+    page,
+    fixture,
+  }) => {
+    fixture.registry.deployments.find(
+      (d) => d.id === 'idle',
+    )!.profile_snapshot!.catalog = {
+      reasoning: {
+        default_mode: 'default',
+        presets: [
+          { id: 'default', enabled, body: { reasoning_budget: 1024 } },
+          {
+            id: 'own-default',
+            name: 'Default',
+            enabled: true,
+            body: { reasoning_effort: 'high' },
+          },
+        ],
+      },
+    };
+    await page.goto('/#/deployments/idle/configuration');
+    const section = page.getByRole('region', { name: 'Variants', exact: true });
+    const row = section.locator('[data-variant="default"]');
+    await expect(row.getByRole('switch')).toHaveCount(0);
+    await expect(
+      row.getByRole('button', { name: 'Default variant actions', exact: true }),
+    ).toBeVisible();
+    await expect(
+      section.locator('[data-variant="own-default"]').getByRole('switch'),
+    ).toBeChecked();
+    await row.getByRole('button', { name: 'Default', exact: true }).click();
+    const drawer = page.getByRole('dialog', {
+      name: 'Edit Default',
+      exact: true,
+    });
+    await expect(
+      drawer.getByLabel('Token budget', { exact: true }),
+    ).toHaveValue('1024');
+    await drawer.getByLabel('Token budget', { exact: true }).fill('2048');
+    await drawer
+      .getByRole('button', { name: 'Apply changes', exact: true })
+      .click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect
+      .poll(
+        () =>
+          fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
+      )
+      .toBe(2);
+    const saved = deploymentDraft(
+      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+        .body,
+    ).configuration!.catalog;
+    expect(saved.reasoning?.default_mode).toBe('default');
+    expect(
+      saved.reasoning?.presets?.find((p) => p.id === 'default'),
+    ).toMatchObject({ enabled, body: { reasoning_budget: 2048 } });
+    await page.reload();
+    await expect(row.getByRole('switch')).toHaveCount(0);
+    await row.getByRole('button', { name: 'Default', exact: true }).click();
+    await expect(
+      drawer.getByLabel('Token budget', { exact: true }),
+    ).toHaveValue('2048');
+  });
+}
+
 test('selecting legacy blank Instant as default persists its configured thinking-off fallback', async ({
   page,
   fixture,

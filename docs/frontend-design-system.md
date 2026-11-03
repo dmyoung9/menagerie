@@ -107,6 +107,8 @@ Rows have their name in ItemContent and the enablement Switch and overflow menu
 in ItemActions.
 Custom entries have a secondary Custom badge anchored to the right edge of the
 name cell, independent of name length; built-ins and legacy Default do not.
+The legacy Default row stays editable and reorderable but has no exposure Switch;
+it must not imply control over the client's built-in no-variant Default choice.
 Configuration summaries and drag handles are deliberately omitted; editing and
 Move up/down live in the menu. Keyed rows preserve control focus across updates.
 A Base UI Drawer opens on the right on desktop and from the bottom on narrow viewports;

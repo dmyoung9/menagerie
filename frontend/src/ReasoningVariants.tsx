@@ -146,22 +146,20 @@ export function Variants({
                 )}
             </ItemContent>
             <ItemActions className="shrink-0">
-              <Switch
-                aria-label={`Enable ${modeLabel(mode)} variant`}
-                checked={mode.enabled}
-                disabled={
-                  !configuredMode(mode) &&
-                  mode.id !== 'default' &&
-                  !mode.enabled
-                }
-                onCheckedChange={(enabled) =>
-                  write(
-                    levels.map((p) =>
-                      p.id === mode.id ? { ...p, enabled } : p,
-                    ),
-                  )
-                }
-              />
+              {mode.id !== 'default' && (
+                <Switch
+                  aria-label={`Enable ${modeLabel(mode)} variant`}
+                  checked={mode.enabled}
+                  disabled={!configuredMode(mode) && !mode.enabled}
+                  onCheckedChange={(enabled) =>
+                    write(
+                      levels.map((p) =>
+                        p.id === mode.id ? { ...p, enabled } : p,
+                      ),
+                    )
+                  }
+                />
+              )}
               <Menu label={`${modeLabel(mode)} variant actions`}>
                 <DropdownMenuItem onClick={() => edit(mode)}>
                   Edit
