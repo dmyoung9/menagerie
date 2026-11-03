@@ -100,6 +100,15 @@ without improving its existing time-series behavior.
 
 ## Verification
 
+The Variants editor composes the shadcn Table with TanStack Table v8, without
+sorting or pagination because its manual order is saved and advertised to clients.
+Stable column components retain switch/handle focus across updates. A Base UI
+Drawer opens on the right on desktop and from the bottom on narrow viewports;
+the owned wrapper is scoped to those directions. Apply updates the parent draft,
+not the server. Nested navigation guards protect both unapplied Drawer edits and
+the builder draft. New drafts seed common reasoning defaults; existing catalogs
+are never reset by merely viewing or saving unrelated settings.
+
 ```sh
 cd frontend
 npm run check

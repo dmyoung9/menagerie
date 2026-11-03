@@ -42,7 +42,7 @@ for (const width of [1440, 576, 320]) {
     };
     await page.goto('/#/deployments/idle/configuration');
     const panel = page.getByRole('region', {
-      name: 'Capabilities and reasoning',
+      name: 'Modalities and capabilities',
       exact: true,
     });
     await expect(
@@ -53,8 +53,8 @@ for (const width of [1440, 576, 320]) {
     await expect(
       page.getByText('Available to clients', { exact: true }),
     ).toHaveCount(0);
-    const options = panel.getByRole('region', {
-      name: 'Reasoning options',
+    const options = page.getByRole('region', {
+      name: 'Variants',
       exact: true,
     });
     await expect(options).toHaveCount(0);
@@ -66,21 +66,18 @@ for (const width of [1440, 576, 320]) {
       .getByRole('button', { name: 'Reasoning', exact: true });
     await reasoning.click();
     await expect(options).toBeVisible();
+    await expect(options.locator('[data-variant="instant"]')).toContainText(
+      'Thinking · Off · Chat template',
+    );
+    await expect(options.locator('[data-variant="high"]')).toContainText(
+      'Token budget · 4096 · thinking_budget',
+    );
     await expect(
-      options.getByRole('combobox', { name: 'Instant thinking', exact: true }),
-    ).toHaveValue('false');
-    await expect(
-      options.getByRole('combobox', {
-        name: 'High control',
+      options.getByRole('switch', {
+        name: 'Enable Low variant',
         exact: true,
       }),
-    ).toHaveValue('thinking_budget');
-    await expect(
-      options.getByRole('button', {
-        name: 'Low',
-        exact: true,
-      }),
-    ).toHaveAttribute('aria-pressed', 'false');
+    ).not.toBeChecked();
     await reasoning.click();
     await expect(options).toHaveCount(0);
     await page
@@ -119,15 +116,12 @@ for (const width of [1440, 576, 320]) {
     ).toEqual([]);
     await reasoning.click();
     await expect(options).toBeVisible();
-    await expect(
-      options.getByRole('combobox', { name: 'Instant thinking', exact: true }),
-    ).toHaveValue('false');
-    await expect(
-      options.getByRole('combobox', {
-        name: 'High control',
-        exact: true,
-      }),
-    ).toHaveValue('thinking_budget');
+    await expect(options.locator('[data-variant="instant"]')).toContainText(
+      'Thinking · Off · Chat template',
+    );
+    await expect(options.locator('[data-variant="high"]')).toContainText(
+      'Token budget · 4096 · thinking_budget',
+    );
     expect(
       (
         await new AxeBuilder({ page })
@@ -140,7 +134,7 @@ for (const width of [1440, 576, 320]) {
   });
 }
 
-test('turning reasoning off clears hidden mapping errors without deleting saved mappings', async ({
+test('turning reasoning off after cancelling a drawer preserves saved mappings', async ({
   page,
   fixture,
 }) => {
@@ -166,23 +160,22 @@ test('turning reasoning off clears hidden mapping errors without deleting saved 
   const original = structuredClone(catalog.reasoning);
   await page.goto('/#/deployments/idle/configuration');
   const section = page.getByRole('region', {
-    name: 'Reasoning options',
+    name: 'Variants',
     exact: true,
   });
-  for (const name of ['Instant', 'High']) {
-    await section
-      .getByLabel(name + ' control', { exact: true })
-      .selectOption('custom');
-    await section
-      .getByRole('textbox', {
-        name: name + ' custom settings',
-        exact: true,
-      })
-      .fill('{invalid');
-  }
+  await section.getByRole('button', { name: 'High', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: 'Edit High', exact: true });
+  await drawer.getByText('Request JSON', { exact: true }).click();
+  await drawer
+    .getByLabel('Request overrides', { exact: true })
+    .fill('{invalid');
   await expect(
-    page.getByRole('button', { name: 'Save', exact: true }),
+    drawer.getByRole('button', { name: 'Apply changes' }),
   ).toBeDisabled();
+  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Discard changes', exact: true })
+    .click();
   const reasoning = page
     .getByRole('group', { name: 'Capabilities', exact: true })
     .getByRole('button', { name: 'Reasoning', exact: true });
@@ -219,6 +212,6 @@ test('legacy boolean Reasoning enabled displays its options', async ({
       .getByRole('button', { name: 'Reasoning', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true');
   await expect(
-    page.getByRole('region', { name: 'Reasoning options', exact: true }),
+    page.getByRole('region', { name: 'Variants', exact: true }),
   ).toBeVisible();
 });

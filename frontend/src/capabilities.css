@@ -31,49 +31,89 @@
 .capabilities-panel > .output-capabilities:first-child {
   margin-top: 0;
 }
-.reasoning-mappings {
-  display: grid;
-  gap: 16px;
-  margin: 18px 0;
-}
-.mapping-row {
-  display: grid;
-  grid-template-columns: 90px minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-  font-size: 12px;
-}
-.mapping-label {
+.variants-toolbar {
   display: flex;
-  align-items: center;
+  align-items: start;
   flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 6px;
+  justify-content: space-between;
+  gap: 16px;
 }
-.mapping-label > span {
+.variants-toolbar > [data-slot='field'] {
+  flex: 1 1 220px;
+}
+.variants-table {
+  min-width: 0;
+}
+.variants-table table {
+  table-layout: fixed;
+  width: 100%;
+}
+.variants-table th:first-child {
+  width: 68px;
+}
+.variants-table th:nth-child(2) {
+  width: 27%;
+}
+.variants-table th:last-child {
+  width: 40px;
+}
+.variants-table td,
+.variants-table th {
+  white-space: normal;
   overflow-wrap: anywhere;
 }
-.mapping-row > fieldset {
+.variants-table [data-dragging] {
+  opacity: 0.5;
+}
+.variant-name {
   min-width: 0;
-  border: 0;
-  padding: 0;
-  margin: 0;
+  white-space: normal;
+  height: auto;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
-.mapping-controls {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+.reasoning-variant-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.mapping-controls > [data-slot='field'] {
+.reasoning-variant-summary small {
+  color: var(--muted-foreground);
+}
+.variant-mobile-summary {
+  display: none;
+}
+.variant-drawer-fields [data-slot='field'] {
   margin-bottom: 0;
 }
-.mapping-controls > [data-slot='field']:has(textarea),
-.mapping-controls > small {
-  grid-column: 1 / -1;
+.variant-drawer-fields details {
+  margin: 0;
 }
 @media (max-width: 575px) {
-  .mapping-controls {
-    grid-template-columns: minmax(0, 1fr);
+  .variants-table th:nth-child(2) {
+    width: auto;
+  }
+  .variants-table th:nth-child(3),
+  .variants-table td:nth-child(3) {
+    display: none;
+  }
+  .variant-mobile-summary {
+    display: block;
+    padding-left: 30px;
+    margin-top: 4px;
+  }
+  .variants-table td,
+  .variants-table th {
+    padding-inline: 4px;
+  }
+  .variants-table th:first-child {
+    width: 52px;
+  }
+  .variants-table th:last-child {
+    width: 32px;
+  }
+  .variants-table .variant-name {
+    padding-inline: 0;
   }
 }
 .capability-evidence {

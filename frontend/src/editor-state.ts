@@ -7,6 +7,7 @@ import type {
 } from './types';
 import { recordValue } from './decode.ts';
 import { profileDraft, deploymentDraft, runtimeDraft } from './contracts.ts';
+import { defaultReasoningOptions } from './capabilityOptions.ts';
 
 export const defaults: EditorDraftMap = {
   profiles: {
@@ -22,7 +23,10 @@ export const defaults: EditorDraftMap = {
       'flash-attn': 'auto',
     },
     raw_args: [],
-    catalog: {},
+    catalog: {
+      model: { capabilities: { reasoning: false } },
+      reasoning: { presets: defaultReasoningOptions() },
+    },
   },
   deployments: {
     name: 'New deployment',

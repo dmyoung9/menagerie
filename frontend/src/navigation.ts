@@ -1,13 +1,17 @@
 export const go = (path: string) => {
   window.location.hash = '/' + path;
 };
-let navigationGuard: (() => Promise<boolean>) | undefined;
+const navigationGuards: (() => Promise<boolean>)[] = [];
 export function setNavigationGuard(guard: () => Promise<boolean>) {
-  navigationGuard = guard;
+  navigationGuards.push(guard);
   return () => {
-    if (navigationGuard === guard) navigationGuard = undefined;
+    const index = navigationGuards.indexOf(guard);
+    if (index !== -1) navigationGuards.splice(index, 1);
   };
 }
 export async function canNavigate() {
-  return navigationGuard ? navigationGuard() : true;
+  for (const guard of [...navigationGuards].reverse()) {
+    if (!(await guard())) return false;
+  }
+  return true;
 }

@@ -6,7 +6,7 @@ import type {
 } from './types';
 
 export const reasoningLabel = (id: string) =>
-  id.charAt(0).toUpperCase() + id.slice(1);
+  id === 'xhigh' ? 'XHigh' : id.charAt(0).toUpperCase() + id.slice(1);
 export const modeLabel = (mode: ReasoningPreset) =>
   mode.name || reasoningLabel(mode.id);
 export const validModeId = (id: string) =>
@@ -43,25 +43,62 @@ export function reasoningOptions(catalog: ModelCatalog): ReasoningPreset[] {
   });
 }
 
-export const standardReasoningIds = ['instant', 'low', 'medium', 'high'];
+export const standardReasoningIds = [
+  'instant',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra',
+];
+
+/** Seed only new builder drafts; saved catalogs remain authoritative. */
+export function defaultReasoningOptions(): ReasoningPreset[] {
+  return standardReasoningIds.map((id): ReasoningPreset => ({
+    id,
+    enabled: ['low', 'medium', 'high'].includes(id),
+    body: id === 'instant' ? {} : { reasoning_effort: id },
+  }));
+}
+
+export const configuredMode = (mode: ReasoningPreset) =>
+  Object.keys(mode.body).length > 0 || !!mode.prompt_prefix;
+
+export function supportsReasoning(catalog: ModelCatalog): boolean {
+  const value = catalog.model?.capabilities?.reasoning;
+  return value === true || (typeof value === 'object' && value.supported);
+}
+
+export function newModeId(name: string, catalog: ModelCatalog): string {
+  const used = new Set([
+    ...standardReasoningIds,
+    'default',
+    'model-default',
+    ...reasoningOptions(catalog).map((mode) => mode.id),
+    ...(catalog.model?.variants || []).map((mode) => mode.id),
+  ]);
+  const base = modeSlug(name) || 'variant';
+  let id = base;
+  for (let n = 2; used.has(id); n++) {
+    const suffix = `-${n}`;
+    id = base.slice(0, 64 - suffix.length) + suffix;
+  }
+  return id;
+}
 
 /** Standard placeholders are UI choices only, never saved/exposed automatically. */
 export function reasoningLevels(catalog: ModelCatalog): ReasoningPreset[] {
   const saved = reasoningOptions(catalog);
   return [
-    ...saved.filter((mode) => mode.id === 'default'),
-    ...standardReasoningIds.map(
-      (id) =>
-        saved.find((mode) => mode.id === id) || {
-          id,
-          enabled: false,
-          body: {},
-        },
-    ),
-    ...saved.filter(
-      (mode) =>
-        mode.id !== 'default' && !standardReasoningIds.includes(mode.id),
-    ),
+    ...saved,
+    ...defaultReasoningOptions()
+      .filter((mode) => !saved.some((row) => row.id === mode.id))
+      .slice(0, 64 - saved.length)
+      .map((mode) => ({
+        ...mode,
+        enabled: false,
+      })),
   ];
 }
 
