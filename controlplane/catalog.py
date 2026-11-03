@@ -4,88 +4,14 @@ import os
 import tempfile
 from copy import deepcopy
 
-REASONING_OPTIONS = {"default", "instant", "low", "medium", "high"}
-
-
-def reasoning_presets(catalog):
-    reasoning = catalog.get("reasoning", {})
-    if not isinstance(reasoning, dict):
-        raise ValueError("Reasoning configuration must be an object")
-    presets = reasoning.get("presets", [])
-    if not isinstance(presets, list):
-        raise ValueError("Reasoning presets must be a list")
-    seen = set()
-    for preset in presets:
-        if (
-            not isinstance(preset, dict)
-            or not isinstance(preset.get("id"), str)
-            or preset["id"] not in REASONING_OPTIONS
-            or preset["id"] in seen
-            or type(preset.get("enabled")) is not bool
-        ):
-            raise ValueError("Invalid or duplicate reasoning preset")
-        seen.add(preset["id"])
-        body = preset.get("body", {})
-        if not isinstance(body, dict) or set(body) - {
-            "reasoning_effort",
-            "chat_template_kwargs",
-            "reasoning_budget",
-            "thinking_budget",
-        }:
-            raise ValueError(
-                "Reasoning presets may only override reasoning request controls"
-            )
-        if "reasoning_effort" in body and (
-            not isinstance(body["reasoning_effort"], str)
-            or body["reasoning_effort"] not in {"none", "low", "medium", "high"}
-        ):
-            raise ValueError("Invalid reasoning effort")
-        for key in ("reasoning_budget", "thinking_budget"):
-            if key in body and (
-                type(body[key]) is not int or not 0 <= body[key] <= 1048576
-            ):
-                raise ValueError("Invalid reasoning token budget")
-        if "chat_template_kwargs" in body and (
-            not isinstance(body["chat_template_kwargs"], dict)
-            or set(body["chat_template_kwargs"]) != {"enable_thinking"}
-            or type(body["chat_template_kwargs"]["enable_thinking"]) is not bool
-        ):
-            raise ValueError(
-                "Only boolean enable_thinking is supported in reasoning template controls"
-            )
-        if preset["id"] == "default" and body:
-            raise ValueError("Default must leave request behavior unchanged")
-        if preset["id"] != "default" and preset["enabled"] and not body:
-            raise ValueError(
-                "Exposed reasoning presets need an explicit request mapping"
-            )
-    return presets
-
-
-def apply_reasoning(body, profile):
-    """Optional selector for clients without native catalog-variant support."""
-    result = deepcopy(body)
-    selected = result.pop("menagerie_variant", None)
-    if selected is None:
-        return result
-    preset = next(
-        (
-            p
-            for p in reasoning_presets(profile.get("catalog", {}))
-            if p["id"] == selected and p["enabled"]
-        ),
-        None,
-    )
-    if preset is None:
-        raise ValueError("Unknown or unexposed reasoning option")
-    override = preset.get("body", {})
-    if "chat_template_kwargs" in override:
-        current = result.get("chat_template_kwargs", {})
-        if not isinstance(current, dict):
-            raise ValueError("chat_template_kwargs must be an object")
-        result["chat_template_kwargs"] = current | override["chat_template_kwargs"]
-    result.update({k: v for k, v in override.items() if k != "chat_template_kwargs"})
-    return result
+from .reasoning import (
+    LEGACY_MODES,
+    MODEL_DEFAULT,
+    generated_variant,
+    reasoning_disabled,
+    reasoning_presets,
+)
+from .reasoning import apply_reasoning as apply_reasoning
 
 
 def costs(value=None):
@@ -150,17 +76,60 @@ def normalize(profile, alias=None):
     if "reasoning" in catalog:
         presets = reasoning_presets(catalog)
         declared = caps.get("reasoning")
-        disabled = declared is False or (
-            isinstance(declared, dict) and declared.get("supported") is False
-        )
+        disabled = reasoning_disabled(catalog)
+        mode_ids = {p["id"] for p in presets}
+        owned = LEGACY_MODES | mode_ids
+        for variant in model["variants"]:
+            if variant["id"] in mode_ids - LEGACY_MODES and not generated_variant(
+                variant
+            ):
+                body = variant.get("body", {})
+                settings = variant.get("settings", {})
+                if (
+                    not isinstance(body, dict)
+                    or set(body)
+                    - {
+                        "reasoning_effort",
+                        "chat_template_kwargs",
+                        "reasoning_budget",
+                        "thinking_budget",
+                    }
+                    or not isinstance(settings, dict)
+                    or set(settings) - {"reasoningEffort"}
+                ):
+                    raise ValueError(
+                        "Reasoning mode ID conflicts with an unrelated catalog variant"
+                    )
+        if catalog["reasoning"].get("default_mode") and any(
+            v["id"] == MODEL_DEFAULT and not generated_variant(v)
+            for v in model["variants"]
+        ):
+            raise ValueError(
+                "The model-default variant ID is reserved when a deployment default is configured"
+            )
         model["variants"] = [
-            v for v in model["variants"] if v["id"] not in REASONING_OPTIONS
+            v
+            for v in model["variants"]
+            if v["id"] not in owned and not generated_variant(v)
         ]
         model["variants"] += [
-            {"id": p["id"], "body": deepcopy(p.get("body", {}))}
+            {
+                "id": p["id"],
+                "body": (
+                    {}
+                    if p["id"] == "default"
+                    and not p.get("body")
+                    and not p.get("prompt_prefix")
+                    else {"menagerie_variant": p["id"]}
+                ),
+            }
             for p in presets
             if p["enabled"] and not disabled
         ]
+        if catalog["reasoning"].get("default_mode") and not disabled:
+            model["variants"].append(
+                {"id": MODEL_DEFAULT, "body": {"menagerie_variant": MODEL_DEFAULT}}
+            )
         # Explicit variants own exposure; don't ask clients to synthesize extra ones.
         supported = declared is True or (
             isinstance(declared, dict) and declared.get("supported") is True
@@ -168,7 +137,15 @@ def normalize(profile, alias=None):
         caps["reasoning"] = {
             "supported": not disabled
             and (
-                supported or any(p["enabled"] and p["id"] != "default" for p in presets)
+                supported
+                or bool(catalog["reasoning"].get("default_mode"))
+                or any(
+                    p["enabled"]
+                    and (
+                        p["id"] != "default" or p.get("body") or p.get("prompt_prefix")
+                    )
+                    for p in presets
+                )
             )
         }
     if isinstance(caps.get("reasoning"), dict) and caps["reasoning"].get("supported"):

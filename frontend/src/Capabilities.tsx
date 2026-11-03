@@ -1,29 +1,18 @@
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select';
-import { NumberControl } from './NumberControl';
-import { Textarea } from '@/components/ui/textarea';
 import { FieldSet, FieldLegend } from '@/components/ui/field';
-import { useId, useRef, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { AudioLines, Brain, Image, Type, Video, Wrench } from 'lucide-react';
+import { NumberControl } from './NumberControl';
 import { Field } from './ui';
-import { jsonObject } from './contracts';
 import type {
   DiscoveredCapabilities,
-  JsonObject,
   ModelCapabilities,
   ModelCatalog,
-  ReasoningPreset,
   Runtime,
+  TemplateSelection,
 } from './types';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import {
-  mappingKind,
-  reasoningLabel,
-  reasoningOptions,
-  setReasoningOptions,
-} from './capabilityOptions';
+import { reasoningLabel } from './capabilityOptions';
+import { ReasoningModes } from './ReasoningModes';
 import './capabilities.css';
 
 export function OutputLimit({
@@ -54,112 +43,6 @@ export function OutputLimit({
   );
 }
 
-function RequestMapping({
-  preset,
-  change,
-  valid,
-}: {
-  preset: ReasoningPreset;
-  change: (body: JsonObject) => void;
-  valid: (ok: boolean) => void;
-}) {
-  const errorId = useId();
-  const [custom, setCustom] = useState(false),
-    [text, setText] = useState(''),
-    [error, setError] = useState('');
-  const mode = custom ? 'custom' : mappingKind(preset.body || {});
-  function select(value: string) {
-    setError('');
-    valid(true);
-    setCustom(value === 'custom');
-    if (value === 'custom') {
-      setText(JSON.stringify(preset.body || {}, null, 2));
-      return;
-    }
-    change(
-      value === 'effort'
-        ? { reasoning_effort: preset.id === 'instant' ? 'none' : preset.id }
-        : value === 'template'
-          ? { chat_template_kwargs: { enable_thinking: false } }
-          : value
-            ? { [value]: 4096 }
-            : {},
-    );
-  }
-  return (
-    <div className="mapping-row">
-      <span>{reasoningLabel(preset.id)}</span>
-      <div>
-        <NativeSelect
-          aria-label={`${reasoningLabel(preset.id)} control`}
-          value={mode}
-          onChange={(e) => select(e.target.value)}
-        >
-          <NativeSelectOption value="">Not configured</NativeSelectOption>
-          <NativeSelectOption value="effort">Native effort</NativeSelectOption>
-          {preset.id === 'instant' && (
-            <NativeSelectOption value="template">
-              Thinking off (template)
-            </NativeSelectOption>
-          )}
-          <NativeSelectOption value="reasoning_budget">
-            Reasoning token budget
-          </NativeSelectOption>
-          <NativeSelectOption value="thinking_budget">
-            Thinking token budget
-          </NativeSelectOption>
-          <NativeSelectOption value="custom">
-            Custom request settings
-          </NativeSelectOption>
-        </NativeSelect>
-        {['reasoning_budget', 'thinking_budget'].includes(mode) && (
-          <NumberControl
-            label={`${reasoningLabel(preset.id)} token budget`}
-            min={0}
-            max={1048576}
-            required
-            value={
-              typeof preset.body[mode] === 'number'
-                ? preset.body[mode]
-                : undefined
-            }
-            sliderMax={32768}
-            change={(v) => change({ [mode]: v ?? 0 })}
-          />
-        )}
-        {mode === 'custom' && (
-          <Textarea
-            aria-label={`${reasoningLabel(preset.id)} custom settings`}
-            aria-invalid={!!error}
-            aria-describedby={error ? errorId : undefined}
-            rows={3}
-            spellCheck={false}
-            value={custom ? text : JSON.stringify(preset.body, null, 2)}
-            onChange={(e) => {
-              setCustom(true);
-              setText(e.target.value);
-              try {
-                const body: unknown = JSON.parse(e.target.value);
-                change(jsonObject(body));
-                setError('');
-                valid(true);
-              } catch {
-                setError('Enter a JSON object.');
-                valid(false);
-              }
-            }}
-          />
-        )}
-        {error && (
-          <small id={errorId} className="error-text" role="alert">
-            {error}
-          </small>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function Capabilities({
   catalog,
   change,
@@ -168,14 +51,18 @@ export function Capabilities({
   valid,
   reasoningControls,
   showOutputLimit = true,
+  artifactId,
+  templateOverride,
 }: {
   catalog: ModelCatalog;
-  change: (v: ModelCatalog) => void;
+  change: (catalog: ModelCatalog) => void;
   hints?: DiscoveredCapabilities;
   runtime?: Partial<Runtime>;
   valid: (key: string, ok: boolean) => void;
   reasoningControls?: ReactNode;
   showOutputLimit?: boolean;
+  artifactId?: string;
+  templateOverride?: TemplateSelection | null;
 }) {
   const model = catalog.model || {};
   const caps = {
@@ -184,116 +71,68 @@ export function Capabilities({
     output: ['text'],
     ...model.capabilities,
   };
-  const options = reasoningOptions(catalog, hints, runtime);
-  const reasoningValidity = useRef<Record<string, boolean>>({});
-  const validateReasoning = (id: string, ok: boolean) => {
-    reasoningValidity.current[id] = ok;
-    valid(
-      'reasoning-options',
-      Object.values(reasoningValidity.current).every(Boolean),
-    );
-  };
+  const reasoning =
+    caps.reasoning === true ||
+    (typeof caps.reasoning === 'object' && !!caps.reasoning.supported);
   const update = (value: Partial<ModelCapabilities>) =>
     change({
       ...catalog,
       model: { ...model, capabilities: { ...caps, ...value } },
     });
-  const writeOptions = (next: ReasoningPreset[]) =>
-    change(setReasoningOptions(catalog, next));
-  const unavailable = options.filter(
-    (p) => p.id !== 'default' && !Object.keys(p.body || {}).length,
-  );
   const modalities = [
     { id: 'text', label: 'Text', icon: Type },
     { id: 'image', label: 'Images', icon: Image },
     { id: 'audio', label: 'Audio', icon: AudioLines },
     { id: 'video', label: 'Video', icon: Video },
   ];
-  const features = [
-    { id: 'tools', label: 'Tools', icon: Wrench },
-    { id: 'reasoning', label: 'Reasoning', icon: Brain },
-  ];
-  const selected = (id: string) =>
-    id === 'tools'
-      ? caps.tools
-      : id === 'reasoning'
-        ? caps.reasoning === true ||
-          (typeof caps.reasoning === 'object' && !!caps.reasoning.supported)
-        : false;
   return (
     <section
       className="capabilities-panel"
       aria-label="Capabilities and reasoning"
     >
-      <FieldSet className="output-capabilities">
-        <FieldLegend>Input modalities</FieldLegend>
-        <ToggleGroup
-          multiple
-          variant="primary"
-          className="flex-wrap"
-          aria-label="Input modalities"
-          value={caps.input}
-          onValueChange={(next) => {
-            if (!next.length) return;
-            valid('input-formats', true);
-            update({
-              input: [
-                ...new Set([
-                  ...caps.input.filter(
-                    (id) => !modalities.some((m) => m.id === id),
-                  ),
-                  ...next,
-                ]),
-              ],
-            });
-          }}
-        >
-          {modalities.map(({ id, label, icon: Icon }) => (
-            <ToggleGroupItem
-              key={id}
-              value={id}
-              disabled={caps.input.length === 1 && caps.input.includes(id)}
-            >
-              <Icon />
-              {label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </FieldSet>
-      <FieldSet className="output-capabilities">
-        <FieldLegend>Output modalities</FieldLegend>
-        <ToggleGroup
-          multiple
-          variant="primary"
-          className="flex-wrap"
-          aria-label="Output modalities"
-          value={caps.output}
-          onValueChange={(next) => {
-            if (next.length)
+      {(['input', 'output'] as const).map((direction) => (
+        <FieldSet key={direction} className="output-capabilities">
+          <FieldLegend>
+            {direction === 'input' ? 'Input modalities' : 'Output modalities'}
+          </FieldLegend>
+          <ToggleGroup
+            multiple
+            variant="primary"
+            className="flex-wrap"
+            aria-label={
+              direction === 'input' ? 'Input modalities' : 'Output modalities'
+            }
+            value={caps[direction]}
+            onValueChange={(next) => {
+              if (!next.length) return;
+              valid(`${direction}-formats`, true);
               update({
-                output: [
+                [direction]: [
                   ...new Set([
-                    ...caps.output.filter(
-                      (id) => !['text', 'image', 'audio', 'video'].includes(id),
+                    ...caps[direction].filter(
+                      (id) => !modalities.some((m) => m.id === id),
                     ),
                     ...next,
                   ]),
                 ],
               });
-          }}
-        >
-          {modalities.map(({ id, icon: Icon }) => (
-            <ToggleGroupItem
-              key={id}
-              value={id}
-              disabled={caps.output.length === 1 && caps.output.includes(id)}
-            >
-              <Icon />
-              {reasoningLabel(id)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </FieldSet>
+            }}
+          >
+            {modalities.map(({ id, label, icon: Icon }) => (
+              <ToggleGroupItem
+                key={id}
+                value={id}
+                disabled={
+                  caps[direction].length === 1 && caps[direction].includes(id)
+                }
+              >
+                <Icon />
+                {direction === 'input' ? label : reasoningLabel(id)}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </FieldSet>
+      ))}
       <div className="capability-heading reasoning-heading">
         <h3>Capabilities</h3>
       </div>
@@ -302,12 +141,12 @@ export function Capabilities({
         variant="primary"
         className="flex-wrap"
         aria-label="Capabilities"
-        value={features.filter((f) => selected(f.id)).map((f) => f.id)}
+        value={[
+          ...(caps.tools ? ['tools'] : []),
+          ...(reasoning ? ['reasoning'] : []),
+        ]}
         onValueChange={(next) => {
-          if (!next.includes('reasoning')) {
-            reasoningValidity.current = {};
-            valid('reasoning-options', true);
-          }
+          if (!next.includes('reasoning')) valid('reasoning-options', true);
           update({
             tools: next.includes('tools'),
             reasoning: {
@@ -317,93 +156,27 @@ export function Capabilities({
           });
         }}
       >
-        {features.map(({ id, label, icon: Icon }) => (
-          <ToggleGroupItem key={id} value={id}>
-            <Icon />
-            {label}
-          </ToggleGroupItem>
-        ))}
+        <ToggleGroupItem value="tools">
+          <Wrench />
+          Tools
+        </ToggleGroupItem>
+        <ToggleGroupItem value="reasoning">
+          <Brain />
+          Reasoning
+        </ToggleGroupItem>
       </ToggleGroup>
       {showOutputLimit && <OutputLimit catalog={catalog} change={change} />}
-      {selected('reasoning') && (
-        <section aria-label="Reasoning options">
-          <div className="capability-heading reasoning-heading">
-            <h3>Reasoning options</h3>
-            <span>Select to expose</span>
-          </div>
-          <ToggleGroup
-            multiple
-            variant="primary"
-            className="flex-wrap"
-            aria-label="Reasoning options"
-            value={options.filter((p) => p.enabled).map((p) => p.id)}
-            onValueChange={(next) =>
-              writeOptions(
-                options.map((row) => ({
-                  ...row,
-                  enabled: next.includes(row.id),
-                })),
-              )
-            }
-          >
-            {options.map((p) => {
-              const available =
-                p.id === 'default' || Object.keys(p.body || {}).length > 0;
-              return (
-                <ToggleGroupItem
-                  key={p.id}
-                  value={p.id}
-                  disabled={!available}
-                  title={p.source}
-                >
-                  {reasoningLabel(p.id)}
-                </ToggleGroupItem>
-              );
-            })}
-          </ToggleGroup>
-          {unavailable.length > 0 && (
-            <p className="capability-hint">
-              {unavailable.length === 4
-                ? 'Reasoning controls not detected.'
-                : `${unavailable.map((p) => reasoningLabel(p.id)).join(', ')} not configured.`}{' '}
-              Configure the controls below.
-            </p>
-          )}
-          <div className="capability-advanced">
-            <p className="capability-hint">
-              Only configure controls your engine supports. Default leaves its
-              behavior unchanged; Instant must turn thinking off.
-            </p>
-            {reasoningControls}
-            <div className="reasoning-mappings">
-              {options
-                .filter((p) => p.id !== 'default')
-                .map((p) => (
-                  <RequestMapping
-                    key={p.id}
-                    preset={p}
-                    change={(body) => {
-                      validateReasoning(p.id, true);
-                      writeOptions(
-                        options.map((row) =>
-                          row.id === p.id
-                            ? {
-                                ...row,
-                                body,
-                                enabled: Object.keys(body).length
-                                  ? row.enabled
-                                  : false,
-                              }
-                            : row,
-                        ),
-                      );
-                    }}
-                    valid={(ok) => validateReasoning(p.id, ok)}
-                  />
-                ))}
-            </div>
-          </div>
-        </section>
+      {reasoning && (
+        <ReasoningModes
+          catalog={catalog}
+          change={change}
+          hints={hints}
+          runtime={runtime}
+          valid={valid}
+          reasoningControls={reasoningControls}
+          artifactId={artifactId}
+          templateOverride={templateOverride}
+        />
       )}
     </section>
   );

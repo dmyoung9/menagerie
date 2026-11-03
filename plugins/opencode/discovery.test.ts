@@ -52,6 +52,8 @@ test('explicit reasoning variants and multimodal declarations survive SDK discov
       id: 'instant',
       body: { chat_template_kwargs: { enable_thinking: false } },
     },
+    { id: 'research-8k', body: { menagerie_variant: 'research-8k' } },
+    { id: 'model-default', body: { menagerie_variant: 'model-default' } },
     { id: 'high', body: { reasoning_effort: 'high' } },
   ];
   const [model] = inventory({
@@ -97,6 +99,8 @@ test('selected reasoning bodies reach the SDK wire request and Default clears th
       id: 'instant',
       body: { chat_template_kwargs: { enable_thinking: false } },
     },
+    { id: 'research-8k', body: { menagerie_variant: 'research-8k' } },
+    { id: 'model-default', body: { menagerie_variant: 'model-default' } },
   ];
   const [model] = inventory({
     data: [
@@ -153,6 +157,8 @@ test('selected reasoning bodies reach the SDK wire request and Default clears th
       'default',
       'instant',
       'default',
+      'research-8k',
+      'model-default',
     ]) {
       const variant = model.variants.find((v) => v.id === id);
       const response = await ai.llm.generate({
@@ -166,6 +172,10 @@ test('selected reasoning bodies reach the SDK wire request and Default clears th
       assert.equal(response.text, 'ok');
       const body = captured.at(-1)!;
       assert.equal(body.model, model.modelID);
+      assert.equal(
+        body.menagerie_variant,
+        ['research-8k', 'model-default'].includes(id) ? id : undefined,
+      );
       if (['low', 'medium', 'high'].includes(id))
         assert.equal(body.reasoning_effort, id);
       else assert.equal(body.reasoning_effort, undefined);

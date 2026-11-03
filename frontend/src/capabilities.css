@@ -20,48 +20,41 @@
 .reasoning-heading {
   margin-top: 22px;
 }
-.capability-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .capability-hint {
   color: var(--muted-foreground);
   font-size: 12px;
   margin: 10px 0;
-}
-.capability-limit {
-  margin-top: 18px;
-}
-.capability-advanced {
-  margin-top: 18px;
-}
-.reasoning-mappings {
-  display: grid;
-  gap: 10px;
-  margin: 16px 0;
-}
-.mapping-row {
-  display: grid;
-  grid-template-columns: 65px minmax(0, 1fr);
-  gap: 12px;
-  align-items: baseline;
-  font-size: 12px;
-}
-.mapping-row > div {
-  display: grid;
-  gap: 8px;
-}
-.mapping-row textarea {
-  font-family: monospace;
-  min-height: 84px;
-  max-height: 200px;
 }
 .output-capabilities {
   margin-top: 18px;
 }
 .capabilities-panel > .output-capabilities:first-child {
   margin-top: 0;
+}
+.reasoning-mode-list {
+  display: grid;
+  gap: 18px;
+  margin: 18px 0;
+}
+.reasoning-mode {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+.reasoning-mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.reasoning-control-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 16px;
+}
+.reasoning-mode pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .capability-evidence {
   margin-top: 18px;

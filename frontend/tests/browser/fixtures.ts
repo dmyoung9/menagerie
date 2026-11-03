@@ -243,6 +243,11 @@ export const test = base.extend<{ fixture: Fixture }>({
         if (path.startsWith('/api/history/')) return send([]);
         if (path.endsWith('/engine-recommendation'))
           return send({ engine: 'llama.cpp', reason: 'GGUF engine' });
+        if (path.endsWith('/reasoning-hints'))
+          return send(
+            fixture.registry.models.find((m) => m.id === path.split('/')[3])
+              ?.discovered_capabilities || {},
+          );
         if (path === '/api/engines/releases') return send({ engines: [] });
         if (path.startsWith('/api/runtimes/') && path.endsWith('/capabilities'))
           return send(

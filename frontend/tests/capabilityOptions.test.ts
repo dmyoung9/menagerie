@@ -1,134 +1,117 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { ConfiguredModelCatalog } from '../src/types';
 import {
-  mappingKind,
+  modeSlug,
   reasoningOptions,
+  reasoningSuggestions,
   setReasoningOptions,
+  validModeId,
 } from '../src/capabilityOptions.ts';
+import type { ModelCatalog } from '../src/types';
 
-test('unknown controls stay unavailable; Default remains usable', () => {
-  const options = reasoningOptions(
-    {},
-    { reasoning: true },
-    { engine: 'llama.cpp' },
-  );
+test('fresh models get no invented modes, Instant or default effort', () => {
+  assert.deepEqual(reasoningOptions({}), []);
+  assert.deepEqual(reasoningSuggestions({ reasoning: true }), []);
   assert.deepEqual(
-    options.filter((p) => p.enabled).map((p) => p.id),
-    ['default'],
-  );
-  assert(
-    options
-      .filter((p) => p.id !== 'default')
-      .every((p) => Object.keys(p.body).length === 0),
+    reasoningSuggestions({ thinking_toggle: true }, { engine: 'custom' }),
+    [],
   );
 });
 
-test('detected thinking toggle offers Instant without inventing effort levels', () => {
-  const options = reasoningOptions(
-    {},
-    { thinking_toggle: true },
-    { engine: 'llama.cpp' },
+test('explicit template hints suggest arbitrary modes without automatically exposing them', () => {
+  const hints = {
+    reasoning_effort: ['xhigh', 'spoon', 'logic'],
+    thinking_toggle: true,
+  };
+  const suggestions = reasoningSuggestions(hints, { engine: 'prism' });
+  assert.deepEqual(
+    suggestions.map((p) => p.id),
+    ['xhigh', 'spoon', 'logic', 'thinking-on', 'thinking-off'],
   );
-  assert.deepEqual(options.find((p) => p.id === 'instant')?.body, {
+  assert(suggestions.every((p) => !p.enabled));
+  assert.deepEqual(suggestions[1].body, {
+    chat_template_kwargs: { reasoning_effort: 'spoon' },
+  });
+  assert.deepEqual(suggestions.at(-1)?.body, {
     chat_template_kwargs: { enable_thinking: false },
   });
-  assert(
-    options
-      .filter((p) => ['low', 'medium', 'high'].includes(p.id))
-      .every((p) => !Object.keys(p.body).length),
-  );
-  assert(
-    !Object.keys(
-      reasoningOptions({}, { thinking_toggle: true }, { engine: 'custom' })[1]
-        .body,
-    ).length,
-  );
 });
 
-test('effort levels must be explicit in metadata', () => {
-  const options = reasoningOptions(
-    {},
-    { reasoning_effort: ['low', 'high'] },
-    { engine: 'prism' },
-  );
-  assert.deepEqual(options.find((p) => p.id === 'high')?.body, {
-    reasoning_effort: 'high',
-  });
-  assert.equal(
-    Object.keys(options.find((p) => p.id === 'medium')!.body).length,
-    0,
-  );
-  assert.equal(
-    Object.keys(options.find((p) => p.id === 'instant')!.body).length,
-    0,
-  );
-});
-
-test('saved mappings and exposure survive metadata changes and edits to another option', () => {
-  const catalog: ConfiguredModelCatalog = {
-    model: {
-      limit: { output: 8192 },
-      capabilities: { tools: true, input: ['text', 'image'], output: ['text'] },
-    },
+test('saved modes preserve order, empty mappings, labels, default and composite effects', () => {
+  const catalog: ModelCatalog = {
+    model: { capabilities: { reasoning: true }, limit: { output: 9000 } },
     reasoning: {
+      default_mode: 'spoon',
       presets: [
-        { id: 'default', enabled: false, body: {} },
-        { id: 'instant', enabled: true, body: { reasoning_effort: 'none' } },
-        { id: 'high', enabled: false, body: { reasoning_budget: 12345 } },
+        {
+          id: 'spoon',
+          name: 'Spoon 8K',
+          enabled: false,
+          body: {
+            reasoning_effort: 'xhigh',
+            reasoning_budget: 8192,
+            chat_template_kwargs: { enable_thinking: true, style: 'research' },
+          },
+          prompt_prefix: '{REASON:spoon}',
+        },
+        {
+          id: 'default',
+          name: 'Custom default',
+          enabled: true,
+          body: { thinking_budget: 2048 },
+        },
+        { id: 'instant', enabled: false, body: {} },
       ],
     },
   };
-  const original = structuredClone(catalog);
-  const options = reasoningOptions(
-    catalog,
-    { thinking_toggle: true },
-    { engine: 'llama.cpp' },
-  );
-  const next = setReasoningOptions(
-    catalog,
-    options.map((p) => (p.id === 'high' ? { ...p, enabled: true } : p)),
-  );
-  assert.deepEqual(
-    next.reasoning.presets.find((p: { id: string }) => p.id === 'instant'),
-    catalog.reasoning.presets[1],
-  );
-  assert.equal(
-    next.reasoning.presets.find((p) => p.id === 'default')?.enabled,
-    false,
-  );
-  assert.deepEqual(next.model.limit, { output: 8192 });
-  assert.deepEqual(next.model.capabilities.input, ['text', 'image']);
-  assert.deepEqual(catalog, original);
-});
-
-test('existing client variants remain selectable without resetting their controls', () => {
-  const options = reasoningOptions({
-    model: { variants: [{ id: 'high', body: { thinking_budget: 9000 } }] },
-  });
-  assert.deepEqual(options.find((p) => p.id === 'high')?.body, {
-    thinking_budget: 9000,
-  });
-  assert.equal(options.find((p) => p.id === 'high')?.enabled, true);
-});
-
-test('legacy boolean reasoning support survives edits to preset options', () => {
-  const catalog = { model: { capabilities: { reasoning: true } } };
+  const before = structuredClone(catalog);
+  assert.deepEqual(reasoningOptions(catalog), catalog.reasoning!.presets);
   const next = setReasoningOptions(catalog, reasoningOptions(catalog));
-  assert.deepEqual(next.model.capabilities.reasoning, { supported: true });
+  assert.deepEqual(next.reasoning, catalog.reasoning);
+  assert.deepEqual(next.model.capabilities.reasoning, true);
+  assert.deepEqual(next.model.limit, { output: 9000 });
+  assert.deepEqual(catalog, before);
 });
 
-test('advanced controls recognize common mappings without exposing JSON', () => {
-  assert.equal(mappingKind({}), '');
-  assert.equal(mappingKind({ reasoning_effort: 'low' }), 'effort');
-  assert.equal(
-    mappingKind({ chat_template_kwargs: { enable_thinking: false } }),
-    'template',
+test('editing modes does not enable an explicitly disabled reasoning capability', () => {
+  const next = setReasoningOptions(
+    { model: { capabilities: { reasoning: { supported: false } } } },
+    [{ id: 'custom', enabled: true, body: { reasoning_effort: 'custom' } }],
   );
-  assert.equal(mappingKind({ reasoning_budget: 2048 }), 'reasoning_budget');
-  assert.equal(mappingKind({ thinking_budget: 2048 }), 'thinking_budget');
-  assert.equal(
-    mappingKind({ reasoning_effort: 'high', reasoning_budget: 1000 }),
-    'custom',
+  assert.deepEqual(next.model.capabilities.reasoning, { supported: false });
+});
+
+test('legacy client mappings import without dropping custom IDs or unrelated catalog variants', () => {
+  const catalog: ModelCatalog = {
+    model: {
+      variants: [
+        { id: 'ultra', body: { reasoning_budget: 1234 } },
+        { id: 'high', settings: { reasoningEffort: 'high' } },
+        { id: 'creative', body: { temperature: 1.2 } },
+      ],
+    },
+  };
+  const modes = reasoningOptions(catalog);
+  assert.deepEqual(
+    modes.map((p) => p.id),
+    ['ultra', 'high'],
   );
+  assert.deepEqual(modes[1].body, { reasoning_effort: 'high' });
+  assert.deepEqual(
+    setReasoningOptions(catalog, modes).model.variants,
+    catalog.model!.variants,
+  );
+});
+
+test('stable IDs are bounded and reserve the explicit model-default selector', () => {
+  assert.equal(modeSlug('Spoon / Research 8K'), 'spoon-research-8k');
+  for (const id of ['xhigh', 'custom.mode-2', 'ABC_1']) assert(validModeId(id));
+  for (const id of [
+    '',
+    'has spaces',
+    'model-default',
+    'x'.repeat(65),
+    '__proto__',
+  ])
+    assert(!validModeId(id));
 });

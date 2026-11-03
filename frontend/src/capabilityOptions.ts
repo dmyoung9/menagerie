@@ -4,65 +4,74 @@ import type {
   ModelCatalog,
   ReasoningPreset,
   Runtime,
-  UnknownRecord,
 } from './types';
 
-const isRecord = (value: unknown): value is UnknownRecord =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-export const reasoningIds = ['default', 'instant', 'low', 'medium', 'high'];
 export const reasoningLabel = (id: string) =>
   id.charAt(0).toUpperCase() + id.slice(1);
+export const modeLabel = (mode: ReasoningPreset) =>
+  mode.name || reasoningLabel(mode.id);
+export const validModeId = (id: string) =>
+  /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(id) && id !== 'model-default';
+export const modeSlug = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 64);
 
-/** Saved mappings win. Metadata can fill gaps, never replace a user's settings. */
-export function reasoningOptions(
-  catalog: ModelCatalog,
+/** Saved modes are authoritative: never pad them with invented levels or overwrite empty mappings. */
+export function reasoningOptions(catalog: ModelCatalog): ReasoningPreset[] {
+  if (catalog.reasoning?.presets) return catalog.reasoning.presets;
+  return (catalog.model?.variants || []).flatMap((variant) => {
+    const effort = variant.settings?.reasoningEffort;
+    const body =
+      variant.body ||
+      (typeof effort === 'string' ? { reasoning_effort: effort } : {});
+    if (
+      Object.keys(body).some(
+        (key) =>
+          ![
+            'reasoning_effort',
+            'chat_template_kwargs',
+            'reasoning_budget',
+            'thinking_budget',
+          ].includes(key),
+      )
+    )
+      return [];
+    if (!Object.keys(body).length && variant.id !== 'default') return [];
+    return [{ id: variant.id, enabled: true, body, source: 'Saved variant' }];
+  });
+}
+
+/** Suggestions require explicit evidence and are never exposed or selected automatically. */
+export function reasoningSuggestions(
   hints: DiscoveredCapabilities = {},
   runtime: Partial<Runtime> = {},
 ): ReasoningPreset[] {
-  const saved = catalog.reasoning?.presets;
-  const variants = catalog.model?.variants || [];
-  const templateEngine = ['llama.cpp', 'prism', 'vllm', 'sglang'].includes(
-    runtime.engine || '',
-  );
-  return reasoningIds.map((id) => {
-    const preset = saved?.find((p) => p.id === id);
-    if (preset && (id === 'default' || Object.keys(preset.body || {}).length))
-      return { ...preset, source: 'Saved settings' };
-    const variant = variants.find((v) => v.id === id);
-    if (variant) {
-      const reasoningEffort = variant.settings?.reasoningEffort;
-      const body =
-        variant.body ||
-        (typeof reasoningEffort === 'string'
-          ? { reasoning_effort: reasoningEffort }
-          : {});
-      return { id, enabled: true, body, source: 'Saved variant' };
-    }
-    if (id === 'default')
-      return { id, enabled: !saved, body: {}, source: 'Deployment default' };
-    const effort = id === 'instant' ? 'none' : id;
-    if (templateEngine && hints.reasoning_effort?.includes(effort))
-      return {
-        id,
-        enabled: false,
-        body: { reasoning_effort: effort },
-        source: 'Detected in model template',
-      };
-    if (id === 'instant' && templateEngine && hints.thinking_toggle)
-      return {
-        id,
-        enabled: false,
-        body: { chat_template_kwargs: { enable_thinking: false } },
-        source: 'Detected thinking control',
-      };
-    return {
+  if (!['llama.cpp', 'prism', 'vllm', 'sglang'].includes(runtime.engine || ''))
+    return [];
+  const modes: ReasoningPreset[] = (hints.reasoning_effort || [])
+    .filter(validModeId)
+    .map((id) => ({
       id,
+      name: reasoningLabel(id),
       enabled: false,
-      body: {},
-      source: 'Needs a supported model and engine control',
-    };
-  });
+      body: { chat_template_kwargs: { reasoning_effort: id } },
+      source: 'Model template hint; confirm engine support',
+    }));
+  if (hints.thinking_toggle)
+    for (const enabled of [true, false])
+      modes.push({
+        id: enabled ? 'thinking-on' : 'thinking-off',
+        name: enabled ? 'Thinking on' : 'Thinking off',
+        enabled: false,
+        body: { chat_template_kwargs: { enable_thinking: enabled } },
+        source: 'Model template hint; confirm engine support',
+      });
+  return modes.filter(
+    (mode, index) => modes.findIndex((other) => other.id === mode.id) === index,
+  );
 }
 
 export function setReasoningOptions(
@@ -76,42 +85,15 @@ export function setReasoningOptions(
     output: ['text'],
     ...model.capabilities,
   };
-  const reasoningSupported =
-    caps.reasoning === true ||
-    (typeof caps.reasoning === 'object' && caps.reasoning.supported);
   return {
     ...catalog,
-    model: {
-      ...model,
-      capabilities: {
-        ...caps,
-        reasoning: {
-          supported:
-            !!reasoningSupported ||
-            options.some((p) => p.id !== 'default' && p.enabled),
-        },
-      },
-    },
+    model: { ...model, capabilities: caps },
     reasoning: {
       ...catalog.reasoning,
-      presets: options.map(({ id, enabled, body }) => ({ id, enabled, body })),
+      presets: options.map(({ source: _source, ...mode }) => {
+        void _source;
+        return mode;
+      }),
     },
   };
-}
-
-export function mappingKind(body: UnknownRecord): string {
-  const keys = Object.keys(body);
-  if (!keys.length) return '';
-  if (keys.length !== 1) return 'custom';
-  if (typeof body.reasoning_effort === 'string') return 'effort';
-  const template = body.chat_template_kwargs;
-  if (
-    isRecord(template) &&
-    template.enable_thinking === false &&
-    Object.keys(template).length === 1
-  )
-    return 'template';
-  if (typeof body.reasoning_budget === 'number') return 'reasoning_budget';
-  if (typeof body.thinking_budget === 'number') return 'thinking_budget';
-  return 'custom';
 }

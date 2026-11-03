@@ -43,7 +43,11 @@ arrangement; the LAN dashboard is not an inference endpoint.
 - Maps an empty `default` preset to the client's built-in Default choice rather
   than creating a duplicate. OpenCode/OpenChamber always retain that base choice;
   hiding Default in Menagerie's advertised presets cannot remove the client's
-  built-in option. Other presets follow the deployment's exposure choices exactly.
+  built-in option. Other modes follow the deployment's exposure choices exactly.
+  Built-in Default uses the deployment's configured reasoning default; the
+  `model-default` variant bypasses it. Mode IDs are stable client-facing names.
+  Named modes send a selector that Menagerie resolves, including model-specific
+  template controls and opt-in prompt prefixes.
 - Replaces that provider's discovered inventory on a successful response, including
   an empty inventory. Keeps the last successful inventory during temporary outages.
 - Clears retained inventory when the endpoint changes; cleans up timers and requests

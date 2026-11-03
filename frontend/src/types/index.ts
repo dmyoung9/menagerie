@@ -29,8 +29,10 @@ export type ModelCapabilities = {
 };
 export type ReasoningPreset = {
   id: string;
+  name?: string;
   enabled: boolean;
   body: JsonObject;
+  prompt_prefix?: string;
   source?: string;
 };
 export type ModelCatalogSettings = {
@@ -42,14 +44,14 @@ export type ModelCatalogSettings = {
 export type ModelCatalog = {
   catalog_id?: string;
   model?: ModelCatalogSettings;
-  reasoning?: { presets?: ReasoningPreset[] };
+  reasoning?: { presets?: ReasoningPreset[]; default_mode?: string | null };
 };
 export type ConfiguredModelCatalog = Omit<
   ModelCatalog,
   'model' | 'reasoning'
 > & {
   model: ModelCatalogSettings & { capabilities: ModelCapabilities };
-  reasoning: { presets: ReasoningPreset[] };
+  reasoning: { presets: ReasoningPreset[]; default_mode?: string | null };
 };
 
 export type DiscoveredCapabilities = {

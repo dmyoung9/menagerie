@@ -41,6 +41,7 @@ import type {
   ProfileDraft,
   Runtime,
   RuntimeRecommendation,
+  TemplateSelection,
 } from './types';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
 import { ModelCompanions } from './ModelCompanions';
@@ -55,6 +56,7 @@ export function ConfigurationFields({
   recommendation,
   modelFields,
   placementFields,
+  templateOverride,
 }: {
   value: ProfileDraft;
   data: Registry;
@@ -63,6 +65,7 @@ export function ConfigurationFields({
   recommendation?: RuntimeRecommendation;
   modelFields?: ReactNode;
   placementFields?: ReactNode;
+  templateOverride?: TemplateSelection | null;
 }) {
   const { confirm, confirmation } = useConfirmation();
   const runtime = data.runtimes?.find((r) => r.id === value.runtime_id);
@@ -303,6 +306,8 @@ export function ConfigurationFields({
           change={(catalog) => set({ ...value, catalog })}
           hints={artifact?.discovered_capabilities}
           runtime={runtime}
+          artifactId={value.artifact_id}
+          templateOverride={templateOverride}
           valid={valid}
           showOutputLimit={false}
           reasoningControls={
@@ -599,6 +604,7 @@ export function Editor(props: EditorProps) {
             {deployment.configuration && (
               <ConfigurationFields
                 value={deployment.configuration}
+                templateOverride={deployment.template_override}
                 data={data}
                 set={(configuration) => set('configuration', configuration)}
                 onValid={(valid) =>

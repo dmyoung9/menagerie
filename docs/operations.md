@@ -39,7 +39,10 @@ also depend on advertised engine flags: select its supported speculative type
 set draft-token limits. Blank new controls retain engine defaults. Engine flag
 availability does not establish model compatibility or inference acceptance.
 Layer and MoE-expert CPU offload live with memory placement; the default reasoning
-budget lives beside the per-level reasoning mappings. Text input can be deselected
+budget lives beside the composable reasoning modes. Modes can have custom names,
+effort values, budgets and template controls; choose the deployment default
+separately from client exposure. See [reasoning modes](model-capabilities.md#configure-deployment-owned-reasoning-modes).
+Text input can be deselected
 for non-text models; at least one input and output format must remain selected.
 
 The deployment list separates currently active requests from historical finished

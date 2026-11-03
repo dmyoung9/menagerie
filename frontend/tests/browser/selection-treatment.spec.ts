@@ -82,9 +82,7 @@ for (const width of [1440, 576, 320]) {
     await page.keyboard.press('Space');
     await page.mouse.move(0, 0);
     await expect(download).toBeEnabled();
-    const selected = dialog.locator(
-      '[data-slot="toggle-group-item"][aria-pressed="true"]',
-    );
+    const selected = dialog.locator('button[aria-pressed="true"]');
     await expect(selected).toHaveCount(4);
     for (const button of await selected.all())
       await expectPrimary(button, colors);
@@ -177,9 +175,7 @@ for (const width of [1440, 576, 320]) {
       exact: true,
     });
     const colors = await primaryColors(page);
-    const selected = panel.locator(
-      '[data-slot="toggle-group-item"][aria-pressed="true"]',
-    );
+    const selected = panel.locator('button[aria-pressed="true"]');
     await expect(selected).toHaveCount(6);
     for (const button of await selected.all())
       await expectPrimary(button, colors);
@@ -202,12 +198,12 @@ for (const width of [1440, 576, 320]) {
     await expect(text).toHaveAttribute('aria-pressed', 'false');
     await expect(text).not.toHaveCSS('background-color', colors.background);
     await expect(image).toBeDisabled();
-    const options = panel.getByRole('group', {
-      name: 'Reasoning options',
+    const options = panel.getByRole('region', {
+      name: 'Reasoning modes',
       exact: true,
     });
     const instant = options.getByRole('button', {
-      name: 'Instant',
+      name: 'Expose Instant to clients',
       exact: true,
     });
     await expect(instant.locator('svg')).toHaveCount(0);

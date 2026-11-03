@@ -56,8 +56,10 @@ const partialCapabilities: d.Decoder<Partial<T.ModelCapabilities>> = (
 };
 const preset = d.object<T.ReasoningPreset>({
   id: d.string,
+  name: opt(d.string),
   enabled: d.boolean,
   body: jsonObject,
+  prompt_prefix: opt(d.string),
   source: opt(d.string),
 });
 const variant = d.object<{
@@ -74,7 +76,12 @@ const catalogSettings = d.object<T.ModelCatalogSettings>({
 export const modelCatalog = d.object<T.ModelCatalog>({
   catalog_id: opt(d.string),
   model: opt(catalogSettings),
-  reasoning: opt(d.object({ presets: opt(d.array(preset)) })),
+  reasoning: opt(
+    d.object({
+      presets: opt(d.array(preset)),
+      default_mode: opt(d.nullable(d.string)),
+    }),
+  ),
 });
 const dependency = d.object<{ name: string; size?: number | null }>({
   name: d.string,

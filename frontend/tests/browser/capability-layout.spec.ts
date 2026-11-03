@@ -54,7 +54,7 @@ for (const width of [1440, 576, 320]) {
       page.getByText('Available to clients', { exact: true }),
     ).toHaveCount(0);
     const options = panel.getByRole('region', {
-      name: 'Reasoning options',
+      name: 'Reasoning modes',
       exact: true,
     });
     await expect(options).toHaveCount(0);
@@ -67,15 +67,19 @@ for (const width of [1440, 576, 320]) {
     await reasoning.click();
     await expect(options).toBeVisible();
     await expect(
-      options.getByRole('combobox', { name: 'Instant control', exact: true }),
-    ).toHaveValue('template');
+      options.getByRole('combobox', { name: 'Instant thinking', exact: true }),
+    ).toHaveValue('false');
     await expect(
-      options.getByRole('combobox', { name: 'High control', exact: true }),
-    ).toHaveValue('thinking_budget');
+      options.getByRole('combobox', {
+        name: 'High thinking budget mode',
+        exact: true,
+      }),
+    ).toHaveValue('custom');
     await expect(
-      options
-        .getByRole('group', { name: 'Reasoning options', exact: true })
-        .getByRole('button', { name: 'Low', exact: true }),
+      options.getByRole('button', {
+        name: 'Expose Low to clients',
+        exact: true,
+      }),
     ).toHaveAttribute('aria-pressed', 'false');
     await reasoning.click();
     await expect(options).toHaveCount(0);
@@ -116,11 +120,14 @@ for (const width of [1440, 576, 320]) {
     await reasoning.click();
     await expect(options).toBeVisible();
     await expect(
-      options.getByRole('combobox', { name: 'Instant control', exact: true }),
-    ).toHaveValue('template');
+      options.getByRole('combobox', { name: 'Instant thinking', exact: true }),
+    ).toHaveValue('false');
     await expect(
-      options.getByRole('combobox', { name: 'High control', exact: true }),
-    ).toHaveValue('thinking_budget');
+      options.getByRole('combobox', {
+        name: 'High thinking budget mode',
+        exact: true,
+      }),
+    ).toHaveValue('custom');
     expect(
       (
         await new AxeBuilder({ page })
@@ -159,15 +166,18 @@ test('turning reasoning off clears hidden mapping errors without deleting saved 
   const original = structuredClone(catalog.reasoning);
   await page.goto('/#/deployments/idle/configuration');
   const section = page.getByRole('region', {
-    name: 'Reasoning options',
+    name: 'Reasoning modes',
     exact: true,
   });
   for (const name of ['Instant', 'High']) {
     await section
-      .getByRole('combobox', { name: name + ' control', exact: true })
-      .selectOption('custom');
+      .getByText(name + ' template arguments (JSON)', { exact: true })
+      .click();
     await section
-      .getByRole('textbox', { name: name + ' custom settings', exact: true })
+      .getByRole('textbox', {
+        name: name + ' template arguments (JSON)',
+        exact: true,
+      })
       .fill('{invalid');
   }
   await expect(
@@ -209,6 +219,6 @@ test('legacy boolean Reasoning enabled displays its options', async ({
       .getByRole('button', { name: 'Reasoning', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true');
   await expect(
-    page.getByRole('region', { name: 'Reasoning options', exact: true }),
+    page.getByRole('region', { name: 'Reasoning modes', exact: true }),
   ).toBeVisible();
 });

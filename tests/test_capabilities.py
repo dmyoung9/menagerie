@@ -140,10 +140,10 @@ def test_explicit_reasoning_off_preserves_presets_without_reenabling_exposure(de
 @pytest.mark.parametrize(
     "preset",
     [
-        {"id": "instant", "enabled": True, "body": {}},
-        {"id": "default", "enabled": True, "body": {"reasoning_effort": "high"}},
+        {"id": "model-default", "enabled": True, "body": {}},
+        {"id": "bad id", "enabled": True, "body": {}},
         {"id": "high", "enabled": True, "body": {"model": "other"}},
-        {"id": "high", "enabled": True, "body": {"reasoning_budget": -1}},
+        {"id": "high", "enabled": True, "body": {"reasoning_budget": -2}},
         {"id": "high", "enabled": True, "body": {"thinking_budget": True}},
         {"id": "high", "enabled": True, "body": {"reasoning_effort": []}},
         {

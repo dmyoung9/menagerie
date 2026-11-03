@@ -646,6 +646,7 @@ export function DeploymentSetEditor({
                 </Field>
                 <ConfigurationFields
                   value={m.configuration!}
+                  templateOverride={m.template_override}
                   data={data}
                   set={(configuration) =>
                     updateMember(index, { configuration })
