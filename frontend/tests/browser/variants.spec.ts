@@ -341,6 +341,12 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
   await expect(
     section.getByLabel('Default variant', { exact: true }),
   ).toHaveValue('private-level');
+  // A resource preview can precede Save; select the saved request by endpoint.
+  await expect
+    .poll(() =>
+      fixture.writes.some((write) => write.path === '/api/resources/preview'),
+    )
+    .toBe(true);
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Preserved variants');
@@ -351,7 +357,11 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
     )
     .toBe(2);
   expect(
-    deploymentDraft(fixture.writes[0].body).configuration!.catalog.reasoning,
+    deploymentDraft(
+      fixture.writes.find(
+        (write) => write.path === '/api/deployments?expected=1',
+      )!.body,
+    ).configuration!.catalog.reasoning,
   ).toEqual(catalog.reasoning);
   await section
     .getByRole('button', { name: 'Private level', exact: true })
