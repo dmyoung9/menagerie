@@ -127,7 +127,7 @@ function WizardHarness() {
                     ? {
                         'flash-attn': {
                           type: 'string',
-                          default: 'on',
+                          default: 'auto',
                           choices: ['on', 'off', 'auto'],
                         },
                       }

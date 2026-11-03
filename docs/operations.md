@@ -25,6 +25,31 @@ configuration. Renaming does not change its alias; changing the alias requires
 updating clients. Immutable revisions remain internal for history/recovery.
 See [multi-model deployments](multi-model-deployments.md).
 
+Configuration groups identity, model/engine, memory placement, performance,
+generation, capabilities/reasoning, lifecycle and networking into open sections.
+Jump buttons scroll without switching tabs. Save and Discard stay available in
+the bottom bar; raw JSON overrides remain under **Advanced model settings**.
+The resource preview sits alongside the form on wide screens; on narrow screens
+its summary stays visible and **Show resource charts** expands the graphics.
+
+Sampling controls include top-p, top-k, min-p, presence and repetition penalties
+when advertised by the selected llama.cpp/Prism engine. MTP/speculative controls
+also depend on advertised engine flags: select its supported speculative type
+(such as `draft-mtp`), optionally supply a compatible local draft/head file, and
+set draft-token limits. Blank new controls retain engine defaults. Engine flag
+availability does not establish model compatibility or inference acceptance.
+Layer and MoE-expert CPU offload live with memory placement; the default reasoning
+budget lives beside the composable reasoning modes. Modes can have custom names,
+effort values, budgets and template controls; choose the deployment default
+separately from client exposure. See [reasoning modes](model-capabilities.md#configure-deployment-owned-reasoning-modes).
+Text input can be deselected
+for non-text models; at least one input and output format must remain selected.
+
+The deployment list separates currently active requests from historical finished
+requests, including errors and cancellations. Finished totals survive request-log
+retention. On upgrade, they start from retained request/session history; requests
+already removed from both sources cannot be reconstructed.
+
 The composer previews the whole draft alongside existing usage and safety headroom.
 Context, concurrency, cache, and member changes update estimates without launching.
 Known runtime/model constraints bound inputs; estimated capacity does not. The

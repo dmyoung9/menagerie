@@ -10,7 +10,7 @@ import { FieldSet, FieldLegend } from '@/components/ui/field';
 import { useEffect, useMemo, useState } from 'react';
 import { Dialog } from '@/components/workspace';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { ArrowUpRight, Download, Check, LoaderCircle } from 'lucide-react';
+import { ArrowUpRight, Download, LoaderCircle } from 'lucide-react';
 import {
   byteSize,
   candidates,
@@ -249,7 +249,7 @@ export function VariantDialog({
                   <FieldSet className="variant-field" key={d}>
                     <FieldLegend>{labels[d]}</FieldLegend>
                     <ToggleGroup
-                      variant="outline"
+                      variant="primary"
                       className="flex-wrap"
                       aria-label={labels[d]}
                       value={selection[d] ? [selection[d]!] : []}
@@ -275,7 +275,6 @@ export function VariantDialog({
                                 : value
                           }
                         >
-                          {selection[d] === value && <Check />}{' '}
                           {value === 'None' ? 'No suffix' : value}
                         </ToggleGroupItem>
                       ))}

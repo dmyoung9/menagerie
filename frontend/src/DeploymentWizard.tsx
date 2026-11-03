@@ -437,8 +437,6 @@ export function DeploymentWizard({
                 key={artifactId + ':' + runtime?.id}
                 catalog={catalog}
                 change={setCatalog}
-                hints={artifact?.discovered_capabilities}
-                runtime={runtime}
                 valid={(key, ok) => setInvalid((v) => ({ ...v, [key]: !ok }))}
               />
               {artifact?.metadata?.projector && schema.mmproj && (

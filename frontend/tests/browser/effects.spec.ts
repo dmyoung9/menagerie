@@ -85,10 +85,10 @@ test('wizard preserves edits on identical polling snapshots but updates changed 
   await expect(input).toHaveValue('{"gpu-layers":"17"}');
   await page.evaluate(() => window.dispatchEvent(new Event('change-schema')));
   await expect(input).toHaveValue(
-    '{\n  "flash-attn": "on",\n  "gpu-layers": "17"\n}',
+    '{\n  "flash-attn": "auto",\n  "gpu-layers": "17"\n}',
   );
   await page.evaluate(() => window.dispatchEvent(new Event('replace-engine')));
   await expect(input).toHaveValue(
-    '{\n  "gpu-layers": "all",\n  "flash-attn": "on"\n}',
+    '{\n  "gpu-layers": "all",\n  "flash-attn": "auto"\n}',
   );
 });

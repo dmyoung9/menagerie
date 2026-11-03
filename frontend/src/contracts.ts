@@ -21,6 +21,9 @@ export const runtimeField = d.object<T.RuntimeField>({
   label: opt(d.string),
   description: opt(d.string),
   default: opt(jsonValue),
+  engine_default: opt(d.number),
+  default_from: opt(d.string),
+  default_note: opt(d.string),
   min: opt(d.number),
   max: opt(d.number),
   enum: opt(d.array(jsonValue)),
@@ -53,8 +56,10 @@ const partialCapabilities: d.Decoder<Partial<T.ModelCapabilities>> = (
 };
 const preset = d.object<T.ReasoningPreset>({
   id: d.string,
+  name: opt(d.string),
   enabled: d.boolean,
   body: jsonObject,
+  prompt_prefix: opt(d.string),
   source: opt(d.string),
 });
 const variant = d.object<{
@@ -71,7 +76,12 @@ const catalogSettings = d.object<T.ModelCatalogSettings>({
 export const modelCatalog = d.object<T.ModelCatalog>({
   catalog_id: opt(d.string),
   model: opt(catalogSettings),
-  reasoning: opt(d.object({ presets: opt(d.array(preset)) })),
+  reasoning: opt(
+    d.object({
+      presets: opt(d.array(preset)),
+      default_mode: opt(d.nullable(d.string)),
+    }),
+  ),
 });
 const dependency = d.object<{ name: string; size?: number | null }>({
   name: d.string,
@@ -145,7 +155,7 @@ export const artifact = d.object<T.Artifact>({
   template_default: opt(d.nullable(templateSelection)),
   templates: opt(d.array(templateAssetPublic)),
 });
-const runtimeCapabilities = d.object<T.RuntimeCapabilities>({
+export const runtimeCapabilities = d.object<T.RuntimeCapabilities>({
   formats: opt(stringArray),
   schema: opt(d.record(runtimeField)),
 });
@@ -227,6 +237,7 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     unit_id: opt(d.string),
     lifecycle: opt(lifecycle),
     inflight: opt(d.number),
+    historical_requests: opt(d.number),
     template_override: opt(d.nullable(templateSelection)),
   })(value, path);
 export const servingDeployment: d.Decoder<T.ServingDeployment> = (
@@ -269,6 +280,7 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
     revision: d.number,
     lifecycle: opt(lifecycle),
     inflight: opt(d.number),
+    historical_requests: opt(d.number),
   })(value, path);
   return { ...common, multi_model: true, members, member_ids };
 };

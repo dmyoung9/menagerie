@@ -19,7 +19,7 @@ export const defaults: EditorDraftMap = {
       'gpu-layers': 'all',
       'cache-type-k': 'q8_0',
       'cache-type-v': 'q8_0',
-      'flash-attn': 'on',
+      'flash-attn': 'auto',
     },
     raw_args: [],
     catalog: {},
@@ -58,7 +58,11 @@ const allowed: Record<string, string[]> = {
     'raw_args',
     'catalog',
   ],
-  deployments: ['id', ...Object.keys(defaults.deployments)],
+  deployments: [
+    'id',
+    ...Object.keys(defaults.deployments),
+    'template_override',
+  ],
   runtimes: [
     'id',
     ...Object.keys(defaults.runtimes),

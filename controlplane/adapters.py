@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import struct
@@ -73,8 +74,8 @@ FIELDS = {
     },
     "flash-attn": {
         "type": "enum",
-        "choices": ["on", "off", "auto"],
-        "default": "on",
+        "choices": ["auto", "on", "off"],
+        "default": "auto",
         "label": "Flash attention",
     },
     "temp": {
@@ -84,19 +85,62 @@ FIELDS = {
         "default": 1,
         "label": "Temperature",
     },
+    "top-p": {"type": "number", "min": 0, "max": 1, "label": "Top-p"},
+    "top-k": {"type": "integer", "min": 0, "max": 1048576, "label": "Top-k"},
+    "min-p": {"type": "number", "min": 0, "max": 1, "label": "Min-p"},
+    "presence-penalty": {
+        "type": "number",
+        "min": -2,
+        "max": 2,
+        "label": "Presence penalty",
+    },
+    "repeat-penalty": {
+        "type": "number",
+        "min": 0,
+        "max": 10,
+        "label": "Repetition penalty",
+    },
+    "spec-type": {"type": "string", "label": "Speculative decoding type (MTP)"},
+    "spec-draft-model": {"type": "string", "label": "MTP / draft model path"},
+    "model-draft": {"type": "string", "label": "Draft model path (legacy alias)"},
+    "spec-draft-n-max": {
+        "type": "integer",
+        "min": 1,
+        "max": 1048576,
+        "label": "Maximum draft tokens",
+    },
+    "spec-draft-n-min": {
+        "type": "integer",
+        "min": 0,
+        "max": 1048576,
+        "label": "Minimum draft tokens",
+    },
+    "draft-max": {
+        "type": "integer",
+        "min": 1,
+        "max": 1048576,
+        "label": "Maximum draft tokens (legacy)",
+    },
+    "draft-min": {
+        "type": "integer",
+        "min": 0,
+        "max": 1048576,
+        "label": "Minimum draft tokens (legacy)",
+    },
     "reasoning-budget": {
         "type": "integer",
         "min": -1,
         "max": 1048576,
         "default": 4096,
-        "label": "Reasoning budget",
+        "label": "Default reasoning budget",
     },
     "n-cpu-moe": {
         "type": "integer",
         "min": 0,
         "max": 256,
         "default": 0,
-        "label": "CPU expert layers (adapter-specific)",
+        "engine_default": 0,
+        "label": "MoE expert layers on CPU",
     },
 }
 OWNED = {
@@ -259,18 +303,97 @@ async def probe(runtime):
         else ["safetensors"],
         "sha256": await asyncio.to_thread(file_hash, path),
         "provenance": "installed executable --help/--version",
-        "schema": option_schema(runtime, flags),
+        "schema": option_schema(runtime, flags, text),
     }
 
 
-def option_schema(runtime, flags=None):
+def help_defaults(text, schema, runtime):
+    """Read only advertised defaults, scoped to their own option's help block."""
+    for block in re.split(r"(?m)(?=^-)", text):
+        header = block.split("\n", 1)[0]
+        header = re.sub(r"^-[^-][^ ,]*,\s+", "", header)
+        names = re.findall(
+            r"--([a-zA-Z0-9][a-zA-Z0-9-]*)", re.split(r"\s{2,}", header)[0]
+        )
+        normalized = " ".join(block.split())
+        match = re.search(r"\(default:\s*([^)]*)\)", normalized)
+        if not match or "argument has been removed" in normalized:
+            continue
+        for key in names:
+            field = schema.get(key)
+            if not field or field.get("type") not in {"integer", "number"}:
+                continue
+            raw = match[1]
+            source = re.fullmatch(r"same as --([a-z-]+)", raw)
+            if source and source[1] in schema:
+                field["default_from"] = source[1]
+                continue
+            number = re.match(r"(-?\d+(?:\.\d+)?)(?=\s*[, )-]|$)", raw)
+            if not number:
+                continue
+            value = float(number[1])
+            if not math.isfinite(value) or (
+                field["type"] == "integer" and not value.is_integer()
+            ):
+                continue
+            if (
+                key in {"spec-draft-n-max", "draft-max"}
+                and runtime.get("managed", {}).get("backend") == "cuda"
+            ):
+                mtp = re.search(r"(\d+) for draft-mtp on CUDA", raw)
+                if mtp:
+                    value = int(mtp[1])
+            field["engine_default"] = (
+                int(value) if field["type"] == "integer" else value
+            )
+            field["default_note"] = raw
+    return schema
+
+
+async def configuration_schema(runtime):
+    """Read trusted engine help without loading weights or modifying saved records."""
+    schema = option_schema(runtime)
+    if (
+        runtime.get("execution_kind") != "native"
+        or not runtime.get("trust")
+        or runtime["engine"] not in {"llama.cpp", "prism", "vllm"}
+    ):
+        return schema
+    args = ["serve", "--help=all"] if runtime["engine"] == "vllm" else ["--help"]
+    text = await command(
+        [runtime["executable"], *args],
+        environment(runtime),
+        120 if runtime["engine"] == "vllm" else 45,
+    )
+    return help_defaults(text, schema, runtime)
+
+
+def option_schema(runtime, flags=None, help_text=None):
     flags = (
         flags if flags is not None else runtime.get("capabilities", {}).get("flags", [])
     )
     if runtime["engine"] in ("llama.cpp", "prism"):
-        return {
-            k: v | {"restart_required": True} for k, v in FIELDS.items() if k in flags
+        retired = {
+            legacy
+            for legacy, modern in (
+                ("draft-max", "spec-draft-n-max"),
+                ("draft-min", "spec-draft-n-min"),
+            )
+            if modern in flags
         }
+        schema = {
+            k: v | {"restart_required": True}
+            for k, v in FIELDS.items()
+            if k in flags and k not in retired
+        }
+        # Older saved schemas contain policy presets, not executable defaults.
+        # Carry only explicitly probed default evidence across registry reads.
+        for key, field in schema.items():
+            saved = runtime.get("capabilities", {}).get("schema", {}).get(key, {})
+            for name in ("engine_default", "default_note", "default_from"):
+                if name in saved:
+                    field[name] = saved[name]
+        return help_defaults(help_text, schema, runtime) if help_text else schema
     return (
         {
             "max-model-len": {
@@ -487,6 +610,18 @@ def validate_profile(profile, artifact, runtime, selection=None):
         errors.append("Context pool must provide at least 32 tokens per parallel slot")
     if number("ubatch-size", 256) > number("batch-size", 512):
         errors.append("Physical batch must not exceed batch size")
+    for minimum, maximum in (
+        ("spec-draft-n-min", "spec-draft-n-max"),
+        ("draft-min", "draft-max"),
+    ):
+        if (
+            minimum in config
+            and maximum in config
+            and number(minimum, 0) > number(maximum, 0)
+        ):
+            errors.append(f"{minimum} must not exceed {maximum}")
+    if type(layers) is int and number("n-cpu-moe", 0) > layers:
+        errors.append("CPU expert layers must not exceed the model layer count")
     gpu_layers = config.get("gpu-layers", "all")
     if gpu_layers != "all":
         if not re.fullmatch(r"\d+", str(gpu_layers)) or (

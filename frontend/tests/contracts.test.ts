@@ -154,6 +154,33 @@ test('serving groups have a distinct contract from single-model deployments', ()
   );
 });
 
+test('deployment editing and duplication preserve template override selections', () => {
+  for (const template_override of [
+    undefined,
+    null,
+    { source: 'automatic', asset_id: null },
+    { source: 'custom', asset_id: 'fixture-template' },
+  ]) {
+    const saved = contracts.deployment({
+      id: 'd',
+      revision: 1,
+      name: 'Deployment',
+      alias: 'model',
+      enabled: true,
+      state: 'STOPPED',
+      template_override,
+    });
+    assert.deepEqual(
+      editable('deployments', saved).template_override,
+      template_override,
+    );
+    assert.deepEqual(
+      editable('deployments', saved, true).template_override,
+      template_override,
+    );
+  }
+});
+
 test('known event payloads are checked and unknown event kinds retain their data', () => {
   const state = contracts.operationEvent({
     seq: 1,

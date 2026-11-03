@@ -498,7 +498,7 @@ meter::-moz-meter-bar {
 .member-row {
   background: var(--muted);
 }
-.member-row td:first-child {
+.member-row td:nth-child(2) {
   padding-left: 32px;
 }
 .member-row a {
@@ -711,6 +711,79 @@ meter::-moz-meter-bar {
 .draft-resources {
   margin: 18px 0;
 }
+.settings-card {
+  min-width: 0;
+  scroll-margin-top: 24px;
+}
+.settings-card [data-slot='card-content'] > .runtime-settings {
+  margin-top: 16px;
+}
+.configuration-fields {
+  gap: 20px;
+}
+.model-settings-group {
+  margin-top: 20px;
+}
+.configuration-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 20px;
+  align-items: start;
+}
+.configuration-editor > fieldset {
+  gap: 20px;
+}
+.configuration-jumps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+.configuration-save-bar {
+  position: sticky;
+  bottom: 0;
+  background: var(--popover);
+  border-top: 1px solid var(--border);
+  padding: 12px 0 max(12px, env(safe-area-inset-bottom));
+  grid-column: 1 / -1;
+  z-index: 10;
+}
+.configuration-save-bar > [role='status'] {
+  margin-right: auto;
+}
+.dialog-actions.configuration-save-bar {
+  padding-inline: max(16px, env(safe-area-inset-left))
+    max(16px, env(safe-area-inset-right));
+}
+.configuration-resources {
+  min-width: 0;
+}
+.resource-chart-toggle {
+  display: none;
+}
+@media (max-width: 1099px) {
+  .resource-chart-toggle {
+    display: inline-flex;
+  }
+  .resource-compact:not(.charts-expanded) .preview-charts {
+    display: none;
+  }
+}
+.configuration-resources .draft-resources {
+  margin-top: 0;
+}
+.deployment-row {
+  cursor: pointer;
+}
+@media (min-width: 1100px) {
+  .configuration-resources {
+    position: sticky;
+    top: 20px;
+    max-height: calc(100dvh - 100px);
+    overflow-y: auto;
+  }
+}
 .draft-resources small,
 .runtime-settings .warning small,
 .runtime-settings .muted small {
@@ -735,6 +808,9 @@ meter::-moz-meter-bar {
     grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
     gap: 0 32px;
     align-items: start;
+  }
+  .configuration-editor.resource-editor {
+    row-gap: 20px;
   }
   .resource-editor > .draft-resources {
     position: sticky;

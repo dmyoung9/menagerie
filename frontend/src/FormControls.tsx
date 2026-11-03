@@ -1,4 +1,10 @@
-import { FieldGroup, FieldSet, FieldLegend } from '@/components/ui/field';
+import {
+  FieldGroup,
+  FieldSet,
+  FieldLegend,
+  Field as FieldRow,
+  FieldLabel,
+} from '@/components/ui/field';
 import {
   NativeSelect,
   NativeSelectOption,
@@ -7,8 +13,13 @@ import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Field } from './ui';
+import { useId, type ReactNode } from 'react';
+import { SettingsSection } from '@/components/settings-section';
 import { memory } from '@/lib/formatters';
+import { NumberControl } from './NumberControl';
+import { DraftTokenRange } from './DraftTokenRange';
 import type {
   DeploymentDraft,
   GpuSnapshot,
@@ -24,54 +35,64 @@ export function Placement({
   value,
   change,
   host = {},
+  part = 'all',
 }: {
   value: PlacementValue;
   change: (v: PlacementValue) => void;
   host?: HostSnapshot;
+  part?: 'all' | 'gpu' | 'network';
 }) {
   return (
     <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-      <Field label="GPU">
-        {host.gpus?.length ? (
-          <NativeSelect
-            value={value.gpu}
-            onChange={(e) => change({ ...value, gpu: Number(e.target.value) })}
-          >
-            {!host.gpus.some((g: GpuSnapshot) => g.index === value.gpu) && (
-              <NativeSelectOption value={value.gpu}>
-                GPU {value.gpu} (unavailable)
-              </NativeSelectOption>
-            )}
-            {host.gpus.map((g: GpuSnapshot) => (
-              <NativeSelectOption key={g.index} value={g.index}>
-                {g.name} · GPU {g.index} ·{' '}
-                {typeof g.free_mib === 'number'
-                  ? memory(g.free_mib) + ' free'
-                  : 'capacity unknown'}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        ) : (
-          <Input
-            type="number"
+      {part !== 'network' && (
+        <Field label="GPU">
+          {host.gpus?.length ? (
+            <NativeSelect
+              value={value.gpu}
+              onChange={(e) =>
+                change({ ...value, gpu: Number(e.target.value) })
+              }
+            >
+              {!host.gpus.some((g: GpuSnapshot) => g.index === value.gpu) && (
+                <NativeSelectOption value={value.gpu}>
+                  GPU {value.gpu} (unavailable)
+                </NativeSelectOption>
+              )}
+              {host.gpus.map((g: GpuSnapshot) => (
+                <NativeSelectOption key={g.index} value={g.index}>
+                  {g.name} · GPU {g.index} ·{' '}
+                  {typeof g.free_mib === 'number'
+                    ? memory(g.free_mib) + ' free'
+                    : 'capacity unknown'}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ) : (
+            <Input
+              type="number"
+              required
+              min={0}
+              aria-label="GPU index"
+              value={value.gpu}
+              onChange={(e) =>
+                change({ ...value, gpu: Number(e.target.value) })
+              }
+            />
+          )}
+        </Field>
+      )}
+      {part !== 'gpu' && (
+        <Field label="Private port">
+          <NumberControl
+            label="Private port"
             required
-            min={0}
-            aria-label="GPU index"
-            value={value.gpu}
-            onChange={(e) => change({ ...value, gpu: Number(e.target.value) })}
+            min={1024}
+            max={65535}
+            value={value.port}
+            change={(port) => change({ ...value, port: port ?? 0 })}
           />
-        )}
-      </Field>
-      <Field label="Private port">
-        <Input
-          type="number"
-          required
-          min={1024}
-          max={65535}
-          value={value.port}
-          onChange={(e) => change({ ...value, port: Number(e.target.value) })}
-        />
-      </Field>
+        </Field>
+      )}
     </FieldGroup>
   );
 }
@@ -140,14 +161,13 @@ export function Duration({
           <NativeSelectOption value="custom">Custom seconds</NativeSelectOption>
         </NativeSelect>
         {!presets.includes(value) && (
-          <Input
-            aria-label="Custom idle duration in seconds"
-            type="number"
+          <NumberControl
+            label="Custom idle duration in seconds"
             min={1}
             max={86400}
             required
             value={value}
-            onChange={(e) => change(Number(e.target.value))}
+            change={(next) => change(next ?? 0)}
           />
         )}
       </div>
@@ -161,54 +181,108 @@ export function RuntimeSettings({
   change,
   host = {},
   recommendation = {},
+  section,
+  before,
+  after,
+  disabled = false,
 }: {
   schema: Record<string, RuntimeField>;
   value: Record<string, JsonValue>;
   change: (value: Record<string, JsonValue>) => void;
   host?: HostSnapshot;
   recommendation?: RuntimeRecommendation;
+  section?:
+    | 'multimodal'
+    | 'mtp'
+    | 'memory'
+    | 'performance'
+    | 'generation'
+    | 'reasoning'
+    | 'other';
+  before?: ReactNode;
+  after?: ReactNode;
+  disabled?: boolean;
 }) {
+  const radioId = useId();
   const update = (key: string, v: JsonValue | undefined) => {
     const next = { ...value };
     if (v === undefined) delete next[key];
     else next[key] = v;
     change(next);
   };
-  const groups = [
-    ['Context & concurrency', ['ctx-size', 'max-model-len', 'parallel']],
+  const draftKeys: [string, string] | undefined =
+    schema['spec-draft-n-min'] && schema['spec-draft-n-max']
+      ? ['spec-draft-n-min', 'spec-draft-n-max']
+      : schema['draft-min'] && schema['draft-max']
+        ? ['draft-min', 'draft-max']
+        : undefined;
+  const groups: [string, string, string[]][] = [
+    ['multimodal', 'Multimodal', ['mmproj']],
     [
-      'Memory & GPU',
-      ['gpu-layers', 'cache-type-k', 'cache-type-v', 'flash-attn', 'n-cpu-moe'],
+      'mtp',
+      'MTP',
+      [
+        'spec-type',
+        'spec-draft-model',
+        'model-draft',
+        'spec-draft-n-max',
+        'spec-draft-n-min',
+        'draft-max',
+        'draft-min',
+      ],
     ],
-    ['Performance', ['threads', 'threads-batch', 'batch-size', 'ubatch-size']],
     [
+      'memory',
+      'Memory & placement',
+      [
+        'ctx-size',
+        'max-model-len',
+        'parallel',
+        'gpu-layers',
+        'n-cpu-moe',
+        'cache-type-k',
+        'cache-type-v',
+        'gpu-memory-utilization',
+      ],
+    ],
+    [
+      'performance',
+      'Performance',
+      ['flash-attn', 'threads', 'threads-batch', 'batch-size', 'ubatch-size'],
+    ],
+    [
+      'generation',
       'Generation',
-      Object.keys(schema).filter(
-        (k) =>
-          ![
-            'ctx-size',
-            'max-model-len',
-            'parallel',
-            'gpu-layers',
-            'cache-type-k',
-            'cache-type-v',
-            'flash-attn',
-            'n-cpu-moe',
-            'threads',
-            'threads-batch',
-            'batch-size',
-            'ubatch-size',
-          ].includes(k),
-      ),
+      ['temp', 'top-p', 'top-k', 'min-p', 'presence-penalty', 'repeat-penalty'],
     ],
-  ] as [string, string[]][];
+    ['reasoning', 'Reasoning', ['reasoning-budget']],
+  ];
+  groups.push([
+    'other',
+    'Other engine controls',
+    Object.keys(schema).filter(
+      (k) => !groups.some(([, , keys]) => keys.includes(k)),
+    ),
+  ]);
   function control(key: string) {
     const f = schema[key],
       current = value[key],
       label = f.label || key;
     const thread = ['threads', 'threads-batch'].includes(key);
     const context = ['ctx-size', 'max-model-len'].includes(key);
-    const min = f.min ?? 0;
+    const inherited = f.default_from
+      ? (value[f.default_from] ?? schema[f.default_from]?.engine_default)
+      : undefined;
+    const engineDefault =
+      typeof inherited === 'number' ? inherited : f.engine_default;
+    const min = Math.min(f.min ?? 0, engineDefault ?? f.min ?? 0);
+    const setNumeric = (n: number | undefined) =>
+      update(
+        key,
+        n === engineDefault && n !== undefined && n < (f.min ?? 0)
+          ? undefined
+          : n,
+      );
     const fieldMax = f.max ?? Number.MAX_SAFE_INTEGER;
     const numeric = ['integer', 'number'].includes(f.type || '');
     const recommended =
@@ -235,8 +309,8 @@ export function RuntimeSettings({
                     fieldMax,
                     typeof value['batch-size'] === 'number'
                       ? value['batch-size']
-                      : typeof schema['batch-size']?.default === 'number'
-                        ? schema['batch-size'].default
+                      : typeof schema['batch-size']?.engine_default === 'number'
+                        ? schema['batch-size'].engine_default
                         : fieldMax,
                   )
                 : fieldMax;
@@ -260,7 +334,7 @@ export function RuntimeSettings({
           )
         : []),
     ].sort((a, b) => a - b);
-    const effective = Number(current ?? f.default ?? min);
+    const effective = Number(current ?? engineDefault ?? min);
     if (key === 'gpu-layers' && f.cpu_only)
       return (
         <Field
@@ -273,6 +347,7 @@ export function RuntimeSettings({
       );
     const exact = (
       <Input
+        disabled={disabled}
         aria-label={label}
         type={numeric ? 'number' : 'text'}
         required={current !== undefined}
@@ -286,18 +361,17 @@ export function RuntimeSettings({
         value={
           typeof current === 'string' || typeof current === 'number'
             ? current
-            : ''
+            : numeric
+              ? (engineDefault ?? '')
+              : ''
         }
-        placeholder={`Default: ${f.default ?? 'engine'}`}
+        placeholder={numeric ? 'Not reported' : undefined}
         onChange={(e) =>
-          update(
-            key,
-            e.target.value === ''
-              ? undefined
-              : numeric
-                ? Number(e.target.value)
-                : e.target.value,
-          )
+          numeric
+            ? setNumeric(
+                e.target.value === '' ? undefined : Number(e.target.value),
+              )
+            : update(key, e.target.value || undefined)
         }
       />
     );
@@ -319,12 +393,13 @@ export function RuntimeSettings({
           <div className="range-control">
             {typeof parallelMax === 'number' && parallelMax > 1 && (
               <Slider
+                disabled={disabled}
                 aria-label="Concurrency range"
                 min={min}
                 max={parallelMax}
                 value={[Math.min(effective, parallelMax)]}
                 onValueChange={(range) =>
-                  update(key, Number(Array.isArray(range) ? range[0] : range))
+                  setNumeric(Number(Array.isArray(range) ? range[0] : range))
                 }
               />
             )}{' '}
@@ -374,44 +449,95 @@ export function RuntimeSettings({
               </NativeSelectOption>
             </NativeSelect>
             {current !== undefined && current !== 'all' && (
-              <Input
-                aria-label="GPU layer count"
-                type="number"
+              <NumberControl
+                label="GPU layer count"
                 required
                 min={0}
                 max={recommendation.gpu_layers_max ?? undefined}
                 step={1}
-                value={
-                  typeof current === 'string' || typeof current === 'number'
-                    ? current
-                    : ''
-                }
-                onChange={(e) => update(key, e.target.value)}
+                value={Number(current)}
+                change={(v) => update(key, String(v ?? 0))}
               />
             )}
           </div>
         </Field>
       );
-    if (key === 'flash-attn')
+    if (numeric && !context) {
+      const sliderMax = key.includes('draft')
+        ? 32
+        : key === 'top-k'
+          ? 200
+          : key === 'reasoning-budget'
+            ? 32768
+            : max === Number.MAX_SAFE_INTEGER
+              ? 1024
+              : max;
       return (
-        <Choices
+        <Field
           key={key}
           label={label}
-          value={typeof current === 'string' ? current : ''}
-          options={[
-            { value: '', label: 'Default' },
-            ...(f.choices || []).map((v: string) => ({
-              value: v,
-              label: v === 'auto' ? 'Auto' : v === 'on' ? 'On' : 'Off',
-              disabled:
-                v === 'off' &&
-                (value['cache-type-v'] ??
-                  schema['cache-type-v']?.default ??
-                  'f16') !== 'f16',
-            })),
-          ]}
-          change={(v) => update(key, v || undefined)}
-        />
+          hint={
+            effective === -1 && thread
+              ? 'Automatic thread selection'
+              : effective === -1 && key === 'parallel'
+                ? 'Automatic slots'
+                : effective === -1 && key === 'reasoning-budget'
+                  ? 'Unlimited'
+                  : f.units
+          }
+        >
+          <NumberControl
+            label={label}
+            value={typeof current === 'number' ? current : undefined}
+            defaultValue={engineDefault}
+            min={min}
+            max={inputMax}
+            sliderMax={sliderMax}
+            step={f.type === 'number' ? 0.01 : 1}
+            disabled={disabled}
+            change={setNumeric}
+          />
+        </Field>
+      );
+    }
+    if (key === 'flash-attn')
+      return (
+        <FieldSet key={key}>
+          <FieldLegend variant="label">{label}</FieldLegend>
+          <RadioGroup
+            aria-label={label}
+            value={typeof current === 'string' ? current : 'auto'}
+            disabled={disabled}
+            onValueChange={(v) => {
+              if (typeof v === 'string') update(key, v);
+            }}
+            className="flex flex-wrap gap-6"
+          >
+            {(['auto', 'on', 'off'] as const).map((option) => (
+              <FieldRow
+                key={option}
+                orientation="horizontal"
+                className="w-auto"
+              >
+                <RadioGroupItem
+                  value={option}
+                  id={`${radioId}-${option}`}
+                  nativeButton
+                  render={<button type="button" />}
+                  disabled={
+                    option === 'off' &&
+                    (value['cache-type-v'] ??
+                      schema['cache-type-v']?.default ??
+                      'f16') !== 'f16'
+                  }
+                />
+                <FieldLabel htmlFor={`${radioId}-${option}`}>
+                  {option === 'auto' ? 'Auto' : option === 'on' ? 'On' : 'Off'}
+                </FieldLabel>
+              </FieldRow>
+            ))}
+          </RadioGroup>
+        </FieldSet>
       );
     if (f.choices)
       return (
@@ -459,38 +585,33 @@ export function RuntimeSettings({
         key={key}
         label={label}
         hint={
-          context && schema.parallel
-            ? `${effective.toLocaleString()} tokens shared across ${value.parallel ?? schema.parallel.default ?? 1} concurrent requests`
-            : thread && host.cpu_count
-              ? `${host.cpu_count} host threads available`
-              : f.units
+          context && effective === 0
+            ? 'Use model context'
+            : context && schema.parallel
+              ? `${effective.toLocaleString()} tokens shared across ${value.parallel ?? schema.parallel.engine_default ?? schema.parallel.default ?? 1} concurrent requests`
+              : thread && host.cpu_count
+                ? `${host.cpu_count} host threads available`
+                : f.units
         }
       >
         <div className="range-control">
           {context && sliderStops.length > 1 ? (
             <Slider
+              disabled={disabled}
               aria-label={`${label} range`}
-              aria-valuetext={`${effective.toLocaleString()} tokens`}
+              aria-valuetext={
+                effective === 0
+                  ? '0 · model context'
+                  : `${effective.toLocaleString()} tokens`
+              }
               min={0}
               max={sliderStops.length - 1}
               step={1}
               value={[sliderIndex]}
               onValueChange={(range) =>
-                update(
-                  key,
+                setNumeric(
                   sliderStops[Number(Array.isArray(range) ? range[0] : range)],
                 )
-              }
-            />
-          ) : thread && host.cpu_count ? (
-            <Slider
-              aria-label={`${label} range`}
-              min={min}
-              max={inputMax}
-              step={1}
-              value={[effective]}
-              onValueChange={(range) =>
-                update(key, Number(Array.isArray(range) ? range[0] : range))
               }
             />
           ) : null}
@@ -528,15 +649,54 @@ export function RuntimeSettings({
   return (
     <div className="runtime-settings">
       {groups
-        .filter(([, keys]) => keys.some((k) => schema[k]))
-        .map(([title, keys], index) => (
-          <details key={title} open={index === 0} className="settings-section">
-            <summary>{title}</summary>
-            <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-              {keys.filter((k) => schema[k]).map(control)}
-            </FieldGroup>
-          </details>
-        ))}
+        .filter(
+          ([name, , keys]) =>
+            (!section || section === name) &&
+            (keys.some((k) => schema[k]) || before || after),
+        )
+        .map(([name, title, keys]) => {
+          const fields = (
+            <>
+              {before}
+              {name === 'mtp' && draftKeys && (
+                <DraftTokenRange
+                  schema={schema}
+                  value={value}
+                  keys={draftKeys}
+                  disabled={disabled}
+                  change={change}
+                />
+              )}
+              <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+                {keys
+                  .filter(
+                    (k) =>
+                      schema[k] &&
+                      !(name === 'mtp' && draftKeys?.includes(k)) &&
+                      !(
+                        name === 'mtp' &&
+                        [
+                          'spec-type',
+                          'spec-draft-model',
+                          'model-draft',
+                        ].includes(k)
+                      ),
+                  )
+                  .map(control)}
+              </FieldGroup>
+              {after}
+            </>
+          );
+          return section === 'multimodal' ||
+            section === 'mtp' ||
+            section === 'reasoning' ? (
+            <div key={name}>{fields}</div>
+          ) : (
+            <SettingsSection key={name} name={name} title={title}>
+              {fields}
+            </SettingsSection>
+          );
+        })}
     </div>
   );
 }

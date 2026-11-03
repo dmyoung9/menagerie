@@ -70,7 +70,7 @@ test('dialogs trap and restore focus; menus use keyboard navigation and fit the 
   await page.keyboard.press('ArrowDown');
   const menu = page.getByRole('menu');
   await expect(
-    menu.getByRole('menuitem', { name: 'Details', exact: true }),
+    menu.getByRole('menuitem', { name: 'Edit', exact: true }),
   ).toBeFocused();
   const box = (await menu.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
@@ -85,8 +85,7 @@ test('dialogs trap and restore focus; menus use keyboard navigation and fit the 
     .poll(() => fixture.writes.some((w) => w.path === '/api/resources/preview'))
     .toBe(true);
   await navigate(page, 'Deployments');
-  await trigger.click();
-  await menu.getByRole('menuitem', { name: 'Details', exact: true }).click();
+  await page.getByRole('link', { name: 'Example idle', exact: true }).click();
   await page
     .getByRole('button', { name: 'Configuration', exact: true })
     .click();
@@ -463,10 +462,6 @@ test('Base UI Select, Switch, outside dismissal and discard actions preserve pol
   await mode.click();
   await page.getByRole('option', { name: 'Pinned', exact: true }).click();
   await expect(mode).toContainText('Pinned');
-  await dialog
-    .locator('summary')
-    .filter({ hasText: /^Advanced$/ })
-    .click();
   const enabled = dialog.getByRole('switch', {
     name: 'Enabled for clients',
     exact: true,

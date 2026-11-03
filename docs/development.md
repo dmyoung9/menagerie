@@ -13,6 +13,10 @@ admission and process ownership. `Store` uses SQLite WAL, revision checks, and
 history. Serving deployments own shared loading/eviction policy; model instances
 retain their engine configuration snapshots and stable aliases.
 
+The hardened user service only grants writes inside its state directory. Keep
+registry migrations independent of writable system temporary directories: stream
+scalar history counters rather than grouping/sorting large session JSON blobs.
+
 Resource accounting is advisory. `controlplane/resources.py` derives only file
 size and metadata-backed KV values, preferring retained process peaks with no
 margin. Execution fingerprints exclude names/catalog/revisions and include engine,
@@ -111,7 +115,7 @@ the wheel needs no Node. Create a fresh environment outside the checkout:
 uv build
 check_dir="$(mktemp -d)"
 uv venv "$check_dir/venv"
-uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-2.3.0-py3-none-any.whl
+uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-2.4.0-py3-none-any.whl
 "$check_dir/venv/bin/python" scripts/check_wheel.py
 ```
 

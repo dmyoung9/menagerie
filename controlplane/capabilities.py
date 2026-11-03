@@ -23,10 +23,12 @@ def inspect(metadata):
     effort = sorted(
         set(
             re.findall(
-                r"""reasoning_effort\s*==\s*['"](none|low|medium|high)['"]""", template
+                r"""reasoning_effort\s*==\s*['"]([a-zA-Z0-9][a-zA-Z0-9_.-]{0,63})['"]""",
+                template,
             )
             + re.findall(
-                r"""['"](none|low|medium|high)['"]\s*==\s*reasoning_effort""", template
+                r"""['"]([a-zA-Z0-9][a-zA-Z0-9_.-]{0,63})['"]\s*==\s*reasoning_effort""",
+                template,
             )
         )
     )

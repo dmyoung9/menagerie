@@ -60,6 +60,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     gateway_url = f"http://127.0.0.1:{gateway_port}/v1"
     jobs = Jobs(manager)
     csrf = secrets.token_urlsafe(32)
+    runtime_schema_tasks = {}
 
     @asynccontextmanager
     async def lifespan(app):
@@ -85,6 +86,9 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 temporary.replace(instance_file)
             yield
         finally:
+            for task in runtime_schema_tasks.values():
+                task.cancel()
+            await asyncio.gather(*runtime_schema_tasks.values(), return_exceptions=True)
             await manager.close()
             if metadata:
                 instance_file.unlink(missing_ok=True)
@@ -112,8 +116,9 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         return result
 
     def serving_rows():
+        totals = store.request_totals()
         return [
-            deployment_sets.describe(u, manager.settings(), manager.inflight)
+            deployment_sets.describe(u, manager.settings(), manager.inflight, totals)
             for u in deployment_sets.units(store)
         ]
 
@@ -738,7 +743,17 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.get("/api/runtimes/{ident}/capabilities")
     async def capabilities(ident: str):
         runtime = store.get("runtime", ident)
-        return runtime["capabilities"] | {"schema": adapters.option_schema(runtime)}
+        key = (ident, runtime["revision"])
+        if key not in runtime_schema_tasks:
+            runtime_schema_tasks[key] = asyncio.create_task(
+                adapters.configuration_schema(runtime)
+            )
+        try:
+            schema = await asyncio.shield(runtime_schema_tasks[key])
+        except Exception:
+            runtime_schema_tasks.pop(key, None)
+            raise
+        return runtime["capabilities"] | {"schema": schema}
 
     @app.post("/api/profiles")
     async def profile(body: Profile, expected: int | None = None):
@@ -1408,7 +1423,8 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         body = await request.json()
         correlation = uid()
         started = time.monotonic()
-        if "menagerie_variant" in body:
+        # Validate explicit modes and deployment-default effects before any load.
+        if isinstance(body, dict):
             candidate = next(
                 (
                     d
@@ -1472,6 +1488,11 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 c.execute(
                     "INSERT INTO requests VALUES(?,?,?,?)",
                     (correlation, time.time(), d["id"], encode(record)),
+                )
+                c.execute(
+                    "INSERT INTO request_totals VALUES(?,1) "
+                    "ON CONFLICT(deployment_id) DO UPDATE SET completed=completed+1",
+                    (d["id"],),
                 )
             if d.get("session_id"):
                 with store.transaction() as c:

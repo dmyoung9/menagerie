@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { CapacityBar } from '@/components/charts/capacity-bar';
 import { CapacitySummary } from '@/components/charts/capacity-summary';
 import { AllocationTreemap } from '@/components/charts/allocation-treemap';
@@ -76,20 +77,22 @@ function PreviewPool({
         remaining={remaining}
         physical={total}
       />
-      <CapacityBar
-        budget={budget}
-        physical={total}
-        components={components}
-        selection={selection}
-        onSelect={setSelection}
-      />
-      <AllocationTreemap
-        title={title}
-        budget={budget}
-        components={components}
-        selection={selection}
-        onSelect={setSelection}
-      />
+      <div className="preview-charts">
+        <CapacityBar
+          budget={budget}
+          physical={total}
+          components={components}
+          selection={selection}
+          onSelect={setSelection}
+        />
+        <AllocationTreemap
+          title={title}
+          budget={budget}
+          components={components}
+          selection={selection}
+          onSelect={setSelection}
+        />
+      </div>
     </section>
   );
 }
@@ -97,18 +100,36 @@ function PreviewPool({
 export function DraftResources({
   preview,
   error,
+  compact = false,
 }: {
   preview?: ResourcePreview;
   error?: string;
+  compact?: boolean;
 }) {
+  const [charts, setCharts] = useState(false);
   return (
     <Card
-      className="draft-resources"
+      className={
+        'draft-resources' +
+        (compact ? ' resource-compact' : '') +
+        (charts ? ' charts-expanded' : '')
+      }
       role="complementary"
       aria-label="Deployment resource preview"
     >
       <CardHeader>
         <CardTitle>Resource preview</CardTitle>
+        {compact && (
+          <Button
+            className="resource-chart-toggle"
+            variant="outline"
+            type="button"
+            aria-expanded={charts}
+            onClick={() => setCharts((v) => !v)}
+          >
+            {charts ? 'Hide resource charts' : 'Show resource charts'}
+          </Button>
+        )}
       </CardHeader>
       <CardContent>
         {!preview ? (

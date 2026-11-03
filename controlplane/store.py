@@ -5,6 +5,7 @@ import json
 import sqlite3
 import time
 import uuid
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -47,7 +48,30 @@ class Store:
               data TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS requests_time ON requests(ts);
             CREATE INDEX IF NOT EXISTS events_time ON events(ts);
+            CREATE TABLE IF NOT EXISTS request_totals(
+              deployment_id TEXT PRIMARY KEY, completed INTEGER NOT NULL);
             """)
+            # Sorting full session JSON can spill to SQLite's system temp directory,
+            # which is read-only in the hardened service. Stream scalar values and
+            # retain only one counter per deployment instead.
+            retained = Counter(
+                row[0] for row in c.execute("SELECT deployment_id FROM requests")
+            )
+            sessions = Counter()
+            for ident, count in c.execute(
+                "SELECT json_extract(data,'$.deployment_id'), json_extract(data,'$.request_count') "
+                "FROM objects WHERE kind='session'"
+            ):
+                if ident is not None and type(count) is int and count >= 0:
+                    sessions[ident] += count
+            for ident, count in sessions.items():
+                retained[ident] = max(retained[ident], count)
+            c.executemany(
+                "INSERT INTO request_totals VALUES(?,?) "
+                "ON CONFLICT(deployment_id) DO UPDATE SET completed=max(completed,excluded.completed)",
+                retained.items(),
+            )
+            c.execute("INSERT OR IGNORE INTO schema_version VALUES(2)")
         self.path.chmod(0o600)
 
     @contextmanager
@@ -159,3 +183,12 @@ class Store:
                 dest.close()
         path.chmod(0o600)
         return path
+
+    def request_totals(self):
+        with self.connect() as c:
+            return {
+                r[0]: r[1]
+                for r in c.execute(
+                    "SELECT deployment_id, completed FROM request_totals"
+                )
+            }

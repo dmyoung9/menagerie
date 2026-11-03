@@ -52,6 +52,7 @@ import { ConfigurationFields } from './Editors';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
 import { defaults, editable } from './editor-state';
 import { Duration, Placement } from './FormControls';
+import { NumberControl } from './NumberControl';
 import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
 import { useConfirmation } from '@/hooks/use-confirmation';
@@ -65,6 +66,7 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { SettingsSection } from '@/components/settings-section';
 import { readApi } from './ui';
 import * as contracts from './contracts';
 import { artifactLimits } from './artifact-metadata';
@@ -103,7 +105,7 @@ export function ServingTable({
   compact?: boolean;
 }) {
   const [expanded, setExpanded] = useState<string[]>([]);
-  function primary(d: ServingDeployment, menu = false) {
+  function primary(d: ServingDeployment) {
     const label = !d.enabled ? 'Enable' : active(d) ? 'Unload' : 'Load';
     const onClick = () =>
       !d.enabled
@@ -112,9 +114,7 @@ export function ServingTable({
           ? actions.stop('serving-deployments', d)
           : actions.load('serving-deployments', d);
     if (d.state === 'STOPPING') return null;
-    return menu ? (
-      <DropdownMenuItem onClick={onClick}>{label}</DropdownMenuItem>
-    ) : (
+    return (
       <Button variant="outline" type="button" onClick={onClick}>
         {label}
       </Button>
@@ -126,8 +126,8 @@ export function ServingTable({
       <Table className={'deployment-table ' + (compact ? 'compact' : '')}>
         <TableHeader>
           <TableRow>
+            <TableHead>Status</TableHead>
             <TableHead>Deployment</TableHead>
-            <TableHead>State</TableHead>
             <TableHead>Mode</TableHead>
             <TableHead className="numeric">
               VRAM (GiB)
@@ -138,7 +138,13 @@ export function ServingTable({
                 </small>
               )}
             </TableHead>
-            <TableHead className="numeric">Requests</TableHead>
+            <TableHead className="numeric">Active requests</TableHead>
+            <TableHead
+              className="numeric"
+              title="All finished requests, including failures and cancellations. Counts start with retained history on upgrade."
+            >
+              Historical requests
+            </TableHead>
             {!compact && (
               <TableHead>
                 <span className="sr-only">Actions</span>
@@ -149,7 +155,26 @@ export function ServingTable({
         <TableBody>
           {rows.map((d) => (
             <Fragment key={d.id}>
-              <TableRow>
+              <TableRow
+                className="deployment-row"
+                onClick={(e) => {
+                  if (
+                    !(e.target as HTMLElement).closest(
+                      'a, button, input, [role="menuitem"]',
+                    )
+                  )
+                    go('deployments/' + d.id);
+                }}
+              >
+                <TableCell>
+                  <Status
+                    value={
+                      d.state === 'FAILED' || d.lifecycle?.failure
+                        ? 'Errored'
+                        : state(d)
+                    }
+                  />
+                </TableCell>
                 <TableCell>
                   <div className="deployment-name">
                     {d.members?.length > 1 && (
@@ -185,43 +210,33 @@ export function ServingTable({
                           {d.members.length} models
                         </small>
                       )}
+                      {(d.state === 'FAILED' || d.lifecycle?.failure) && (
+                        <a
+                          className="block text-muted-foreground"
+                          href={`#/deployments/${d.id}/logs`}
+                        >
+                          View logs
+                        </a>
+                      )}
                     </div>
                   </div>
-                </TableCell>
-                <TableCell>
-                  <Status
-                    value={
-                      d.state === 'FAILED' || d.lifecycle?.failure
-                        ? 'Errored'
-                        : state(d)
-                    }
-                  />
-                  {(d.state === 'FAILED' || d.lifecycle?.failure) && (
-                    <a className="block" href={`#/deployments/${d.id}/logs`}>
-                      View logs
-                    </a>
-                  )}
                 </TableCell>
                 <TableCell>{mode(d)}</TableCell>
                 <TableCell className="numeric">
                   {gib(unitVram(d, host))}
                 </TableCell>
                 <TableCell className="numeric">{d.inflight || 0}</TableCell>
+                <TableCell className="numeric">
+                  {number(d.historical_requests, 0)}
+                </TableCell>
                 {!compact && (
                   <TableCell>
                     <div className="actions">
                       {primary(d)}
                       <Menu label={'Actions for ' + d.name}>
                         <DropdownMenuItem
-                          onClick={() => go('deployments/' + d.id)}
-                        >
-                          Details
-                        </DropdownMenuItem>
-                        {primary(d, true)}
-                        <DropdownMenuItem
-                          disabled={active(d)}
-                          onClick={() =>
-                            go(`deployments/${d.id}/configuration`)
+                          render={
+                            <a href={`#/deployments/${d.id}/configuration`} />
                           }
                         >
                           Edit
@@ -244,7 +259,7 @@ export function ServingTable({
                             disabled={active(d)}
                             onClick={() => actions.enable(d, false)}
                           >
-                            Disable for clients
+                            Disable
                           </DropdownMenuItem>
                         )}
                       </Menu>
@@ -256,12 +271,12 @@ export function ServingTable({
                 d.members?.map((member: Deployment) => (
                   <TableRow className="member-row" key={member.id}>
                     <TableCell>
+                      <Status value={state(member)} />
+                    </TableCell>
+                    <TableCell>
                       <a href={'#/deployments/' + d.id + '/models'}>
                         {member.name}
                       </a>
-                    </TableCell>
-                    <TableCell>
-                      <Status value={state(member)} />
                     </TableCell>
                     <TableCell />
                     <TableCell className="numeric">
@@ -269,6 +284,9 @@ export function ServingTable({
                     </TableCell>
                     <TableCell className="numeric">
                       {member.inflight || 0}
+                    </TableCell>
+                    <TableCell className="numeric">
+                      {number(member.historical_requests, 0)}
                     </TableCell>
                     {!compact && <TableCell />}
                   </TableRow>
@@ -330,6 +348,8 @@ export function DeploymentSetEditor({
   const [selected, setSelected] = useState(0);
   const preview = useResourcePreview(value.members, data.host?.[0]?.ts);
   const [original] = useState(() => JSON.stringify(value));
+  const [originalValue] = useState(value);
+  const [epoch, setEpoch] = useState(0);
   const changed =
     JSON.stringify(value) !== original || Object.values(invalid).some(Boolean);
   const aliasError = (m: DeploymentDraft) =>
@@ -541,7 +561,7 @@ export function DeploymentSetEditor({
           void submit();
         }}
       >
-        <FieldSet disabled={busy}>
+        <FieldSet key={epoch} disabled={busy}>
           <Field label="Name">
             <Input
               required
@@ -636,27 +656,37 @@ export function DeploymentSetEditor({
                   recommendation={
                     preview.data?.members?.[index]?.recommendation
                   }
+                  modelFields={
+                    m.configuration && (
+                      <ChatTemplateSettings
+                        label="Chat template"
+                        model={data.models.find(
+                          (x) => x.id === m.configuration?.artifact_id,
+                        )}
+                        override={m.template_override || null}
+                        onChange={(selection) =>
+                          updateMember(index, { template_override: selection })
+                        }
+                      />
+                    )
+                  }
+                  placementFields={
+                    <Placement
+                      part="gpu"
+                      value={m}
+                      change={(v) => updateMember(index, v)}
+                      host={data.host?.[0]}
+                    />
+                  }
                 />
-                {m.configuration && (
-                  <ChatTemplateSettings
-                    label="Chat template"
-                    model={data.models.find(
-                      (x) => x.id === m.configuration?.artifact_id,
-                    )}
-                    override={m.template_override || null}
-                    onChange={(selection) =>
-                      updateMember(index, { template_override: selection })
-                    }
-                  />
-                )}
-                <details>
-                  <summary>Placement</summary>
+                <SettingsSection name="network" title="Networking">
                   <Placement
+                    part="network"
                     value={m}
                     change={(v) => updateMember(index, v)}
                     host={data.host?.[0]}
                   />
-                </details>
+                </SettingsSection>
                 <Button
                   variant="destructive"
                   type="button"
@@ -681,67 +711,66 @@ export function DeploymentSetEditor({
               </section>
             ))}
           </FieldSet>
-          <Field label="Mode">
-            <Select
-              disabled={busy}
-              items={[
-                { value: 'on-demand', label: 'On demand' },
-                { value: 'pinned', label: 'Pinned' },
-                { value: 'evictable', label: 'Evictable' },
-              ]}
-              value={value.residency}
-              onValueChange={(next) => {
-                if (next) set('residency', next);
-              }}
-            >
-              <SelectTrigger aria-label="Mode" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="on-demand">On demand</SelectItem>
-                  <SelectItem value="pinned">Pinned</SelectItem>
-                  <SelectItem value="evictable">Evictable</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </Field>
-          {value.residency === 'on-demand' && (
-            <Duration
-              value={value.idle_timeout}
-              change={(v) => set('idle_timeout', v)}
-            />
-          )}
-          {value.residency !== 'pinned' && (
-            <label className="check">
-              <Checkbox
-                checked={value.allow_eviction}
-                onCheckedChange={(checked) => set('allow_eviction', checked)}
+          <SettingsSection name="lifecycle" title="Lifecycle">
+            <Field label="Mode">
+              <Select
+                disabled={busy}
+                items={[
+                  { value: 'on-demand', label: 'On demand' },
+                  { value: 'pinned', label: 'Pinned' },
+                  { value: 'evictable', label: 'Evictable' },
+                ]}
+                value={value.residency}
+                onValueChange={(next) => {
+                  if (next) set('residency', next);
+                }}
+              >
+                <SelectTrigger aria-label="Mode" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="on-demand">On demand</SelectItem>
+                    <SelectItem value="pinned">Pinned</SelectItem>
+                    <SelectItem value="evictable">Evictable</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+            {value.residency === 'on-demand' && (
+              <Duration
+                value={value.idle_timeout}
+                change={(v) => set('idle_timeout', v)}
               />
-              Can unload to make room for another deployment
-            </label>
-          )}
-          <details>
-            <summary>Advanced</summary>
+            )}
+            {value.residency !== 'pinned' && (
+              <label className="check">
+                <Checkbox
+                  checked={value.allow_eviction}
+                  onCheckedChange={(checked) => set('allow_eviction', checked)}
+                />
+                Can unload to make room for another deployment
+              </label>
+            )}
             <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
               <Field label="Priority">
-                <Input
+                <NumberControl
+                  label="Priority"
                   required
-                  type="number"
                   min={0}
                   max={100}
                   value={value.priority}
-                  onChange={(e) => set('priority', Number(e.target.value))}
+                  change={(v) => set('priority', v ?? 0)}
                 />
               </Field>
               <Field label="Switch timeout (seconds)">
-                <Input
+                <NumberControl
+                  label="Switch timeout (seconds)"
                   required
-                  type="number"
                   min={1}
                   max={1800}
                   value={value.queue_timeout}
-                  onChange={(e) => set('queue_timeout', Number(e.target.value))}
+                  change={(v) => set('queue_timeout', v ?? 0)}
                 />
               </Field>
             </FieldGroup>
@@ -753,12 +782,29 @@ export function DeploymentSetEditor({
               />
               Enabled for clients
             </label>
-          </details>
+          </SettingsSection>
         </FieldSet>
         {value.members.length > 0 && (
           <DraftResources preview={preview.data} error={preview.error} />
         )}
-        <div className="dialog-actions">
+        <div className="dialog-actions configuration-save-bar">
+          <span className="muted" role="status">
+            {changed ? 'Unsaved changes' : 'All changes saved'}
+          </span>
+          <Button
+            variant="outline"
+            type="button"
+            disabled={busy || !changed}
+            onClick={() => {
+              setValue(originalValue);
+              setInvalid({});
+              setSelected(0);
+              setEpoch((v) => v + 1);
+              setError('');
+            }}
+          >
+            Discard
+          </Button>
           {initial && value.members.length > 1 && (
             <Button
               variant="destructive"

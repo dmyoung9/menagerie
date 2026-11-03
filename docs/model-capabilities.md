@@ -62,68 +62,94 @@ missing or failed to download. A profile that still sets a manual
 `--chat-template-file` or `--chat-template` flag is rejected at save time rather
 than silently shadowing the selection.
 
-## Configure deployment-owned reasoning presets
+## Configure deployment-owned reasoning modes
 
-Each model configuration has compact **Capabilities** and **Reasoning options**
-controls. Selected chips are exposed to clients. Text is implicit; Tools, Images,
-Audio, and Video describe additional input capabilities. Output formats are under
-**Advanced capabilities**.
+Under **Capabilities & reasoning**, enable the Reasoning declaration to show
+**Reasoning options**. This declares support and enables your configured levels; it
+does not force the model to think or stop thinking. Turning it off hides and
+deactivates the modes without deleting them. Input/output modalities remain separate.
 
-Reasoning controls are filled from detected template controls for supported
-engines. Existing saved mappings and exposure choices take precedence. Unknown
-options stay disabled until configured; a thinking model alone does not imply
-an Instant switch or effort levels. Explicit comparisons to `reasoning_effort`
-levels in a template are used as evidence, not just the presence of that variable.
+Use the **Instant / Low / Medium / High** toggle buttons to select the levels
+exposed to clients. These are the only built-in level choices. A level stays
+unavailable until its request control is configured; merely opening the editor
+does not save presets or change model behavior. Existing saved presets retain
+their IDs, order, settings and exposure choices, including custom settings on a
+mode named Default.
 
-If metadata is incomplete, open **Advanced capabilities** and choose a control
-for each option. There is no need to edit JSON for the common mappings:
+Use **Add custom level** for your own name and stable client ID. The new level
+appears in the same toggle row, not a separate preset catalog. Custom levels
+come only from saved/user-created settings, never from template text or model
+names. Remove a custom level with its row action.
 
-- **Native reasoning effort** maps Instant to `reasoning_effort: "none"` and
-  Low/Medium/High to `"low"`, `"medium"`, and `"high"`.
-- **Template enable_thinking** maps Instant to
-  `chat_template_kwargs: {"enable_thinking": false}`. It does not invent effort
-  levels. When this template variable is detected, a shortcut offers this mapping.
-- **Default** sends no preset override; the deployment/engine default remains in
-  effect. It is not another name for Medium.
+Compact mapping rows below the toggles offer:
 
-The initial configuration exposes only Default. Select exactly the options you
-want advertised. Token-budget controls offer numeric inputs; custom request
-settings are an advanced escape hatch. A startup-only reasoning budget is not a
-per-request control. Empty mappings cannot be exposed except for Default. Never
-use an output formatting switch that merely hides reasoning to implement Instant.
+- **Native effort:** a `reasoning_effort` string.
+- **Template effort:** a `chat_template_kwargs.reasoning_effort` string.
+- **Thinking (template):** On or Off via `enable_thinking`.
+- **Reasoning/thinking token budgets:** a token count, or `-1` for
+  unlimited **only when the engine supports that field and sentinel**.
+- **Custom request settings:** JSON for combinations of these controls and
+  additional bounded template arguments. An optional prompt prefix is available
+  here for models that use prompt tags. Reserved conversation/tool/template-
+  structure arguments cannot be replaced.
 
-Input and output modalities are declared separately. Image, audio, and video
-declarations do not install processors, add gateway endpoints, or certify runtime
-behavior; verify the complete request path before advertising them. The chat gateway
-forwards message content without transforming multimodal data.
+Do not assume these fields are interchangeable or supported by every engine.
+Native effort and template effort may be different bindings. Budgets are separate
+from the maximum output-token limit and from an engine's startup reasoning budget.
+Zero tokens, hidden reasoning output and a mode named "Off" do not necessarily
+disable thinking. Confirm the engine/template binding before exposing a level.
+Selecting **Not configured** removes that level's body mapping, not its saved
+prompt prefix; clear both to remove all effects. Nothing is executed to discover levels.
+
+### Defaults and request precedence
+
+- **Model default (no overrides)** leaves request reasoning controls unchanged.
+  This can still mean the model thinks by default.
+- Choosing a named **Default reasoning mode** applies it to requests without a
+  selected mode. Explicit caller fields win over these default fields; template
+  arguments merge by key. A default mode need not be exposed as a client choice.
+- Explicitly selecting an exposed mode overrides only its mapped fields, preserving
+  unrelated request fields and template arguments. It replaces, rather than stacks
+  with, the deployment's default mode.
+
+A prompt prefix is prepended to the **latest user message**, preserving image and
+other content parts, prior messages, system instructions and tool messages. It is
+request-local, not a persistent edit to the saved conversation. Existing tags in
+chat history still follow the model template's own precedence rules; switching may
+require a new chat. Returning to Model default does not erase past tags.
 
 ## Client exposure
 
-Only checked presets are emitted as explicit catalog variants in `/v1/models`,
+Only levels selected in the **Reasoning options** toggle row are emitted as catalog variants in `/v1/models`,
 the OpenCode configuration export, and the existing OpenCode discovery plugin.
-Their request `body` mappings survive the plugin's SDK validation. The metadata
+Their gateway selectors survive the plugin's SDK validation. Clients may display
+the stable ID rather than the editable name. The metadata
 does not ask clients to synthesize additional reasoning levels.
 
 OpenCode/OpenChamber already provide a built-in Default (no variant). The plugin
-maps Menagerie's empty Default preset to that choice, avoiding a duplicate.
+maps a legacy empty Default preset to that choice, avoiding a duplicate.
 Those clients retain their built-in Default even when the explicit Default preset
-is unchecked in Menagerie; exposure cannot remove a client-owned base option.
+is not exposed in Menagerie; exposure cannot remove a client-owned base option.
+That no-variant choice uses the deployment's configured default. When a named
+deployment default exists, an additional `model-default` variant bypasses it.
 
 Clients without a variant picker may send a selector to the chat endpoint:
 
 ```json
 {
   "model": "my-model",
-  "menagerie_variant": "instant",
-  "messages": [{"role": "user", "content": "Hello"}]
+  "menagerie_variant": "high",
+  "messages": [{ "role": "user", "content": "Hello" }]
 }
 ```
 
-The gateway removes the selector and applies the exposed preset before forwarding.
-An unknown or unchecked selector returns HTTP 400. Preset values take precedence
-over conflicting request values; unrelated template arguments are preserved.
+The example requires a configured, exposed `high` level. Use
+`"menagerie_variant": "model-default"` to bypass deployment-default overrides.
+The gateway validates mode selection and required prompt content before loading
+a model, removes the selector, and applies the selected mode before forwarding.
+Unknown or unexposed selectors return HTTP 400.
 
 Exposure is not access control: callers may still send native reasoning settings
-directly. Omitting `menagerie_variant` leaves the original request unchanged.
+directly. With no selected mode, deployment defaults fill only missing fields.
 Runtime-specific reasoning behavior still needs a live serving check; metadata
 inspection alone cannot prove that an engine honors a setting.
