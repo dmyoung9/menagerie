@@ -112,6 +112,12 @@ test('existing client variants remain selectable without resetting their control
   assert.equal(options.find((p) => p.id === 'high')?.enabled, true);
 });
 
+test('legacy boolean reasoning support survives edits to preset options', () => {
+  const catalog = { model: { capabilities: { reasoning: true } } };
+  const next = setReasoningOptions(catalog, reasoningOptions(catalog));
+  assert.deepEqual(next.model.capabilities.reasoning, { supported: true });
+});
+
 test('advanced controls recognize common mappings without exposing JSON', () => {
   assert.equal(mappingKind({}), '');
   assert.equal(mappingKind({ reasoning_effort: 'low' }), 'effort');

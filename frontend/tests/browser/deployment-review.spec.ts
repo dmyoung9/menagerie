@@ -187,7 +187,7 @@ for (const width of [1440, 576, 320]) {
     ).toBe(true);
     await expect(
       config.getByLabel('Default reasoning budget', { exact: true }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     const inputs = config
       .getByRole('group', {
         name: 'Input modalities',
@@ -225,6 +225,9 @@ for (const width of [1440, 576, 320]) {
     await capabilities
       .getByRole('button', { name: 'Reasoning', exact: true })
       .click();
+    await expect(
+      config.getByLabel('Default reasoning budget', { exact: true }),
+    ).toBeVisible();
     await expect(
       inputs.getByRole('button', { name: 'Images', exact: true }),
     ).toBeDisabled();

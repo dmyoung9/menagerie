@@ -149,20 +149,27 @@ def normalize(profile, alias=None):
         raise ValueError("Duplicate variant IDs")
     if "reasoning" in catalog:
         presets = reasoning_presets(catalog)
+        declared = caps.get("reasoning")
+        disabled = declared is False or (
+            isinstance(declared, dict) and declared.get("supported") is False
+        )
         model["variants"] = [
             v for v in model["variants"] if v["id"] not in REASONING_OPTIONS
         ]
         model["variants"] += [
             {"id": p["id"], "body": deepcopy(p.get("body", {}))}
             for p in presets
-            if p["enabled"]
+            if p["enabled"] and not disabled
         ]
         # Explicit variants own exposure; don't ask clients to synthesize extra ones.
-        declared = caps.get("reasoning", {})
-        supported = isinstance(declared, dict) and declared.get("supported") is True
+        supported = declared is True or (
+            isinstance(declared, dict) and declared.get("supported") is True
+        )
         caps["reasoning"] = {
-            "supported": supported
-            or any(p["enabled"] and p["id"] != "default" for p in presets)
+            "supported": not disabled
+            and (
+                supported or any(p["enabled"] and p["id"] != "default" for p in presets)
+            )
         }
     if isinstance(caps.get("reasoning"), dict) and caps["reasoning"].get("supported"):
         model.setdefault("compatibility", {}).setdefault(

@@ -107,6 +107,36 @@ def test_reasoning_support_is_independent_of_preset_exposure():
     assert model["compatibility"]["reasoningField"] == "reasoning"
 
 
+@pytest.mark.parametrize("declared", [False, {"supported": False}])
+def test_explicit_reasoning_off_preserves_presets_without_reenabling_exposure(declared):
+    p = profile()
+    p["catalog"]["model"] = {
+        "capabilities": {
+            "tools": False,
+            "input": ["text"],
+            "output": ["text"],
+            "reasoning": declared,
+        },
+        "variants": [{"id": "custom", "body": {"temperature": 0.5}}],
+    }
+    original = copy.deepcopy(p)
+    off = normalize(p)
+    assert p == original
+    assert off["model"]["capabilities"]["reasoning"] == {"supported": False}
+    assert [v["id"] for v in off["model"]["variants"]] == ["custom"]
+    assert off["reasoning"] == p["catalog"]["reasoning"]
+    assert normalize(p | {"catalog": off}) == off
+    off["model"]["capabilities"]["reasoning"] = {"supported": True}
+    enabled = normalize(p | {"catalog": off})
+    assert [v["id"] for v in enabled["model"]["variants"]] == [
+        "custom",
+        "default",
+        "instant",
+        "high",
+    ]
+    assert enabled["reasoning"] == original["catalog"]["reasoning"]
+
+
 @pytest.mark.parametrize(
     "preset",
     [

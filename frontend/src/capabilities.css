@@ -60,6 +60,9 @@
 .output-capabilities {
   margin-top: 18px;
 }
+.capabilities-panel > .output-capabilities:first-child {
+  margin-top: 0;
+}
 .capability-evidence {
   margin-top: 18px;
   font-size: 12px;

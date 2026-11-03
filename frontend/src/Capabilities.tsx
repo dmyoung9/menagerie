@@ -5,7 +5,7 @@ import {
 import { NumberControl } from './NumberControl';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldSet, FieldLegend } from '@/components/ui/field';
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import {
   AudioLines,
   Brain,
@@ -193,6 +193,14 @@ export function Capabilities({
     ...model.capabilities,
   };
   const options = reasoningOptions(catalog, hints, runtime);
+  const reasoningValidity = useRef<Record<string, boolean>>({});
+  const validateReasoning = (id: string, ok: boolean) => {
+    reasoningValidity.current[id] = ok;
+    valid(
+      'reasoning-options',
+      Object.values(reasoningValidity.current).every(Boolean),
+    );
+  };
   const update = (value: Partial<ModelCapabilities>) =>
     change({
       ...catalog,
@@ -217,43 +225,14 @@ export function Capabilities({
     id === 'tools'
       ? caps.tools
       : id === 'reasoning'
-        ? typeof caps.reasoning === 'object' && !!caps.reasoning.supported
+        ? caps.reasoning === true ||
+          (typeof caps.reasoning === 'object' && !!caps.reasoning.supported)
         : false;
   return (
     <section
       className="capabilities-panel"
       aria-label="Capabilities and reasoning"
     >
-      <div className="capability-heading">
-        <h3>Capabilities</h3>
-        <span>Available to clients</span>
-      </div>
-      <ToggleGroup
-        multiple
-        variant="outline"
-        className="flex-wrap"
-        aria-label="Capabilities"
-        value={features.filter((f) => selected(f.id)).map((f) => f.id)}
-        onValueChange={(next) => {
-          update({
-            tools: next.includes('tools'),
-            reasoning: {
-              ...(typeof caps.reasoning === 'object' ? caps.reasoning : {}),
-              supported: next.includes('reasoning'),
-            },
-          });
-        }}
-      >
-        {features.map(({ id, label, icon: Icon }) => {
-          return (
-            <ToggleGroupItem key={id} value={id}>
-              <Icon />
-              {label}
-              {selected(id) && <Check />}
-            </ToggleGroupItem>
-          );
-        })}
-      </ToggleGroup>
       <FieldSet className="output-capabilities">
         <FieldLegend>Input modalities</FieldLegend>
         <ToggleGroup
@@ -325,81 +304,119 @@ export function Capabilities({
           ))}
         </ToggleGroup>
       </FieldSet>
-      {showOutputLimit && <OutputLimit catalog={catalog} change={change} />}
       <div className="capability-heading reasoning-heading">
-        <h3>Reasoning options</h3>
-        <span>Select to expose</span>
+        <h3>Capabilities</h3>
       </div>
       <ToggleGroup
         multiple
         variant="outline"
         className="flex-wrap"
-        aria-label="Reasoning options"
-        value={options.filter((p) => p.enabled).map((p) => p.id)}
-        onValueChange={(next) =>
-          writeOptions(
-            options.map((row) => ({ ...row, enabled: next.includes(row.id) })),
-          )
-        }
+        aria-label="Capabilities"
+        value={features.filter((f) => selected(f.id)).map((f) => f.id)}
+        onValueChange={(next) => {
+          if (!next.includes('reasoning')) {
+            reasoningValidity.current = {};
+            valid('reasoning-options', true);
+          }
+          update({
+            tools: next.includes('tools'),
+            reasoning: {
+              ...(typeof caps.reasoning === 'object' ? caps.reasoning : {}),
+              supported: next.includes('reasoning'),
+            },
+          });
+        }}
       >
-        {options.map((p) => {
-          const available =
-            p.id === 'default' || Object.keys(p.body || {}).length > 0;
-          return (
-            <ToggleGroupItem
-              key={p.id}
-              value={p.id}
-              disabled={!available}
-              title={p.source}
-            >
-              {reasoningLabel(p.id)}
-              {p.enabled && <Check />}
-            </ToggleGroupItem>
-          );
-        })}
+        {features.map(({ id, label, icon: Icon }) => (
+          <ToggleGroupItem key={id} value={id}>
+            <Icon />
+            {label}
+            {selected(id) && <Check />}
+          </ToggleGroupItem>
+        ))}
       </ToggleGroup>
-      {unavailable.length > 0 && (
-        <p className="capability-hint">
-          {unavailable.length === 4
-            ? 'Reasoning controls not detected.'
-            : `${unavailable.map((p) => reasoningLabel(p.id)).join(', ')} not configured.`}{' '}
-          Configure the controls below.
-        </p>
+      {showOutputLimit && <OutputLimit catalog={catalog} change={change} />}
+      {selected('reasoning') && (
+        <section aria-label="Reasoning options">
+          <div className="capability-heading reasoning-heading">
+            <h3>Reasoning options</h3>
+            <span>Select to expose</span>
+          </div>
+          <ToggleGroup
+            multiple
+            variant="outline"
+            className="flex-wrap"
+            aria-label="Reasoning options"
+            value={options.filter((p) => p.enabled).map((p) => p.id)}
+            onValueChange={(next) =>
+              writeOptions(
+                options.map((row) => ({
+                  ...row,
+                  enabled: next.includes(row.id),
+                })),
+              )
+            }
+          >
+            {options.map((p) => {
+              const available =
+                p.id === 'default' || Object.keys(p.body || {}).length > 0;
+              return (
+                <ToggleGroupItem
+                  key={p.id}
+                  value={p.id}
+                  disabled={!available}
+                  title={p.source}
+                >
+                  {reasoningLabel(p.id)}
+                  {p.enabled && <Check />}
+                </ToggleGroupItem>
+              );
+            })}
+          </ToggleGroup>
+          {unavailable.length > 0 && (
+            <p className="capability-hint">
+              {unavailable.length === 4
+                ? 'Reasoning controls not detected.'
+                : `${unavailable.map((p) => reasoningLabel(p.id)).join(', ')} not configured.`}{' '}
+              Configure the controls below.
+            </p>
+          )}
+          <div className="capability-advanced">
+            <p className="capability-hint">
+              Only configure controls your engine supports. Default leaves its
+              behavior unchanged; Instant must turn thinking off.
+            </p>
+            {reasoningControls}
+            <div className="reasoning-mappings">
+              {options
+                .filter((p) => p.id !== 'default')
+                .map((p) => (
+                  <RequestMapping
+                    key={p.id}
+                    preset={p}
+                    change={(body) => {
+                      validateReasoning(p.id, true);
+                      writeOptions(
+                        options.map((row) =>
+                          row.id === p.id
+                            ? {
+                                ...row,
+                                body,
+                                enabled: Object.keys(body).length
+                                  ? row.enabled
+                                  : false,
+                              }
+                            : row,
+                        ),
+                      );
+                    }}
+                    valid={(ok) => validateReasoning(p.id, ok)}
+                  />
+                ))}
+            </div>
+          </div>
+        </section>
       )}
-      <div className="capability-advanced">
-        <p className="capability-hint">
-          Only configure controls your engine supports. Default leaves its
-          behavior unchanged; Instant must turn thinking off.
-        </p>
-        {reasoningControls}
-        <div className="reasoning-mappings">
-          {options
-            .filter((p) => p.id !== 'default')
-            .map((p) => (
-              <RequestMapping
-                key={p.id}
-                preset={p}
-                change={(body) => {
-                  valid('reasoning-' + p.id, true);
-                  writeOptions(
-                    options.map((row) =>
-                      row.id === p.id
-                        ? {
-                            ...row,
-                            body,
-                            enabled: Object.keys(body).length
-                              ? row.enabled
-                              : false,
-                          }
-                        : row,
-                    ),
-                  );
-                }}
-                valid={(ok) => valid('reasoning-' + p.id, ok)}
-              />
-            ))}
-        </div>
-      </div>
     </section>
   );
 }

@@ -77,7 +77,8 @@ export function setReasoningOptions(
     ...model.capabilities,
   };
   const reasoningSupported =
-    typeof caps.reasoning === 'object' && caps.reasoning.supported;
+    caps.reasoning === true ||
+    (typeof caps.reasoning === 'object' && caps.reasoning.supported);
   return {
     ...catalog,
     model: {
