@@ -16,7 +16,7 @@ import { Duration, Placement, RuntimeSettings } from './FormControls';
 import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
 import { Capabilities, OutputLimit } from './Capabilities';
-import { Variants } from './Variants';
+import { Variants } from './ReasoningVariants';
 import { supportsReasoning } from './capabilityOptions';
 import { useConfirmation } from '@/hooks/use-confirmation';
 import { readApi } from './ui';

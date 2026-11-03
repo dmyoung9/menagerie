@@ -18,7 +18,7 @@ import { Choices, RuntimeSettings } from './FormControls';
 import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
 import { Capabilities } from './Capabilities';
-import { Variants } from './Variants';
+import { Variants } from './ReasoningVariants';
 import { defaultReasoningOptions } from './capabilityOptions';
 import { SettingsSection } from '@/components/settings-section';
 import type {
