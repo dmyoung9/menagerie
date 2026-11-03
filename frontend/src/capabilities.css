@@ -107,7 +107,8 @@
     padding-inline: 4px;
   }
   .variants-table th:first-child {
-    width: 52px;
+    width: 60px;
+    white-space: nowrap;
   }
   .variants-table th:last-child {
     width: 32px;
