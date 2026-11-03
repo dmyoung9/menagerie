@@ -21,6 +21,9 @@ export const runtimeField = d.object<T.RuntimeField>({
   label: opt(d.string),
   description: opt(d.string),
   default: opt(jsonValue),
+  engine_default: opt(d.number),
+  default_from: opt(d.string),
+  default_note: opt(d.string),
   min: opt(d.number),
   max: opt(d.number),
   enum: opt(d.array(jsonValue)),
@@ -145,7 +148,7 @@ export const artifact = d.object<T.Artifact>({
   template_default: opt(d.nullable(templateSelection)),
   templates: opt(d.array(templateAssetPublic)),
 });
-const runtimeCapabilities = d.object<T.RuntimeCapabilities>({
+export const runtimeCapabilities = d.object<T.RuntimeCapabilities>({
   formats: opt(stringArray),
   schema: opt(d.record(runtimeField)),
 });

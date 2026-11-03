@@ -52,6 +52,7 @@ import { ConfigurationFields } from './Editors';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
 import { defaults, editable } from './editor-state';
 import { Duration, Placement } from './FormControls';
+import { NumberControl } from './NumberControl';
 import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
 import { useConfirmation } from '@/hooks/use-confirmation';
@@ -753,23 +754,23 @@ export function DeploymentSetEditor({
             )}
             <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
               <Field label="Priority">
-                <Input
+                <NumberControl
+                  label="Priority"
                   required
-                  type="number"
                   min={0}
                   max={100}
                   value={value.priority}
-                  onChange={(e) => set('priority', Number(e.target.value))}
+                  change={(v) => set('priority', v ?? 0)}
                 />
               </Field>
               <Field label="Switch timeout (seconds)">
-                <Input
+                <NumberControl
+                  label="Switch timeout (seconds)"
                   required
-                  type="number"
                   min={1}
                   max={1800}
                   value={value.queue_timeout}
-                  onChange={(e) => set('queue_timeout', Number(e.target.value))}
+                  change={(v) => set('queue_timeout', v ?? 0)}
                 />
               </Field>
             </FieldGroup>

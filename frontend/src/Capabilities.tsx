@@ -2,7 +2,7 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from '@/components/ui/native-select';
-import { Input } from '@/components/ui/input';
+import { NumberControl } from './NumberControl';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldSet, FieldLegend } from '@/components/ui/field';
 import { useId, useState, type ReactNode } from 'react';
@@ -44,14 +44,16 @@ export function OutputLimit({
   const model = catalog.model || {};
   return (
     <Field label="Max output tokens">
-      <Input
-        type="number"
+      <NumberControl
+        label="Max output tokens"
         min={1}
-        value={model.limit?.output ?? ''}
-        placeholder="Default"
-        onChange={(e) => {
+        max={1048576}
+        sliderMax={32768}
+        value={model.limit?.output}
+        defaultValue={1024}
+        change={(value) => {
           const limit = { ...model.limit };
-          if (e.target.value) limit.output = Number(e.target.value);
+          if (value !== undefined) limit.output = value;
           else delete limit.output;
           change({ ...catalog, model: { ...model, limit } });
         }}
@@ -119,16 +121,18 @@ function RequestMapping({
           </NativeSelectOption>
         </NativeSelect>
         {['reasoning_budget', 'thinking_budget'].includes(mode) && (
-          <Input
-            aria-label={`${reasoningLabel(preset.id)} token budget`}
-            type="number"
+          <NumberControl
+            label={`${reasoningLabel(preset.id)} token budget`}
             min={0}
             max={1048576}
             required
             value={
-              typeof preset.body[mode] === 'number' ? preset.body[mode] : ''
+              typeof preset.body[mode] === 'number'
+                ? preset.body[mode]
+                : undefined
             }
-            onChange={(e) => change({ [mode]: Number(e.target.value) })}
+            sliderMax={32768}
+            change={(v) => change({ [mode]: v ?? 0 })}
           />
         )}
         {mode === 'custom' && (

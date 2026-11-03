@@ -51,6 +51,124 @@ def test_sampler_and_mtp_fields_are_probed_and_validated():
         )
 
 
+HELP_DEFAULTS = """-t,    --threads N                      CPU threads (default: -1)
+-tb,   --threads-batch N                batch threads (default:
+                                        same as --threads)
+--temp, --temperature N                 sampling temperature (default: 0.80)
+--top-p N                               nucleus sampling (default: 0.95)
+--spec-draft-n-max N                    draft tokens (default: 3, 2 for
+                                        draft-mtp on CUDA)
+--spec-draft-n-min N                    minimum draft tokens
+                                        (default: 0)
+--draft-max N                           the argument has been removed. use --spec-draft-n-max
+--spec-type none,draft-simple,draft-mtp  speculation (default: none)
+--ctx-size N                            context (default: 0, 0 = loaded from model)
+--reasoning-budget N                    thinking tokens (default: -1)
+--top-k N                               top k (default: unknown)
+"""
+
+
+def test_executable_defaults_are_scoped_wrapped_and_backend_specific():
+    flags = [
+        "threads",
+        "threads-batch",
+        "temp",
+        "top-p",
+        "top-k",
+        "spec-draft-n-max",
+        "spec-draft-n-min",
+        "ctx-size",
+        "reasoning-budget",
+    ]
+    runtime = {
+        "engine": "prism",
+        "managed": {"backend": "cuda"},
+        "capabilities": {"flags": flags},
+    }
+    schema = adapters.option_schema(runtime, flags, HELP_DEFAULTS)
+    assert schema["threads"]["engine_default"] == -1
+    assert schema["threads-batch"]["default_from"] == "threads"
+    assert schema["temp"]["engine_default"] == 0.8
+    assert schema["top-p"]["engine_default"] == 0.95
+    assert schema["spec-draft-n-max"]["engine_default"] == 2
+    assert schema["spec-draft-n-min"]["engine_default"] == 0
+    assert schema["ctx-size"]["engine_default"] == 0
+    assert schema["reasoning-budget"]["engine_default"] == -1
+    assert "engine_default" not in schema["top-k"]
+    assert (
+        schema["threads"]["default"] == 6
+    )  # historical policy is not silently rewritten
+    assert (
+        adapters.option_schema(
+            runtime | {"managed": {"backend": "cpu"}}, flags, HELP_DEFAULTS
+        )["spec-draft-n-max"]["engine_default"]
+        == 3
+    )
+    saved = runtime | {"capabilities": {"flags": flags, "schema": schema}}
+    assert adapters.option_schema(saved)["spec-draft-n-max"]["engine_default"] == 2
+
+
+@pytest.mark.asyncio
+async def test_engine_help_defaults_are_cached_without_mutating_runtime(
+    tmp_path, monkeypatch
+):
+    app = create_app(tmp_path / "state")
+    store = app.state.store
+    runtime = store.put(
+        "runtime",
+        {
+            "id": "engine",
+            "engine": "llama.cpp",
+            "execution_kind": "native",
+            "trust": True,
+            "executable": "/engines/fake",
+            "capabilities": {"flags": ["temp", "spec-draft-n-max"]},
+        },
+    )
+    calls = []
+
+    async def command(argv, *args):
+        calls.append(argv)
+        return HELP_DEFAULTS
+
+    monkeypatch.setattr(adapters, "command", command)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            for _ in range(2):
+                response = await client.get("/api/runtimes/engine/capabilities")
+                assert response.status_code == 200
+                assert response.json()["schema"]["temp"]["engine_default"] == 0.8
+        assert calls == [["/engines/fake", "--help"]]
+        assert store.get("runtime", "engine") == runtime
+    finally:
+        await app.state.manager.close()
+
+
+@pytest.mark.asyncio
+async def test_untrusted_custom_and_container_defaults_do_not_execute(
+    tmp_path, monkeypatch
+):
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Must not execute")
+
+    monkeypatch.setattr(adapters, "command", forbidden)
+    runtime = {
+        "engine": "llama.cpp",
+        "execution_kind": "native",
+        "trust": True,
+        "capabilities": {"flags": ["temp"]},
+    }
+    for changed in [
+        {"trust": False},
+        {"engine": "custom"},
+        {"execution_kind": "docker"},
+    ]:
+        schema = await adapters.configuration_schema(runtime | changed)
+        assert not schema or "engine_default" not in schema["temp"]
+
+
 def test_request_totals_seed_retained_history_once_and_survive_cleanup(tmp_path):
     store = Store(tmp_path)
     with store.connect() as c:

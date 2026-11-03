@@ -9,6 +9,9 @@ export type RuntimeField = {
   label?: string;
   description?: string;
   default?: JsonValue;
+  engine_default?: number;
+  default_note?: string;
+  default_from?: string;
   min?: number;
   max?: number;
   enum?: JsonValue[];

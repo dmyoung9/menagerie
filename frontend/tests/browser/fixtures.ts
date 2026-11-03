@@ -95,7 +95,13 @@ export const test = base.extend<{ fixture: Fixture }>({
                     default: 8192,
                   },
                   parallel: { type: 'integer', min: 1, max: 8, default: 1 },
-                  threads: { type: 'integer', min: 1, max: 128, default: 8 },
+                  threads: {
+                    type: 'integer',
+                    min: 1,
+                    max: 128,
+                    default: 8,
+                    engine_default: 8,
+                  },
                   'gpu-layers': { type: 'string', default: 'all' },
                 },
               },
@@ -238,6 +244,11 @@ export const test = base.extend<{ fixture: Fixture }>({
         if (path.endsWith('/engine-recommendation'))
           return send({ engine: 'llama.cpp', reason: 'GGUF engine' });
         if (path === '/api/engines/releases') return send({ engines: [] });
+        if (path.startsWith('/api/runtimes/') && path.endsWith('/capabilities'))
+          return send(
+            fixture.registry.runtimes.find((r) => r.id === path.split('/')[3])
+              ?.capabilities || {},
+          );
         if (path.endsWith('/logs'))
           return send({ text: 'Runtime ready\nNo requests in flight' });
         if (path === '/api/resources/preview') {

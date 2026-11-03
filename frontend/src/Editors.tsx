@@ -27,6 +27,7 @@ import {
   profileDraft,
   deploymentDraft,
   runtimeDraft,
+  runtimeCapabilities,
 } from './contracts';
 import { recordValue } from './decode';
 import { artifactLimits } from './artifact-metadata';
@@ -42,6 +43,9 @@ import type {
   RuntimeRecommendation,
 } from './types';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
+import { ModelCompanions } from './ModelCompanions';
+import { NumberControl } from './NumberControl';
+import type { RuntimeCapabilities } from './types';
 
 export function ConfigurationFields({
   value,
@@ -63,7 +67,30 @@ export function ConfigurationFields({
   const { confirm, confirmation } = useConfirmation();
   const runtime = data.runtimes?.find((r) => r.id === value.runtime_id);
   const artifact = data.models?.find((m) => m.id === value.artifact_id);
-  const schema = { ...runtime?.capabilities?.schema };
+  const [probed, setProbed] = useState<{
+    key: string;
+    capabilities: RuntimeCapabilities;
+  }>();
+  const runtimeKey = `${runtime?.id}:${runtime?.revision}`;
+  useEffect(() => {
+    let alive = true;
+    if (runtime?.id)
+      readApi(`/api/runtimes/${runtime.id}/capabilities`, runtimeCapabilities)
+        .then((capabilities) => {
+          if (alive) setProbed({ key: runtimeKey, capabilities });
+        })
+        .catch(() => {
+          /* Saved defaults remain usable; missing engine defaults stay unknown. */
+        });
+    return () => {
+      alive = false;
+    };
+  }, [runtime?.id, runtimeKey]);
+  const schema = {
+    ...(probed?.key === runtimeKey
+      ? probed.capabilities.schema
+      : runtime?.capabilities?.schema),
+  };
   const { context: modelContext, layers } = artifactLimits(artifact);
   for (const key of ['ctx-size', 'max-model-len'])
     if (schema[key] && modelContext)
@@ -203,19 +230,9 @@ export function ConfigurationFields({
                 )
                   return;
                 const selected = engines.find((r) => r.id === id);
-                const schema: Record<string, import('./types').RuntimeField> =
-                  selected?.capabilities?.schema || {};
                 const config: Record<string, JsonValue> = {};
-                for (const [key, field] of Object.entries(schema)) {
-                  if (field.default !== undefined) config[key] = field.default;
-                }
                 if (selected?.managed?.backend === 'cpu')
                   config['gpu-layers'] = '0';
-                const { context } = artifactLimits(artifact);
-                if (context)
-                  for (const key of ['ctx-size', 'max-model-len'])
-                    if (typeof config[key] === 'number')
-                      config[key] = Math.min(config[key], context);
                 setValidity({});
                 onValid(true);
                 set({ ...value, runtime_id: id, config, raw_args: [] });
@@ -247,57 +264,13 @@ export function ConfigurationFields({
           />
         )}
         {modelFields}
-        {schema.mmproj && (
-          <FieldSet className="model-settings-group">
-            <FieldLegend>Multimodal</FieldLegend>
-            <RuntimeSettings
-              section="multimodal"
-              schema={schema}
-              value={value.config}
-              change={(config) => set({ ...value, config })}
-              host={data.host?.[0]}
-              recommendation={{ gpu_layers_max: layers, ...recommendation }}
-            />
-            {artifact?.metadata?.projector &&
-              runtime?.capabilities?.schema?.mmproj && (
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() =>
-                    set({
-                      ...value,
-                      config: {
-                        ...value.config,
-                        mmproj: artifact.metadata?.projector?.path || '',
-                      },
-                    })
-                  }
-                >
-                  Use downloaded projector: {artifact.metadata.projector.name}
-                </Button>
-              )}
-          </FieldSet>
-        )}
-        {[
-          'spec-type',
-          'spec-draft-model',
-          'model-draft',
-          'spec-draft-n-max',
-          'spec-draft-n-min',
-          'draft-max',
-          'draft-min',
-        ].some((key) => schema[key]) && (
-          <FieldSet className="model-settings-group">
-            <FieldLegend>MTP</FieldLegend>
-            <RuntimeSettings
-              section="mtp"
-              schema={schema}
-              value={value.config}
-              change={(config) => set({ ...value, config })}
-              host={data.host?.[0]}
-            />
-          </FieldSet>
-        )}
+        <ModelCompanions
+          model={artifact}
+          models={data.models || []}
+          value={value}
+          schema={schema}
+          change={set}
+        />
       </SettingsSection>
       {(['memory', 'performance', 'generation', 'other'] as const).map(
         (section) => (
@@ -427,20 +400,31 @@ export function Editor(props: EditorProps) {
     max?: number,
   ) => (
     <Field label={label}>
-      <Input
-        required={!['commit', 'fork_url'].includes(key)}
-        type={type}
-        min={min}
-        max={max}
-        value={
-          typeof read(key) === 'string' || typeof read(key) === 'number'
-            ? String(read(key))
-            : ''
-        }
-        onChange={(e) =>
-          set(key, type === 'number' ? Number(e.target.value) : e.target.value)
-        }
-      />
+      {type === 'number' ? (
+        <NumberControl
+          label={label}
+          required
+          min={min}
+          max={max}
+          value={
+            typeof read(key) === 'number' ? (read(key) as number) : undefined
+          }
+          change={(v) => set(key, v ?? 0)}
+        />
+      ) : (
+        <Input
+          required={!['commit', 'fork_url'].includes(key)}
+          type={type}
+          min={min}
+          max={max}
+          value={
+            typeof read(key) === 'string' || typeof read(key) === 'number'
+              ? String(read(key))
+              : ''
+          }
+          onChange={(e) => set(key, e.target.value)}
+        />
+      )}
     </Field>
   );
   const check = (key: EditorField, label: string) => (

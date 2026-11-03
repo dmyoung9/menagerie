@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import struct
@@ -138,6 +139,7 @@ FIELDS = {
         "min": 0,
         "max": 256,
         "default": 0,
+        "engine_default": 0,
         "label": "MoE expert layers on CPU",
     },
 }
@@ -301,11 +303,72 @@ async def probe(runtime):
         else ["safetensors"],
         "sha256": await asyncio.to_thread(file_hash, path),
         "provenance": "installed executable --help/--version",
-        "schema": option_schema(runtime, flags),
+        "schema": option_schema(runtime, flags, text),
     }
 
 
-def option_schema(runtime, flags=None):
+def help_defaults(text, schema, runtime):
+    """Read only advertised defaults, scoped to their own option's help block."""
+    for block in re.split(r"(?m)(?=^-)", text):
+        header = block.split("\n", 1)[0]
+        header = re.sub(r"^-[^-][^ ,]*,\s+", "", header)
+        names = re.findall(
+            r"--([a-zA-Z0-9][a-zA-Z0-9-]*)", re.split(r"\s{2,}", header)[0]
+        )
+        normalized = " ".join(block.split())
+        match = re.search(r"\(default:\s*([^)]*)\)", normalized)
+        if not match or "argument has been removed" in normalized:
+            continue
+        for key in names:
+            field = schema.get(key)
+            if not field or field.get("type") not in {"integer", "number"}:
+                continue
+            raw = match[1]
+            source = re.fullmatch(r"same as --([a-z-]+)", raw)
+            if source and source[1] in schema:
+                field["default_from"] = source[1]
+                continue
+            number = re.match(r"(-?\d+(?:\.\d+)?)(?=\s*[, )-]|$)", raw)
+            if not number:
+                continue
+            value = float(number[1])
+            if not math.isfinite(value) or (
+                field["type"] == "integer" and not value.is_integer()
+            ):
+                continue
+            if (
+                key in {"spec-draft-n-max", "draft-max"}
+                and runtime.get("managed", {}).get("backend") == "cuda"
+            ):
+                mtp = re.search(r"(\d+) for draft-mtp on CUDA", raw)
+                if mtp:
+                    value = int(mtp[1])
+            field["engine_default"] = (
+                int(value) if field["type"] == "integer" else value
+            )
+            field["default_note"] = raw
+    return schema
+
+
+async def configuration_schema(runtime):
+    """Read trusted engine help without loading weights or modifying saved records."""
+    schema = option_schema(runtime)
+    if (
+        runtime.get("execution_kind") != "native"
+        or not runtime.get("trust")
+        or runtime["engine"] not in {"llama.cpp", "prism", "vllm"}
+    ):
+        return schema
+    args = ["serve", "--help=all"] if runtime["engine"] == "vllm" else ["--help"]
+    text = await command(
+        [runtime["executable"], *args],
+        environment(runtime),
+        120 if runtime["engine"] == "vllm" else 45,
+    )
+    return help_defaults(text, schema, runtime)
+
+
+def option_schema(runtime, flags=None, help_text=None):
     flags = (
         flags if flags is not None else runtime.get("capabilities", {}).get("flags", [])
     )
@@ -318,11 +381,19 @@ def option_schema(runtime, flags=None):
             )
             if modern in flags
         }
-        return {
+        schema = {
             k: v | {"restart_required": True}
             for k, v in FIELDS.items()
             if k in flags and k not in retired
         }
+        # Older saved schemas contain policy presets, not executable defaults.
+        # Carry only explicitly probed default evidence across registry reads.
+        for key, field in schema.items():
+            saved = runtime.get("capabilities", {}).get("schema", {}).get(key, {})
+            for name in ("engine_default", "default_note", "default_from"):
+                if name in saved:
+                    field[name] = saved[name]
+        return help_defaults(help_text, schema, runtime) if help_text else schema
     return (
         {
             "max-model-len": {

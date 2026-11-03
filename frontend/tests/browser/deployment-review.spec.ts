@@ -18,7 +18,15 @@ for (const width of [1440, 576, 320]) {
         type: 'integer',
         min: 1,
         max: 32,
+        engine_default: 3,
         label: 'Maximum draft tokens',
+      },
+      'spec-draft-n-min': {
+        type: 'integer',
+        min: 0,
+        max: 32,
+        engine_default: 0,
+        label: 'Minimum draft tokens',
       },
       'n-cpu-moe': {
         type: 'integer',
@@ -60,6 +68,8 @@ for (const width of [1440, 576, 320]) {
     idle.profile_snapshot!.config.extension = 'preserved';
     fixture.registry.models[0].metadata = {
       ...fixture.registry.models[0].metadata,
+      'example.block_count': 32,
+      'example.nextn_predict_layers': 1,
       projector: {
         name: 'example-mmproj.gguf',
         path: '/models/example-mmproj.gguf',
@@ -125,29 +135,42 @@ for (const width of [1440, 576, 320]) {
     });
     const mtp = model.getByRole('group', { name: 'MTP', exact: true });
     await expect(
-      multimodal.getByLabel('Multimodal projector path', { exact: true }),
+      multimodal.getByRole('combobox', { name: 'Projector', exact: true }),
     ).toBeVisible();
     await expect(
       multimodal.getByLabel('Speculative decoding type (MTP)', { exact: true }),
     ).toHaveCount(0);
     await expect(
-      mtp.getByLabel('Speculative decoding type (MTP)', { exact: true }),
+      mtp.getByRole('combobox', { name: 'MTP head', exact: true }),
     ).toBeVisible();
     await expect(
       mtp.getByLabel('Multimodal projector path', { exact: true }),
     ).toHaveCount(0);
+    await expect(multimodal.getByRole('button')).toHaveCount(0);
     await multimodal
-      .getByRole('button', {
-        name: 'Use downloaded projector: example-mmproj.gguf',
-        exact: true,
-      })
-      .click();
+      .getByRole('combobox', { name: 'Projector', exact: true })
+      .selectOption('/models/example-mmproj.gguf');
     await expect(
-      multimodal.getByLabel('Multimodal projector path', { exact: true }),
+      multimodal.getByRole('combobox', { name: 'Projector', exact: true }),
     ).toHaveValue('/models/example-mmproj.gguf');
     await expect(
-      mtp.getByLabel('Speculative decoding type (MTP)', { exact: true }),
+      mtp.getByRole('combobox', { name: 'MTP head', exact: true }),
     ).toHaveValue('');
+    await expect(
+      mtp.getByLabel('Maximum draft tokens', { exact: true }),
+    ).toHaveValue('3');
+    await expect(
+      mtp.getByLabel('Minimum draft tokens', { exact: true }),
+    ).toHaveValue('0');
+    await expect(
+      mtp.getByLabel('Maximum draft tokens', { exact: true }),
+    ).toBeDisabled();
+    await expect(
+      mtp.getByRole('slider', {
+        name: 'Maximum draft tokens range',
+        exact: true,
+      }),
+    ).toBeDisabled();
     expect(
       await model
         .getByRole('button', { name: 'Install an engine', exact: true })
@@ -227,12 +250,12 @@ for (const width of [1440, 576, 320]) {
       await config.getByLabel(key, { exact: true }).fill(value);
     }
     await config
-      .getByLabel('Speculative decoding type (MTP)', { exact: true })
-      .fill('draft-mtp');
-    await config
-      .getByLabel('MTP / draft model path', { exact: true })
-      .fill('/models/example-mtp.gguf');
-    await config.getByLabel('Maximum draft tokens', { exact: true }).fill('3');
+      .getByRole('combobox', { name: 'MTP head', exact: true })
+      .selectOption('embedded');
+    await expect(
+      config.getByLabel('MTP / draft model path', { exact: true }),
+    ).toHaveCount(0);
+    await config.getByLabel('Maximum draft tokens', { exact: true }).fill('4');
     await config
       .getByLabel('MoE expert layers on CPU', { exact: true })
       .fill('4');
@@ -293,7 +316,7 @@ for (const width of [1440, 576, 320]) {
       'presence-penalty': 0.2,
       'repeat-penalty': 1.1,
       'spec-type': 'draft-mtp',
-      'spec-draft-n-max': 3,
+      'spec-draft-n-max': 4,
       'n-cpu-moe': 4,
       'reasoning-budget': 8192,
       extension: 'preserved',
