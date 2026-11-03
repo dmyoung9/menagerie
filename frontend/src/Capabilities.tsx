@@ -3,13 +3,7 @@ import type { ReactNode } from 'react';
 import { AudioLines, Brain, Image, Type, Video, Wrench } from 'lucide-react';
 import { NumberControl } from './NumberControl';
 import { Field } from './ui';
-import type {
-  DiscoveredCapabilities,
-  ModelCapabilities,
-  ModelCatalog,
-  Runtime,
-  TemplateSelection,
-} from './types';
+import type { ModelCapabilities, ModelCatalog } from './types';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { reasoningLabel } from './capabilityOptions';
 import { ReasoningModes } from './ReasoningModes';
@@ -46,23 +40,15 @@ export function OutputLimit({
 export function Capabilities({
   catalog,
   change,
-  hints,
-  runtime,
   valid,
   reasoningControls,
   showOutputLimit = true,
-  artifactId,
-  templateOverride,
 }: {
   catalog: ModelCatalog;
   change: (catalog: ModelCatalog) => void;
-  hints?: DiscoveredCapabilities;
-  runtime?: Partial<Runtime>;
   valid: (key: string, ok: boolean) => void;
   reasoningControls?: ReactNode;
   showOutputLimit?: boolean;
-  artifactId?: string;
-  templateOverride?: TemplateSelection | null;
 }) {
   const model = catalog.model || {};
   const caps = {
@@ -170,12 +156,8 @@ export function Capabilities({
         <ReasoningModes
           catalog={catalog}
           change={change}
-          hints={hints}
-          runtime={runtime}
           valid={valid}
           reasoningControls={reasoningControls}
-          artifactId={artifactId}
-          templateOverride={templateOverride}
         />
       )}
     </section>

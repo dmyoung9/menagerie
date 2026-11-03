@@ -65,39 +65,41 @@ than silently shadowing the selection.
 ## Configure deployment-owned reasoning modes
 
 Under **Capabilities & reasoning**, enable the Reasoning declaration to show
-**Reasoning modes**. This declares support and enables your configured modes; it
+**Reasoning options**. This declares support and enables your configured levels; it
 does not force the model to think or stop thinking. Turning it off hides and
 deactivates the modes without deleting them. Input/output modalities remain separate.
 
-Fresh configurations have no invented Instant or Low/Medium/High modes. **Add mode**
-with a name and stable client ID. Names are editable; duplicate a mode to give a
-copy its own ID. Reorder or remove modes with the row actions. Existing saved
-presets retain their IDs, order, settings and exposure choices, including custom
-settings on a mode named Default.
+Use the **Instant / Low / Medium / High** toggle buttons to select the levels
+exposed to clients. These are the only built-in level choices. A level stays
+unavailable until its request control is configured; merely opening the editor
+does not save presets or change model behavior. Existing saved presets retain
+their IDs, order, settings and exposure choices, including custom settings on a
+mode named Default.
 
-Each mode can combine:
+Use **Add custom level** for your own name and stable client ID. The new level
+appears in the same toggle row, not a separate preset catalog. Custom levels
+come only from saved/user-created settings, never from template text or model
+names. Remove a custom level with its row action.
 
-- **Thinking:** Inherit, On or Off, using the template's `enable_thinking` argument.
-- **Native effort:** a model-specific `reasoning_effort` string.
-- **Template effort:** a model-specific `chat_template_kwargs.reasoning_effort` string.
-- **Reasoning/thinking budgets:** inherit, a custom token count, or `-1` for
+Compact mapping rows below the toggles offer:
+
+- **Native effort:** a `reasoning_effort` string.
+- **Template effort:** a `chat_template_kwargs.reasoning_effort` string.
+- **Thinking (template):** On or Off via `enable_thinking`.
+- **Reasoning/thinking token budgets:** a token count, or `-1` for
   unlimited **only when the engine supports that field and sentinel**.
-- **Template arguments (JSON):** bounded additional template controls. Reserved
-  conversation/tool/template-structure arguments cannot be replaced.
-- **Prompt prefix:** an explicit fallback for models that use prompt tags.
+- **Custom request settings:** JSON for combinations of these controls and
+  additional bounded template arguments. An optional prompt prefix is available
+  here for models that use prompt tags. Reserved conversation/tool/template-
+  structure arguments cannot be replaced.
 
 Do not assume these fields are interchangeable or supported by every engine.
 Native effort and template effort may be different bindings. Budgets are separate
 from the maximum output-token limit and from an engine's startup reasoning budget.
 Zero tokens, hidden reasoning output and a mode named "Off" do not necessarily
-disable thinking. **Resolved request changes** shows exactly what the mode adds.
-
-Suggestions come from explicit controls in the installed artifact's recorded
-template, or the selected template override/model-default template. They do not
-come from a repository name, model-card prose, or a different quantization.
-**Add** a suggestion to review it; it is not selected or exposed automatically.
-Missing metadata or unavailable template content means no suggestion, not proof
-that the model lacks support. Nothing is executed to discover modes.
+disable thinking. Confirm the engine/template binding before exposing a level.
+Selecting **Not configured** removes that level's body mapping, not its saved
+prompt prefix; clear both to remove all effects. Nothing is executed to discover levels.
 
 ### Defaults and request precedence
 
@@ -118,7 +120,7 @@ require a new chat. Returning to Model default does not erase past tags.
 
 ## Client exposure
 
-Only modes with **Expose to clients** selected are emitted as catalog variants in `/v1/models`,
+Only levels selected in the **Reasoning options** toggle row are emitted as catalog variants in `/v1/models`,
 the OpenCode configuration export, and the existing OpenCode discovery plugin.
 Their gateway selectors survive the plugin's SDK validation. Clients may display
 the stable ID rather than the editable name. The metadata
@@ -136,12 +138,12 @@ Clients without a variant picker may send a selector to the chat endpoint:
 ```json
 {
   "model": "my-model",
-  "menagerie_variant": "research-8k",
+  "menagerie_variant": "high",
   "messages": [{ "role": "user", "content": "Hello" }]
 }
 ```
 
-The example requires a saved, exposed `research-8k` mode. Use
+The example requires a configured, exposed `high` level. Use
 `"menagerie_variant": "model-default"` to bypass deployment-default overrides.
 The gateway validates mode selection and required prompt content before loading
 a model, removes the selector, and applies the selected mode before forwarding.

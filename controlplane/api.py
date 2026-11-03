@@ -377,43 +377,6 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             _template_public(t) for t in templates.list_template_assets(store, ident)
         ]
 
-    @app.get("/api/models/{ident}/reasoning-hints")
-    async def reasoning_hints(
-        ident: str, template_source: str | None = None, template_id: str | None = None
-    ):
-        from .capabilities import inspect
-
-        artifact = store.get("artifact", ident)
-        override = None
-        if template_source is not None:
-            if template_source not in templates.TEMPLATE_SOURCES:
-                raise ValueError("Unknown template source")
-            override = {"source": template_source, "asset_id": template_id}
-        selected = templates.effective_selection(
-            {"template_override": override}, artifact, store
-        )
-        if selected["source"] == "automatic":
-            metadata = dict(artifact.get("metadata") or {})
-            metadata.pop("discovery", None)
-            return inspect(metadata) | {"template_source": "automatic"}
-        asset = selected["asset"]
-        if not asset or asset.get("status") != "available":
-            return inspect({}) | {
-                "note": "Selected template is unavailable; no reasoning controls inferred."
-            }
-        content = asset.get("content", "")
-        if (
-            not isinstance(content, str)
-            or len(content.encode()) > templates.TEMPLATE_MAX_SIZE
-        ):
-            return inspect({}) | {
-                "note": "Selected template has no bounded recorded content."
-            }
-        return inspect({"chat_template": content}) | {
-            "template_source": selected["source"],
-            "template_sha256": asset.get("sha256"),
-        }
-
     @app.get("/api/templates/{ident}")
     async def template_detail(ident: str):
         asset = store.get("template", ident)

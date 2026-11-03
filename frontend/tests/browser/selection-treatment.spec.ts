@@ -199,11 +199,11 @@ for (const width of [1440, 576, 320]) {
     await expect(text).not.toHaveCSS('background-color', colors.background);
     await expect(image).toBeDisabled();
     const options = panel.getByRole('region', {
-      name: 'Reasoning modes',
+      name: 'Reasoning options',
       exact: true,
     });
     const instant = options.getByRole('button', {
-      name: 'Expose Instant to clients',
+      name: 'Instant',
       exact: true,
     });
     await expect(instant.locator('svg')).toHaveCount(0);

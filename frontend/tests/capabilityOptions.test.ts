@@ -3,38 +3,67 @@ import { test } from 'node:test';
 import {
   modeSlug,
   reasoningOptions,
-  reasoningSuggestions,
+  reasoningLevels,
+  mappingKind,
   setReasoningOptions,
   validModeId,
 } from '../src/capabilityOptions.ts';
 import type { ModelCatalog } from '../src/types';
 
-test('fresh models get no invented modes, Instant or default effort', () => {
+test('fresh models offer only the four standard unconfigured choices without saving defaults', () => {
   assert.deepEqual(reasoningOptions({}), []);
-  assert.deepEqual(reasoningSuggestions({ reasoning: true }), []);
   assert.deepEqual(
-    reasoningSuggestions({ thinking_toggle: true }, { engine: 'custom' }),
-    [],
+    reasoningLevels({}).map((mode) => mode.id),
+    ['instant', 'low', 'medium', 'high'],
+  );
+  assert(
+    reasoningLevels({}).every(
+      (mode) => !mode.enabled && !Object.keys(mode.body).length,
+    ),
   );
 });
 
-test('explicit template hints suggest arbitrary modes without automatically exposing them', () => {
-  const hints = {
-    reasoning_effort: ['xhigh', 'spoon', 'logic'],
-    thinking_toggle: true,
+test('custom toggle choices come only from saved user levels, with no guessed settings', () => {
+  const catalog: ModelCatalog = {
+    reasoning: {
+      presets: [
+        {
+          id: 'research',
+          name: 'Research',
+          enabled: true,
+          body: { reasoning_budget: 8192 },
+        },
+        { id: 'instant', enabled: false, body: {} },
+      ],
+    },
   };
-  const suggestions = reasoningSuggestions(hints, { engine: 'prism' });
+  const before = structuredClone(catalog);
+  const levels = reasoningLevels(catalog);
   assert.deepEqual(
-    suggestions.map((p) => p.id),
-    ['xhigh', 'spoon', 'logic', 'thinking-on', 'thinking-off'],
+    levels.map((mode) => mode.id),
+    ['instant', 'low', 'medium', 'high', 'research'],
   );
-  assert(suggestions.every((p) => !p.enabled));
-  assert.deepEqual(suggestions[1].body, {
-    chat_template_kwargs: { reasoning_effort: 'spoon' },
-  });
-  assert.deepEqual(suggestions.at(-1)?.body, {
-    chat_template_kwargs: { enable_thinking: false },
-  });
+  assert.deepEqual(levels[0], catalog.reasoning!.presets![1]);
+  assert.deepEqual(levels.at(-1), catalog.reasoning!.presets![0]);
+  assert.deepEqual(catalog, before);
+});
+
+test('compact mappings recognize simple controls and keep composites in custom settings', () => {
+  assert.equal(mappingKind({}), '');
+  assert.equal(mappingKind({ reasoning_effort: 'custom' }), 'effort');
+  assert.equal(
+    mappingKind({ chat_template_kwargs: { reasoning_effort: 'custom' } }),
+    'template-effort',
+  );
+  assert.equal(
+    mappingKind({ chat_template_kwargs: { enable_thinking: true } }),
+    'template',
+  );
+  assert.equal(mappingKind({ thinking_budget: -1 }), 'thinking_budget');
+  assert.equal(
+    mappingKind({ reasoning_effort: 'high', thinking_budget: 8192 }),
+    'custom',
+  );
 });
 
 test('saved modes preserve order, empty mappings, labels, default and composite effects', () => {

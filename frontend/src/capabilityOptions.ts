@@ -1,9 +1,8 @@
 import type {
   ConfiguredModelCatalog,
-  DiscoveredCapabilities,
   ModelCatalog,
   ReasoningPreset,
-  Runtime,
+  UnknownRecord,
 } from './types';
 
 export const reasoningLabel = (id: string) =>
@@ -44,34 +43,44 @@ export function reasoningOptions(catalog: ModelCatalog): ReasoningPreset[] {
   });
 }
 
-/** Suggestions require explicit evidence and are never exposed or selected automatically. */
-export function reasoningSuggestions(
-  hints: DiscoveredCapabilities = {},
-  runtime: Partial<Runtime> = {},
-): ReasoningPreset[] {
-  if (!['llama.cpp', 'prism', 'vllm', 'sglang'].includes(runtime.engine || ''))
-    return [];
-  const modes: ReasoningPreset[] = (hints.reasoning_effort || [])
-    .filter(validModeId)
-    .map((id) => ({
-      id,
-      name: reasoningLabel(id),
-      enabled: false,
-      body: { chat_template_kwargs: { reasoning_effort: id } },
-      source: 'Model template hint; confirm engine support',
-    }));
-  if (hints.thinking_toggle)
-    for (const enabled of [true, false])
-      modes.push({
-        id: enabled ? 'thinking-on' : 'thinking-off',
-        name: enabled ? 'Thinking on' : 'Thinking off',
-        enabled: false,
-        body: { chat_template_kwargs: { enable_thinking: enabled } },
-        source: 'Model template hint; confirm engine support',
-      });
-  return modes.filter(
-    (mode, index) => modes.findIndex((other) => other.id === mode.id) === index,
-  );
+export const standardReasoningIds = ['instant', 'low', 'medium', 'high'];
+
+/** Standard placeholders are UI choices only, never saved/exposed automatically. */
+export function reasoningLevels(catalog: ModelCatalog): ReasoningPreset[] {
+  const saved = reasoningOptions(catalog);
+  return [
+    ...saved.filter((mode) => mode.id === 'default'),
+    ...standardReasoningIds.map(
+      (id) =>
+        saved.find((mode) => mode.id === id) || {
+          id,
+          enabled: false,
+          body: {},
+        },
+    ),
+    ...saved.filter(
+      (mode) =>
+        mode.id !== 'default' && !standardReasoningIds.includes(mode.id),
+    ),
+  ];
+}
+
+export function mappingKind(body: UnknownRecord): string {
+  const keys = Object.keys(body);
+  if (!keys.length) return '';
+  if (keys.length !== 1) return 'custom';
+  if (typeof body.reasoning_effort === 'string') return 'effort';
+  const template = body.chat_template_kwargs;
+  if (template && typeof template === 'object' && !Array.isArray(template)) {
+    const kwargs = template as UnknownRecord;
+    if (Object.keys(kwargs).length === 1) {
+      if (typeof kwargs.enable_thinking === 'boolean') return 'template';
+      if (typeof kwargs.reasoning_effort === 'string') return 'template-effort';
+    }
+  }
+  if (typeof body.reasoning_budget === 'number') return 'reasoning_budget';
+  if (typeof body.thinking_budget === 'number') return 'thinking_budget';
+  return 'custom';
 }
 
 export function setReasoningOptions(

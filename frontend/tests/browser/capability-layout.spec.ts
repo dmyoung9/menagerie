@@ -54,7 +54,7 @@ for (const width of [1440, 576, 320]) {
       page.getByText('Available to clients', { exact: true }),
     ).toHaveCount(0);
     const options = panel.getByRole('region', {
-      name: 'Reasoning modes',
+      name: 'Reasoning options',
       exact: true,
     });
     await expect(options).toHaveCount(0);
@@ -71,13 +71,13 @@ for (const width of [1440, 576, 320]) {
     ).toHaveValue('false');
     await expect(
       options.getByRole('combobox', {
-        name: 'High thinking budget mode',
+        name: 'High control',
         exact: true,
       }),
-    ).toHaveValue('custom');
+    ).toHaveValue('thinking_budget');
     await expect(
       options.getByRole('button', {
-        name: 'Expose Low to clients',
+        name: 'Low',
         exact: true,
       }),
     ).toHaveAttribute('aria-pressed', 'false');
@@ -124,10 +124,10 @@ for (const width of [1440, 576, 320]) {
     ).toHaveValue('false');
     await expect(
       options.getByRole('combobox', {
-        name: 'High thinking budget mode',
+        name: 'High control',
         exact: true,
       }),
-    ).toHaveValue('custom');
+    ).toHaveValue('thinking_budget');
     expect(
       (
         await new AxeBuilder({ page })
@@ -166,16 +166,16 @@ test('turning reasoning off clears hidden mapping errors without deleting saved 
   const original = structuredClone(catalog.reasoning);
   await page.goto('/#/deployments/idle/configuration');
   const section = page.getByRole('region', {
-    name: 'Reasoning modes',
+    name: 'Reasoning options',
     exact: true,
   });
   for (const name of ['Instant', 'High']) {
     await section
-      .getByText(name + ' template arguments (JSON)', { exact: true })
-      .click();
+      .getByLabel(name + ' control', { exact: true })
+      .selectOption('custom');
     await section
       .getByRole('textbox', {
-        name: name + ' template arguments (JSON)',
+        name: name + ' custom settings',
         exact: true,
       })
       .fill('{invalid');
@@ -219,6 +219,6 @@ test('legacy boolean Reasoning enabled displays its options', async ({
       .getByRole('button', { name: 'Reasoning', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true');
   await expect(
-    page.getByRole('region', { name: 'Reasoning modes', exact: true }),
+    page.getByRole('region', { name: 'Reasoning options', exact: true }),
   ).toBeVisible();
 });

@@ -31,30 +31,50 @@
 .capabilities-panel > .output-capabilities:first-child {
   margin-top: 0;
 }
-.reasoning-mode-list {
+.reasoning-mappings {
   display: grid;
-  gap: 18px;
+  gap: 16px;
   margin: 18px 0;
 }
-.reasoning-mode {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 16px;
+.mapping-row {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  font-size: 12px;
 }
-.reasoning-mode-actions {
+.mapping-label {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 16px;
+  padding-top: 6px;
 }
-.reasoning-control-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
-  gap: 16px;
-}
-.reasoning-mode pre {
-  white-space: pre-wrap;
+.mapping-label > span {
   overflow-wrap: anywhere;
+}
+.mapping-row > fieldset {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.mapping-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.mapping-controls > [data-slot='field'] {
+  margin-bottom: 0;
+}
+.mapping-controls > [data-slot='field']:has(textarea),
+.mapping-controls > small {
+  grid-column: 1 / -1;
+}
+@media (max-width: 575px) {
+  .mapping-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .capability-evidence {
   margin-top: 18px;
