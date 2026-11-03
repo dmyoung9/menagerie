@@ -74,8 +74,8 @@ FIELDS = {
     },
     "flash-attn": {
         "type": "enum",
-        "choices": ["on", "off", "auto"],
-        "default": "on",
+        "choices": ["auto", "on", "off"],
+        "default": "auto",
         "label": "Flash attention",
     },
     "temp": {

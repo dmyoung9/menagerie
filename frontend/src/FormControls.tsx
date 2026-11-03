@@ -1,4 +1,10 @@
-import { FieldGroup, FieldSet, FieldLegend } from '@/components/ui/field';
+import {
+  FieldGroup,
+  FieldSet,
+  FieldLegend,
+  Field as FieldRow,
+  FieldLabel,
+} from '@/components/ui/field';
 import {
   NativeSelect,
   NativeSelectOption,
@@ -7,8 +13,9 @@ import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Field } from './ui';
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { SettingsSection } from '@/components/settings-section';
 import { memory } from '@/lib/formatters';
 import { NumberControl } from './NumberControl';
@@ -196,6 +203,7 @@ export function RuntimeSettings({
   after?: ReactNode;
   disabled?: boolean;
 }) {
+  const radioId = useId();
   const update = (key: string, v: JsonValue | undefined) => {
     const next = { ...value };
     if (v === undefined) delete next[key];
@@ -494,24 +502,42 @@ export function RuntimeSettings({
     }
     if (key === 'flash-attn')
       return (
-        <Choices
-          key={key}
-          label={label}
-          value={typeof current === 'string' ? current : ''}
-          options={[
-            { value: '', label: 'Default' },
-            ...(f.choices || []).map((v: string) => ({
-              value: v,
-              label: v === 'auto' ? 'Auto' : v === 'on' ? 'On' : 'Off',
-              disabled:
-                v === 'off' &&
-                (value['cache-type-v'] ??
-                  schema['cache-type-v']?.default ??
-                  'f16') !== 'f16',
-            })),
-          ]}
-          change={(v) => update(key, v || undefined)}
-        />
+        <FieldSet key={key}>
+          <FieldLegend variant="label">{label}</FieldLegend>
+          <RadioGroup
+            aria-label={label}
+            value={typeof current === 'string' ? current : 'auto'}
+            disabled={disabled}
+            onValueChange={(v) => {
+              if (typeof v === 'string') update(key, v);
+            }}
+            className="flex flex-wrap gap-6"
+          >
+            {(['auto', 'on', 'off'] as const).map((option) => (
+              <FieldRow
+                key={option}
+                orientation="horizontal"
+                className="w-auto"
+              >
+                <RadioGroupItem
+                  value={option}
+                  id={`${radioId}-${option}`}
+                  nativeButton
+                  render={<button type="button" />}
+                  disabled={
+                    option === 'off' &&
+                    (value['cache-type-v'] ??
+                      schema['cache-type-v']?.default ??
+                      'f16') !== 'f16'
+                  }
+                />
+                <FieldLabel htmlFor={`${radioId}-${option}`}>
+                  {option === 'auto' ? 'Auto' : option === 'on' ? 'On' : 'Off'}
+                </FieldLabel>
+              </FieldRow>
+            ))}
+          </RadioGroup>
+        </FieldSet>
       );
     if (f.choices)
       return (

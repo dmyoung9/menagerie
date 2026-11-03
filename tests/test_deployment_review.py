@@ -68,6 +68,20 @@ HELP_DEFAULTS = """-t,    --threads N                      CPU threads (default:
 """
 
 
+def test_flash_attention_defaults_to_auto_without_changing_existing_profiles():
+    runtime = {
+        "engine": "llama.cpp",
+        "execution_kind": "native",
+        "capabilities": {"flags": ["flash-attn"]},
+    }
+    schema = adapters.option_schema(runtime)
+    assert schema["flash-attn"]["default"] == "auto"
+    assert schema["flash-attn"]["choices"] == ["auto", "on", "off"]
+    profile = {"config": {"flash-attn": "on"}, "raw_args": []}
+    assert adapters.validate_profile(profile, {"format": "unknown"}, runtime) == []
+    assert profile["config"]["flash-attn"] == "on"
+
+
 def test_executable_defaults_are_scoped_wrapped_and_backend_specific():
     flags = [
         "threads",
