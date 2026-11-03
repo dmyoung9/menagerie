@@ -146,17 +146,3 @@ export function parseMapping(text: string): JsonObject {
   }
   return body;
 }
-
-export function mappingSummary(body: JsonObject): string {
-  const kind = mappingKind(body);
-  const kwargs = templateArgs(body);
-  if (kind === 'effort')
-    return `Effort · Request field · ${String(body.reasoning_effort)}`;
-  if (kind === 'template-effort')
-    return `Effort · Chat template · ${String(kwargs.reasoning_effort)}`;
-  if (kind === 'template')
-    return `Thinking · ${kwargs.enable_thinking ? 'On' : 'Off'} · Chat template`;
-  if (kind === 'reasoning_budget' || kind === 'thinking_budget')
-    return `Token budget · ${String(body[kind])} · ${kind}`;
-  return kind ? 'Custom request settings' : 'Not configured';
-}

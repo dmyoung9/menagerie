@@ -39,7 +39,7 @@ also depend on advertised engine flags: select its supported speculative type
 set draft-token limits. Blank new controls retain engine defaults. Engine flag
 availability does not establish model compatibility or inference acceptance.
 Layer and MoE-expert CPU offload live with memory placement; the default reasoning
-budget lives with generation settings. The separate Variants table opens a Drawer
+budget lives with generation settings. The separate Variants list opens a Drawer
 for editing each variant. Variants can have custom names,
 effort values, budgets and template controls; choose the deployment default
 separately from client exposure. See [reasoning modes](model-capabilities.md#configure-deployment-owned-reasoning-modes).

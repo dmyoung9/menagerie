@@ -66,12 +66,15 @@ for (const width of [1440, 576, 320]) {
       .getByRole('button', { name: 'Reasoning', exact: true });
     await reasoning.click();
     await expect(options).toBeVisible();
-    await expect(options.locator('[data-variant="instant"]')).toContainText(
-      'Thinking · Off · Chat template',
-    );
-    await expect(options.locator('[data-variant="high"]')).toContainText(
-      'Token budget · 4096 · thinking_budget',
-    );
+    await expect(
+      options.getByRole('switch', {
+        name: 'Enable Instant variant',
+        exact: true,
+      }),
+    ).toBeChecked();
+    await expect(
+      options.getByRole('switch', { name: 'Enable High variant', exact: true }),
+    ).toBeChecked();
     await expect(
       options.getByRole('switch', {
         name: 'Enable Low variant',
@@ -116,12 +119,15 @@ for (const width of [1440, 576, 320]) {
     ).toEqual([]);
     await reasoning.click();
     await expect(options).toBeVisible();
-    await expect(options.locator('[data-variant="instant"]')).toContainText(
-      'Thinking · Off · Chat template',
-    );
-    await expect(options.locator('[data-variant="high"]')).toContainText(
-      'Token budget · 4096 · thinking_budget',
-    );
+    await expect(
+      options.getByRole('switch', {
+        name: 'Enable Instant variant',
+        exact: true,
+      }),
+    ).toBeChecked();
+    await expect(
+      options.getByRole('switch', { name: 'Enable High variant', exact: true }),
+    ).toBeChecked();
     expect(
       (
         await new AxeBuilder({ page })

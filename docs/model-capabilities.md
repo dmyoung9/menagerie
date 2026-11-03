@@ -83,9 +83,10 @@ support. Existing configurations are not reset or automatically enabled.
 
 Click a variant's name or choose **Edit** from its actions menu to open the editor
 Drawer. **Add variant** uses the same form and asks only for a name; Menagerie
-generates a unique, stable client ID. Renaming does not change that ID. Drag a
-row's handle to reorder, or use **Move up / Move down** in its menu (keyboard:
-Alt+Up/Down on the handle). The saved order is used for advertised variants;
+generates a unique, stable client ID. Renaming does not change that ID. Each compact
+row keeps its enablement switch and overflow menu together. Use **Move up / Move down**
+in the menu to reorder variants, with the same actions available by keyboard.
+The saved order is used for advertised variants;
 clients may apply their own display order. Remove custom variants through their
 actions menu.
 
@@ -137,7 +138,7 @@ require a new chat. Returning to Model default does not erase past tags.
 
 ## Client exposure
 
-Only enabled variants in the **Variants** table are emitted as catalog variants in `/v1/models`,
+Only enabled variants in the **Variants** list are emitted as catalog variants in `/v1/models`,
 the OpenCode configuration export, and the existing OpenCode discovery plugin.
 Their gateway selectors survive the plugin's SDK validation. Clients may display
 the stable ID rather than the editable name. The metadata

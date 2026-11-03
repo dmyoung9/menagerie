@@ -3,7 +3,6 @@ import { test } from 'node:test';
 import {
   changeControl,
   controlFor,
-  mappingSummary,
   parseMapping,
 } from '../src/variant-mapping.ts';
 import { canNavigate, setNavigationGuard } from '../src/navigation.ts';
@@ -24,17 +23,17 @@ test('guided edits preserve additional request and chat template settings', () =
   assert.deepEqual(original.reasoning_effort, 'high');
 });
 
-test('simple mappings and summaries distinguish destinations without inventing budget semantics', () => {
+test('simple mappings recognize guided controls for both effort destinations and budget keys', () => {
   assert.equal(controlFor({ thinking_budget: -1 }), 'budget');
   assert.equal(
     controlFor({ chat_template_kwargs: { reasoning_effort: 'max' } }),
     'effort',
   );
-  assert.match(mappingSummary({ thinking_budget: -1 }), /thinking_budget/);
-  assert.match(mappingSummary({ reasoning_effort: 'low' }), /Request field/);
-  assert.match(
-    mappingSummary({ chat_template_kwargs: { reasoning_effort: 'max' } }),
-    /Chat template/,
+  assert.equal(controlFor({ reasoning_budget: 8192 }), 'budget');
+  assert.equal(controlFor({ reasoning_effort: 'low' }), 'effort');
+  assert.equal(
+    controlFor({ chat_template_kwargs: { enable_thinking: false } }),
+    'thinking',
   );
 });
 

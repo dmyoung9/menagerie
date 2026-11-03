@@ -100,10 +100,11 @@ without improving its existing time-series behavior.
 
 ## Verification
 
-The Variants editor composes the shadcn Table with TanStack Table v8, without
-sorting or pagination because its manual order is saved and advertised to clients.
-Stable column components retain switch/handle focus across updates. A Base UI
-Drawer opens on the right on desktop and from the bottom on narrow viewports;
+The Variants editor composes shadcn Item rows in an ItemGroup. Each row has its
+name in ItemContent and the enablement Switch and overflow menu in ItemActions.
+Configuration summaries and drag handles are deliberately omitted; editing and
+Move up/down live in the menu. Keyed rows preserve control focus across updates.
+A Base UI Drawer opens on the right on desktop and from the bottom on narrow viewports;
 the owned wrapper is scoped to those directions. Apply updates the parent draft,
 not the server. Nested navigation guards protect both unapplied Drawer edits and
 the builder draft. New drafts seed common reasoning defaults; existing catalogs
