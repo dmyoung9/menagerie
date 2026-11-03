@@ -52,57 +52,109 @@ test('selecting legacy blank Instant as default persists its configured thinking
   expect(saved.reasoning?.default_mode).toBe('instant');
 });
 
-test('long Item names wrap without displacing their actions on narrow screens', async ({
-  page,
-  fixture,
-}, testInfo) => {
-  await page.setViewportSize({ width: 320, height: 1000 });
-  const name =
-    'Research variant with a deliberately long name and no per-row configuration label';
-  fixture.registry.deployments.find(
-    (deployment) => deployment.id === 'idle',
-  )!.profile_snapshot!.catalog = {
-    model: { capabilities: { reasoning: true } },
-    reasoning: {
-      presets: [
-        {
-          id: 'research',
-          name,
-          enabled: true,
-          body: { reasoning_effort: 'high' },
-        },
-      ],
-    },
-  };
-  await page.goto('/#/deployments/idle/configuration');
-  const section = page.getByRole('region', { name: 'Variants', exact: true });
-  const item = section.getByRole('listitem').first();
-  const actions = item.locator('[data-slot="item-actions"]');
-  await item.scrollIntoViewIfNeeded();
-  await expect(actions.getByRole('switch')).toBeVisible();
-  await expect(actions.getByRole('button')).toBeVisible();
-  const box = await item.boundingBox();
-  expect(box!.x).toBeGreaterThanOrEqual(0);
-  expect(box!.x + box!.width).toBeLessThanOrEqual(320);
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await page.screenshot({
-    path: testInfo.outputPath('variant-items-long-name.png'),
+for (const width of [1440, 320]) {
+  test(`Custom badges align to the name cell edge without displacing names or actions at ${width}px`, async ({
+    page,
+    fixture,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const name =
+      'Research variant with a deliberately long name and no per-row configuration label';
+    fixture.registry.deployments.find(
+      (deployment) => deployment.id === 'idle',
+    )!.profile_snapshot!.catalog = {
+      model: { capabilities: { reasoning: true } },
+      reasoning: {
+        presets: [
+          {
+            id: 'research',
+            name,
+            enabled: true,
+            body: { reasoning_effort: 'high' },
+          },
+          {
+            id: 'notes',
+            name: 'Notes',
+            enabled: false,
+            body: { reasoning_effort: 'low' },
+          },
+          { id: 'ultra', enabled: false, body: { reasoning_effort: 'ultra' } },
+          { id: 'default', enabled: true, body: {} },
+          {
+            id: 'low',
+            name: 'Renamed built-in',
+            enabled: true,
+            body: { reasoning_budget: 1024 },
+          },
+        ],
+      },
+    };
+    await page.goto('/#/deployments/idle/configuration');
+    const section = page.getByRole('region', { name: 'Variants', exact: true });
+    const item = section.getByRole('listitem').first();
+    const actions = item.locator('[data-slot="item-actions"]');
+    await item.scrollIntoViewIfNeeded();
+    await expect(actions.getByRole('switch')).toBeVisible();
+    await expect(actions.getByRole('button')).toBeVisible();
+    const box = await item.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    await expect(section.locator('[data-slot="badge"]')).toHaveCount(3);
+    const rightEdges: number[] = [];
+    for (const id of ['research', 'notes', 'ultra']) {
+      const row = section.locator(`[data-variant="${id}"]`);
+      const content = row.locator('[data-slot="item-content"]');
+      const badge = content.getByText('Custom', { exact: true });
+      await expect(badge).toBeVisible();
+      await expect(badge).toHaveAttribute('data-variant', 'secondary');
+      await expect(
+        row.locator('[data-slot="item-actions"] [data-slot="badge"]'),
+      ).toHaveCount(0);
+      const badgeBox = (await badge.boundingBox())!;
+      const contentBox = (await content.boundingBox())!;
+      const nameBox = (await content.getByRole('button').boundingBox())!;
+      const actionsBox = (await row
+        .locator('[data-slot="item-actions"]')
+        .boundingBox())!;
+      const right = badgeBox.x + badgeBox.width;
+      expect(Math.abs(right - contentBox.x - contentBox.width)).toBeLessThan(1);
+      expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(badgeBox.x);
+      expect(right).toBeLessThan(actionsBox.x);
+      rightEdges.push(right);
+    }
+    expect(Math.max(...rightEdges) - Math.min(...rightEdges)).toBeLessThan(1);
+    for (const id of [
+      'default',
+      'instant',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+      await expect(
+        section.locator(`[data-variant="${id}"] [data-slot="badge"]`),
+      ).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath('variant-items-long-name.png'),
+    });
+    await item.getByRole('button', { name, exact: true }).click();
+    const drawer = page.getByRole('dialog', {
+      name: `Edit ${name}`,
+      exact: true,
+    });
+    await expect(
+      drawer.getByLabel('Variant name', { exact: true }),
+    ).toHaveValue(name);
+    await drawer.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(item.getByRole('button', { name, exact: true })).toBeFocused();
   });
-  await item.getByRole('button', { name, exact: true }).click();
-  const drawer = page.getByRole('dialog', {
-    name: `Edit ${name}`,
-    exact: true,
-  });
-  await expect(drawer.getByLabel('Variant name', { exact: true })).toHaveValue(
-    name,
-  );
-  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(item.getByRole('button', { name, exact: true })).toBeFocused();
-});
+}
 
 test('new deployment members get common defaults and a nested Drawer without submitting the builder', async ({
   page,

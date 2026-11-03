@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import {
@@ -128,11 +129,11 @@ export function Variants({
             data-variant={mode.id}
           >
             <ItemContent className="min-w-0">
-              <ItemTitle className="max-w-full line-clamp-none">
+              <ItemTitle className="w-full min-w-0 line-clamp-none">
                 <Button
                   type="button"
                   variant="ghost"
-                  className="variant-name"
+                  className="variant-name shrink"
                   ref={(node) => {
                     names.current[mode.id] = node;
                   }}
@@ -140,6 +141,12 @@ export function Variants({
                 >
                   {modeLabel(mode)}
                 </Button>
+                {!standardReasoningIds.includes(mode.id) &&
+                  mode.id !== 'default' && (
+                    <Badge variant="secondary" className="ml-auto">
+                      Custom
+                    </Badge>
+                  )}
               </ItemTitle>
             </ItemContent>
             <ItemActions className="shrink-0">
