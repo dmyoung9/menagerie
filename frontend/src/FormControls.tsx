@@ -12,6 +12,7 @@ import type { ReactNode } from 'react';
 import { SettingsSection } from '@/components/settings-section';
 import { memory } from '@/lib/formatters';
 import { NumberControl } from './NumberControl';
+import { DraftTokenRange } from './DraftTokenRange';
 import type {
   DeploymentDraft,
   GpuSnapshot,
@@ -201,6 +202,12 @@ export function RuntimeSettings({
     else next[key] = v;
     change(next);
   };
+  const draftKeys: [string, string] | undefined =
+    schema['spec-draft-n-min'] && schema['spec-draft-n-max']
+      ? ['spec-draft-n-min', 'spec-draft-n-max']
+      : schema['draft-min'] && schema['draft-max']
+        ? ['draft-min', 'draft-max']
+        : undefined;
   const groups: [string, string, string[]][] = [
     ['multimodal', 'Multimodal', ['mmproj']],
     [
@@ -625,11 +632,21 @@ export function RuntimeSettings({
           const fields = (
             <>
               {before}
+              {name === 'mtp' && draftKeys && (
+                <DraftTokenRange
+                  schema={schema}
+                  value={value}
+                  keys={draftKeys}
+                  disabled={disabled}
+                  change={change}
+                />
+              )}
               <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
                 {keys
                   .filter(
                     (k) =>
                       schema[k] &&
+                      !(name === 'mtp' && draftKeys?.includes(k)) &&
                       !(
                         name === 'mtp' &&
                         [

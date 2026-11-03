@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
+import AxeBuilder from '@axe-core/playwright';
 
 test('projectors and MTP heads use matching inventory and None clears both draft aliases', async ({
   page,
@@ -226,3 +227,160 @@ test('numeric engine defaults are real values, editable by sliders, and stay imp
   for (const key of ['threads-batch', 'batch-size', 'ubatch-size', 'top-p'])
     expect(saved).not.toHaveProperty(key);
 });
+
+for (const width of [1440, 576, 320]) {
+  test(`draft-token bounds share one accessible range slider at ${width}px`, async ({
+    page,
+    fixture,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const legacy = width === 576;
+    const keys = legacy
+      ? ['draft-min', 'draft-max']
+      : ['spec-draft-n-min', 'spec-draft-n-max'];
+    Object.assign(fixture.registry.models[0], {
+      metadata: {
+        'example.block_count': 32,
+        'example.nextn_predict_layers': 1,
+      },
+    });
+    Object.assign(fixture.registry.runtimes[0].capabilities!.schema!, {
+      'spec-type': { type: 'string' },
+      [keys[0]]: {
+        type: 'integer',
+        min: 0,
+        max: 1048576,
+        engine_default: 0,
+        label: 'Minimum draft tokens',
+      },
+      [keys[1]]: {
+        type: 'integer',
+        min: 1,
+        max: 1048576,
+        engine_default: 3,
+        label: 'Maximum draft tokens',
+      },
+      'top-p': {
+        type: 'number',
+        min: 0,
+        max: 1,
+        engine_default: 0.95,
+        label: 'Top-p',
+      },
+      'min-p': {
+        type: 'number',
+        min: 0,
+        max: 1,
+        engine_default: 0.05,
+        label: 'Min-p',
+      },
+    });
+    await page.goto('/#/deployments/idle/configuration');
+    const range = page.getByRole('group', {
+      name: 'Draft tokens',
+      exact: true,
+    });
+    const minimum = range.getByRole('slider', {
+      name: 'Minimum draft tokens range',
+      exact: true,
+    });
+    const maximum = range.getByRole('slider', {
+      name: 'Maximum draft tokens range',
+      exact: true,
+    });
+    const minInput = range.getByRole('spinbutton', {
+      name: 'Minimum draft tokens',
+      exact: true,
+    });
+    const maxInput = range.getByRole('spinbutton', {
+      name: 'Maximum draft tokens',
+      exact: true,
+    });
+    await expect(range.locator('[data-slot="slider"]')).toHaveCount(1);
+    await expect(minimum).toBeDisabled();
+    await expect(maximum).toBeDisabled();
+    await expect(minInput).toHaveValue('0');
+    await expect(maxInput).toHaveValue('3');
+    await expect(
+      page.getByRole('button', { name: 'Discard', exact: true }),
+    ).toBeDisabled();
+    await page
+      .getByRole('combobox', { name: 'MTP head', exact: true })
+      .selectOption('embedded');
+    await minimum.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(minInput).toHaveValue('1');
+    await expect(maxInput).toHaveValue('3');
+    await maximum.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(maxInput).toHaveValue('4');
+    await minInput.fill('2');
+    await expect(minimum).toHaveAttribute('aria-valuenow', '2');
+    await maximum.focus();
+    await page.keyboard.press('Home');
+    await expect(maxInput).toHaveValue('2');
+    await maxInput.fill('5');
+    await minimum.focus();
+    await page.keyboard.press('End');
+    await expect(minInput).toHaveValue('5');
+    await minInput.fill('6');
+    await expect(range.getByRole('alert')).toBeVisible();
+    await expect(minInput).toBeVisible();
+    await expect(maxInput).toBeVisible();
+    const writesBefore = fixture.writes.filter(
+      (w) => w.path === '/api/deployments?expected=1',
+    ).length;
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    expect(
+      fixture.writes.filter((w) => w.path === '/api/deployments?expected=1'),
+    ).toHaveLength(writesBefore);
+    await minInput.fill('1');
+    await maxInput.fill('8');
+    await expect(minimum).toHaveAttribute('aria-valuenow', '1');
+    await expect(maximum).toHaveAttribute('aria-valuenow', '8');
+    await range.scrollIntoViewIfNeeded();
+    await expect(range.locator('[data-slot="slider-range"]')).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath(`draft-range-${width}.png`),
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    expect(
+      (
+        await new AxeBuilder({ page })
+          .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+          .analyze()
+      ).violations,
+    ).toEqual([]);
+    await expect(
+      page.getByRole('slider', { name: 'Top-p range', exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      page.getByRole('slider', { name: 'Min-p range', exact: true }),
+    ).toHaveCount(1);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect
+      .poll(
+        () =>
+          fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
+      )
+      .toBe(2);
+    const saved = deploymentDraft(
+      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+        .body,
+    ).configuration!.config;
+    expect(saved).toMatchObject({ [keys[0]]: 1, [keys[1]]: 8 });
+    await page
+      .getByRole('combobox', { name: 'MTP head', exact: true })
+      .selectOption('');
+    await expect(minimum).toBeDisabled();
+    await expect(maximum).toBeDisabled();
+    await page.getByRole('button', { name: 'Discard', exact: true }).click();
+    await expect(minInput).toHaveValue('1');
+    await expect(maxInput).toHaveValue('8');
+    await expect(minimum).toBeEnabled();
+  });
+}
