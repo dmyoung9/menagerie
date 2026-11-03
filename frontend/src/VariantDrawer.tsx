@@ -42,7 +42,6 @@ import {
 import type { JsonObject, ReasoningPreset } from './types';
 
 const descriptions: Record<Control, string> = {
-  none: 'No request fields are overridden. Add a control or a prompt prefix to make this variant available.',
   effort:
     'Send a named effort value through the request body or the model’s chat template. Your runtime must support the selected field and value.',
   budget:
@@ -81,6 +80,7 @@ export function VariantDrawer({
     JSON.stringify(mode) !== JSON.stringify(initial) ||
     text !== JSON.stringify(initial.body, null, 2);
   const navigationGuard = useUnsavedChanges(dirty);
+  const unconfigured = !configuredMode(mode) && mode.id !== 'default';
   const kwargs = templateArgs(mode.body);
   const templateEffort =
     !('reasoning_effort' in mode.body) &&
@@ -131,7 +131,7 @@ export function VariantDrawer({
           onSubmit={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (error || !modeLabel(mode).trim()) return;
+            if (error || unconfigured || !modeLabel(mode).trim()) return;
             try {
               parseMapping(text);
             } catch (err) {
@@ -177,7 +177,6 @@ export function VariantDrawer({
               >
                 {(
                   [
-                    ['none', 'Not configured'],
                     ['effort', 'Effort'],
                     ['budget', 'Token budget'],
                     ['thinking', 'Thinking toggle'],
@@ -368,9 +367,9 @@ export function VariantDrawer({
                 />
               </Field>
             </details>
-            {error && (
+            {(error || unconfigured) && (
               <p role="alert" id={errorId} className="error-text">
-                {error}
+                {error || 'Add request settings or a prompt prefix.'}
               </p>
             )}
           </FieldGroup>
@@ -382,6 +381,7 @@ export function VariantDrawer({
               type="submit"
               disabled={
                 !!error ||
+                unconfigured ||
                 !(mode.name ?? (adding ? '' : modeLabel(mode))).trim()
               }
             >

@@ -109,6 +109,9 @@ the owned wrapper is scoped to those directions. Apply updates the parent draft,
 not the server. Nested navigation guards protect both unapplied Drawer edits and
 the builder draft. New drafts seed common reasoning defaults; existing catalogs
 are never reset by merely viewing or saving unrelated settings.
+Variants remain visible and editable independently of the Reasoning capability.
+Their client exposure/defaults and gateway transformations are independent too;
+the declaration is metadata, not a gate on saved variants.
 
 ```sh
 cd frontend

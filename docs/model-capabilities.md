@@ -64,22 +64,25 @@ than silently shadowing the selection.
 
 ## Configure deployment-owned reasoning modes
 
-Under **Modalities & capabilities**, enable the Reasoning declaration to show
-the separate **Variants** card. This declares support and enables your configured levels; it
-does not force the model to think or stop thinking. Turning it off hides and
-deactivates the modes without deleting them. Input/output modalities remain separate.
+The **Reasoning** declaration under **Modalities & capabilities** describes model
+support; it does not force thinking on or off. The separate **Variants** card is
+always available. Its settings, exposure and default selection work independently
+of that declaration, including when Reasoning is disabled.
 
 Use each row's **Enabled** switch to select variants exposed to clients. Common
-choices are **Instant, Low, Medium, High, XHigh, Max and Ultra**. A variant stays
-unavailable until its request control is configured; merely opening the editor
+choices, in default order, are **Instant, Low, Medium, High, XHigh and Max**.
+Merely opening the editor
 does not save presets or change model behavior. Existing saved presets retain
 their IDs, order, settings and exposure choices, including custom settings on a
 mode named Default.
 
 New configurations start with Low, Medium and High enabled using request-field
-effort. XHigh, Max and Ultra use their matching effort values but start disabled;
-Instant starts disabled and unconfigured. These defaults do not certify runtime
-support. Existing configurations are not reset or automatically enabled.
+effort. XHigh and Max use their matching effort values but start disabled.
+Instant starts disabled with `chat_template_kwargs.enable_thinking: false`.
+These defaults do not certify runtime support. Existing configurations are not
+reset or automatically enabled, and a saved Ultra variant remains a custom entry.
+Previously blank common entries receive the sensible default in the editor,
+without rewriting stored settings until a variant change is applied.
 
 Click a variant's name or choose **Edit** from its actions menu to open the editor
 Drawer. **Add variant** uses the same form and asks only for a name; Menagerie
@@ -108,6 +111,9 @@ additional override layer. A prompt prefix can also be used on its own. Invalid
 JSON blocks applying changes; Cancel, Escape and outside dismissal protect
 unapplied edits. **Apply changes** updates the builder draft; use the builder's
 **Save** action to persist it.
+New custom variants start with request-field effort `medium`. A variant cannot
+be added or cleared to an empty request object without a nonblank prompt prefix;
+legacy empty Default entries remain supported for client compatibility.
 
 Do not assume these fields are interchangeable or supported by every engine.
 Request-field effort and chat-template effort may be different bindings. The two
@@ -116,8 +122,7 @@ between reasoning and thinking. Budgets are separate
 from the maximum output-token limit and from an engine's startup reasoning budget.
 Zero tokens, hidden reasoning output and a mode named "Off" do not necessarily
 disable thinking. Confirm the engine/template binding before exposing a level.
-Selecting **Not configured** removes that level's body mapping, not its saved
-prompt prefix; clear both to remove all effects. Nothing is executed to discover levels.
+Nothing is executed to discover levels.
 
 ### Defaults and request precedence
 

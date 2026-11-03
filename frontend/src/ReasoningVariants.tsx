@@ -12,7 +12,6 @@ import {
   ItemGroup,
   ItemContent,
   ItemTitle,
-  ItemDescription,
   ItemActions,
 } from '@/components/ui/item';
 import { SettingsSection } from '@/components/settings-section';
@@ -25,7 +24,6 @@ import {
   reasoningOptions,
   setReasoningOptions,
   standardReasoningIds,
-  supportsReasoning,
 } from './capabilityOptions';
 import { VariantDrawer } from './VariantDrawer';
 import type { ModelCatalog, ReasoningPreset } from './types';
@@ -71,7 +69,6 @@ export function Variants({
       `${modeLabel(mode)} moved to position ${to + 1} of ${next.length}.`,
     );
   }
-  if (!supportsReasoning(catalog)) return null;
   return (
     <SettingsSection
       name="variants"
@@ -85,15 +82,11 @@ export function Variants({
         >
           <NativeSelect
             value={catalog.reasoning?.default_mode || ''}
-            onChange={(e) =>
-              change({
-                ...catalog,
-                reasoning: {
-                  ...catalog.reasoning,
-                  default_mode: e.target.value || null,
-                },
-              })
-            }
+            onChange={(e) => {
+              const next = setReasoningOptions(catalog, levels);
+              next.reasoning.default_mode = e.target.value || null;
+              change(next);
+            }}
           >
             <NativeSelectOption value="">
               Model default (no overrides)
@@ -112,7 +105,12 @@ export function Variants({
           onClick={(e) => {
             returnFocus.current = e.currentTarget;
             setAdding(true);
-            setEditing({ id: '', name: '', enabled: false, body: {} });
+            setEditing({
+              id: '',
+              name: '',
+              enabled: false,
+              body: { reasoning_effort: 'medium' },
+            });
           }}
         >
           <Plus data-icon="inline-start" />
@@ -143,9 +141,6 @@ export function Variants({
                   {modeLabel(mode)}
                 </Button>
               </ItemTitle>
-              {!configuredMode(mode) && mode.id !== 'default' && (
-                <ItemDescription>Configure to enable</ItemDescription>
-              )}
             </ItemContent>
             <ItemActions className="shrink-0">
               <Switch

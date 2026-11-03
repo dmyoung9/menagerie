@@ -87,7 +87,7 @@ test('explicit reasoning variants and multimodal declarations survive SDK discov
   assert.equal(model.compatibility?.reasoningField, 'reasoning_content');
 });
 
-test('selected reasoning bodies reach the SDK wire request and Default clears the override', async () => {
+test('variants reach SDK wire requests with Reasoning off and Default clears the override', async () => {
   const row = payload().data[0];
   const variants = [
     { id: 'default', body: {} },
@@ -109,7 +109,14 @@ test('selected reasoning bodies reach the SDK wire request and Default clears th
         menagerie: {
           catalog: {
             ...row.menagerie.catalog,
-            model: { ...row.menagerie.catalog.model, variants },
+            model: {
+              ...row.menagerie.catalog.model,
+              capabilities: {
+                ...row.menagerie.catalog.model.capabilities,
+                reasoning: { supported: false },
+              },
+              variants,
+            },
           },
         },
       },

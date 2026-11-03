@@ -2,11 +2,10 @@ import type { JsonObject, JsonValue } from './types';
 import { jsonObject } from './contracts.ts';
 import { mappingKind, standardReasoningIds } from './capabilityOptions.ts';
 
-export type Control = 'none' | 'effort' | 'budget' | 'thinking' | 'custom';
+export type Control = 'effort' | 'budget' | 'thinking' | 'custom';
 
 export function controlFor(body: JsonObject): Control {
   const kind = mappingKind(body);
-  if (!kind) return 'none';
   if (kind === 'effort' || kind === 'template-effort') return 'effort';
   if (kind === 'template') return 'thinking';
   if (kind === 'reasoning_budget' || kind === 'thinking_budget')
@@ -29,7 +28,6 @@ export function changeControl(
   id: string,
 ): JsonObject {
   if (to === 'custom') return body;
-  if (to === 'none') return {};
   const next = { ...body };
   const kwargs = { ...templateArgs(body) };
   if (from === 'effort') {

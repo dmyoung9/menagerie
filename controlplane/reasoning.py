@@ -156,10 +156,6 @@ def apply_reasoning(body, profile):
         raise ValueError("Invalid reasoning mode selector")
     if explicit and selected == MODEL_DEFAULT:
         return result
-    if reasoning_disabled(catalog):
-        if explicit:
-            raise ValueError("Unknown or unexposed reasoning option")
-        return result
     if not explicit:
         selected = catalog.get("reasoning", {}).get("default_mode")
         if selected is None:

@@ -526,11 +526,6 @@ export function Editor(props: EditorProps) {
           )
             .filter(
               (name) =>
-                name !== 'variants' ||
-                supportsReasoning(deployment.configuration?.catalog || {}),
-            )
-            .filter(
-              (name) =>
                 name !== 'performance' ||
                 [
                   'flash-attn',

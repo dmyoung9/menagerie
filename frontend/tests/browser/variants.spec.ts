@@ -4,6 +4,54 @@ import { deploymentDraft } from '../../src/contracts';
 import { defaultReasoningOptions } from '../../src/capabilityOptions';
 import type { ModelCatalog } from '../../src/types';
 
+test('selecting legacy blank Instant as default persists its configured thinking-off fallback', async ({
+  page,
+  fixture,
+}) => {
+  fixture.registry.deployments.find(
+    (d) => d.id === 'idle',
+  )!.profile_snapshot!.catalog = {
+    model: { capabilities: { reasoning: false } },
+    reasoning: { presets: [{ id: 'instant', enabled: false, body: {} }] },
+  };
+  await page.goto('/#/deployments/idle/configuration');
+  const section = page.getByRole('region', { name: 'Variants', exact: true });
+  await expect(
+    section.getByRole('switch', {
+      name: 'Enable Instant variant',
+      exact: true,
+    }),
+  ).toBeEnabled();
+  await section.getByRole('button', { name: 'Instant', exact: true }).click();
+  const drawer = page.getByRole('dialog', {
+    name: 'Edit Instant',
+    exact: true,
+  });
+  await expect(drawer.getByLabel('Thinking', { exact: true })).toHaveValue(
+    'false',
+  );
+  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await section
+    .getByLabel('Default variant', { exact: true })
+    .selectOption('instant');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect
+    .poll(
+      () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
+    )
+    .toBe(2);
+  const saved = deploymentDraft(
+    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
+  ).configuration!.catalog;
+  expect(
+    saved.reasoning?.presets?.find((mode) => mode.id === 'instant'),
+  ).toMatchObject({
+    enabled: false,
+    body: { chat_template_kwargs: { enable_thinking: false } },
+  });
+  expect(saved.reasoning?.default_mode).toBe('instant');
+});
+
 test('long Item names wrap without displacing their actions on narrow screens', async ({
   page,
   fixture,
@@ -68,16 +116,17 @@ test('new deployment members get common defaults and a nested Drawer without sub
     .getByRole('dialog')
     .getByRole('button', { name: 'Add model', exact: true })
     .click();
-  await page
-    .getByRole('group', { name: 'Capabilities', exact: true })
-    .getByRole('button', { name: 'Reasoning', exact: true })
-    .click();
+  await expect(
+    page
+      .getByRole('group', { name: 'Capabilities', exact: true })
+      .getByRole('button', { name: 'Reasoning', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'false');
   const section = page.getByRole('region', { name: 'Variants', exact: true });
   await expect(section.getByRole('switch', { checked: true })).toHaveCount(3);
   await expect(
     section.getByRole('switch', { name: 'Enable Instant variant' }),
-  ).toBeDisabled();
-  for (const name of ['XHigh', 'Max', 'Ultra']) {
+  ).toBeEnabled();
+  for (const name of ['XHigh', 'Max']) {
     await expect(
       section.getByRole('switch', {
         name: `Enable ${name} variant`,
@@ -191,8 +240,19 @@ for (const width of [1440, 576, 320]) {
     await expect(
       variants.getByText(/Effort ·|Token budget ·|Custom request settings/),
     ).toHaveCount(0);
-    await expect(variants.getByRole('listitem')).toHaveCount(7);
-    await expect(variants.getByRole('switch')).toHaveCount(7);
+    await expect(variants.getByRole('listitem')).toHaveCount(6);
+    await expect(variants.getByRole('switch')).toHaveCount(6);
+    await expect(variants.locator('.variant-name')).toHaveText([
+      'Instant',
+      'Low',
+      'Medium',
+      'High',
+      'XHigh',
+      'Max',
+    ]);
+    await expect(
+      variants.getByText('Configure to enable', { exact: true }),
+    ).toHaveCount(0);
     await expect(variants.getByRole('switch', { checked: true })).toHaveCount(
       3,
     );
@@ -206,7 +266,7 @@ for (const width of [1440, 576, 320]) {
         name: 'Enable Instant variant',
         exact: true,
       }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     await expect(
       variants.getByRole('switch', {
         name: 'Enable XHigh variant',
@@ -300,7 +360,7 @@ for (const width of [1440, 576, 320]) {
       .getByRole('button', { name: 'Research variant actions' })
       .click();
     await page.getByRole('menuitem', { name: 'Move up', exact: true }).click();
-    await expect(variants.getByRole('listitem').nth(6)).toHaveAttribute(
+    await expect(variants.getByRole('listitem').nth(5)).toHaveAttribute(
       'data-variant',
       'research',
     );
@@ -322,7 +382,7 @@ for (const width of [1440, 576, 320]) {
     expect(
       saved.reasoning?.presets?.find((mode) => mode.id === 'xhigh')?.body,
     ).toEqual({ reasoning_effort: 'xhigh' });
-    expect(saved.reasoning?.presets?.[6]).toEqual({
+    expect(saved.reasoning?.presets?.[5]).toEqual({
       id: 'research',
       name: 'Research',
       enabled: true,
@@ -335,7 +395,7 @@ for (const width of [1440, 576, 320]) {
       prompt_prefix: 'Think carefully.',
     });
     await page.reload();
-    await expect(variants.getByRole('listitem').nth(6)).toHaveAttribute(
+    await expect(variants.getByRole('listitem').nth(5)).toHaveAttribute(
       'data-variant',
       'research',
     );
@@ -508,6 +568,23 @@ test('invalid JSON stays local, cancellation guards drafts, and prompt-only vari
   await section.getByRole('button', { name: 'Add variant' }).click();
   const add = page.getByRole('dialog', { name: 'Add variant', exact: true });
   await add.getByLabel('Variant name', { exact: true }).fill('Research');
+  await expect(add.getByLabel('Effort value', { exact: true })).toHaveValue(
+    'medium',
+  );
+  await expect(
+    add.getByRole('button', { name: 'Not configured', exact: true }),
+  ).toHaveCount(0);
+  await add.getByRole('button', { name: 'Custom', exact: true }).click();
+  await add
+    .getByLabel('Request overrides', { exact: true })
+    .fill('{"chat_template_kwargs":{}}');
+  await expect(
+    add.getByRole('button', { name: 'Apply changes' }),
+  ).toBeDisabled();
+  await add.getByLabel('Request overrides', { exact: true }).fill('{}');
+  await expect(
+    add.getByRole('button', { name: 'Apply changes' }),
+  ).toBeDisabled();
   await add.getByText('Prompt prefix', { exact: true }).click();
   await add
     .getByLabel('Prefix text', { exact: true })
@@ -569,19 +646,19 @@ test('overflow menus support keyboard reordering and preserve disabled variants'
   await expect(instantMenu).toBeFocused();
   await expect(
     section.getByRole('switch', { name: 'Enable Instant variant' }),
-  ).toBeDisabled();
+  ).not.toBeChecked();
   await section
-    .getByRole('button', { name: 'Ultra variant actions', exact: true })
+    .getByRole('button', { name: 'Max variant actions', exact: true })
     .click();
   await expect(
     page.getByRole('menuitem', { name: 'Move down', exact: true }),
   ).toBeDisabled();
   await page.getByRole('menuitem', { name: 'Move up', exact: true }).click();
-  await expect(section.getByRole('listitem').nth(5)).toHaveAttribute(
+  await expect(section.getByRole('listitem').nth(4)).toHaveAttribute(
     'data-variant',
-    'ultra',
+    'max',
   );
   await expect(
-    section.getByRole('switch', { name: 'Enable Ultra variant' }),
+    section.getByRole('switch', { name: 'Enable Max variant' }),
   ).not.toBeChecked();
 });

@@ -50,7 +50,6 @@ export const standardReasoningIds = [
   'high',
   'xhigh',
   'max',
-  'ultra',
 ];
 
 /** Seed only new builder drafts; saved catalogs remain authoritative. */
@@ -58,12 +57,22 @@ export function defaultReasoningOptions(): ReasoningPreset[] {
   return standardReasoningIds.map((id): ReasoningPreset => ({
     id,
     enabled: ['low', 'medium', 'high'].includes(id),
-    body: id === 'instant' ? {} : { reasoning_effort: id },
+    body:
+      id === 'instant'
+        ? { chat_template_kwargs: { enable_thinking: false } }
+        : { reasoning_effort: id },
   }));
 }
 
 export const configuredMode = (mode: ReasoningPreset) =>
-  Object.keys(mode.body).length > 0 || !!mode.prompt_prefix;
+  Object.entries(mode.body).some(
+    ([key, value]) =>
+      key !== 'chat_template_kwargs' ||
+      (value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        Object.keys(value).length > 0),
+  ) || !!mode.prompt_prefix?.trim();
 
 export function supportsReasoning(catalog: ModelCatalog): boolean {
   const value = catalog.model?.capabilities?.reasoning;
@@ -90,9 +99,17 @@ export function newModeId(name: string, catalog: ModelCatalog): string {
 /** Standard placeholders are UI choices only, never saved/exposed automatically. */
 export function reasoningLevels(catalog: ModelCatalog): ReasoningPreset[] {
   const saved = reasoningOptions(catalog);
+  const defaults = defaultReasoningOptions();
   return [
-    ...saved,
-    ...defaultReasoningOptions()
+    // Fill legacy blank common choices in the editor only; never rewrite saved
+    // mappings on read or change a configured mapping, saved name or exposure.
+    ...saved.map((mode) => {
+      const fallback = defaults.find((row) => row.id === mode.id);
+      return fallback && !configuredMode(mode)
+        ? { ...mode, body: fallback.body }
+        : mode;
+    }),
+    ...defaults
       .filter((mode) => !saved.some((row) => row.id === mode.id))
       .slice(0, 64 - saved.length)
       .map((mode) => ({

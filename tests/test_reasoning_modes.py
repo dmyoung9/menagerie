@@ -168,9 +168,11 @@ def test_unexposed_mode_can_be_deployment_default_but_not_explicitly_selected():
     with pytest.raises(ValueError, match="unexposed"):
         apply_reasoning({"menagerie_variant": "instruct"}, profile)
     profile["catalog"]["model"] = {"capabilities": {"reasoning": {"supported": False}}}
-    assert apply_reasoning({"messages": []}, profile) == {"messages": []}
-    with pytest.raises(ValueError, match="unexposed"):
-        apply_reasoning({"menagerie_variant": "research"}, profile)
+    assert apply_reasoning({"messages": []}, profile)["thinking_budget"] == 2048
+    assert (
+        apply_reasoning({"menagerie_variant": "research"}, profile)["reasoning_effort"]
+        == "xhigh"
+    )
 
 
 @pytest.mark.parametrize(
@@ -275,12 +277,21 @@ def test_default_reference_duplicate_ids_and_mode_count_are_validated():
         normalize(profile)
 
 
+@pytest.mark.parametrize("supported", [True, False])
 async def test_gateway_applies_defaults_modes_and_prefixes_before_any_runtime_load(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, supported
 ):
     app = create_app(tmp_path)
     manager = app.state.manager
     profile = configured()
+    profile["catalog"]["model"] = {
+        "capabilities": {
+            "tools": False,
+            "input": ["text"],
+            "output": ["text"],
+            "reasoning": {"supported": supported},
+        }
+    }
     profile["catalog"]["reasoning"]["presets"][0]["prompt_prefix"] = "{REASON:research}"
     deployment = app.state.store.put(
         "deployment",
@@ -289,6 +300,7 @@ async def test_gateway_applies_defaults_modes_and_prefixes_before_any_runtime_lo
             "name": "Synthetic",
             "alias": "synthetic",
             "enabled": True,
+            "residency": "on-demand",
             "state": "STOPPED",
             "profile_snapshot": profile,
             "port": 8120,
@@ -316,6 +328,16 @@ async def test_gateway_applies_defaults_modes_and_prefixes_before_any_runtime_lo
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client:
+            models = (await client.get("/v1/models")).json()["data"]
+            catalog = models[0]["menagerie"]["catalog"]
+            assert catalog["model"]["capabilities"]["reasoning"] == {
+                "supported": supported
+            }
+            assert [mode["id"] for mode in catalog["model"]["variants"]] == [
+                "research",
+                "default",
+                "model-default",
+            ]
             for selector in ["missing", "instruct", None, []]:
                 response = await client.post(
                     "/v1/chat/completions",

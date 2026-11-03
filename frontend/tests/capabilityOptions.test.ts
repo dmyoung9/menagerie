@@ -16,10 +16,12 @@ test('existing empty catalogs offer disabled common choices without saving or ex
   assert.deepEqual(reasoningOptions({}), []);
   assert.deepEqual(
     reasoningLevels({}).map((mode) => mode.id),
-    ['instant', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    ['instant', 'low', 'medium', 'high', 'xhigh', 'max'],
   );
   assert(reasoningLevels({}).every((mode) => !mode.enabled));
-  assert.deepEqual(reasoningLevels({})[0].body, {});
+  assert.deepEqual(reasoningLevels({})[0].body, {
+    chat_template_kwargs: { enable_thinking: false },
+  });
   assert.deepEqual(reasoningLevels({})[4].body, { reasoning_effort: 'xhigh' });
 });
 
@@ -41,24 +43,55 @@ test('custom toggle choices come only from saved user levels, with no guessed se
   const levels = reasoningLevels(catalog);
   assert.deepEqual(
     levels.map((mode) => mode.id),
-    ['research', 'instant', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    ['research', 'instant', 'low', 'medium', 'high', 'xhigh', 'max'],
   );
-  assert.deepEqual(levels[1], catalog.reasoning!.presets![1]);
+  assert.deepEqual(levels[1], {
+    ...catalog.reasoning!.presets![1],
+    body: { chat_template_kwargs: { enable_thinking: false } },
+  });
   assert.deepEqual(levels[0], catalog.reasoning!.presets![0]);
   assert.deepEqual(catalog, before);
 });
 
-test('new drafts get independent common defaults without configuring Instant', () => {
+test('six ordered common defaults configure Instant off and expose only Low/Medium/High', () => {
   const modes = defaultReasoningOptions();
   assert.deepEqual(
     modes.filter((mode) => mode.enabled).map((mode) => mode.id),
     ['low', 'medium', 'high'],
   );
-  assert.deepEqual(modes[0], { id: 'instant', enabled: false, body: {} });
+  assert.deepEqual(
+    modes.map((mode) => mode.id),
+    ['instant', 'low', 'medium', 'high', 'xhigh', 'max'],
+  );
+  assert.deepEqual(modes[0], {
+    id: 'instant',
+    enabled: false,
+    body: { chat_template_kwargs: { enable_thinking: false } },
+  });
   for (const mode of modes.slice(1))
     assert.deepEqual(mode.body, { reasoning_effort: mode.id });
   modes[1].body.reasoning_effort = 'changed';
   assert.equal(defaultReasoningOptions()[1].body.reasoning_effort, 'low');
+});
+
+test('saved Ultra remains custom and blank common fallbacks never overwrite configured settings', () => {
+  const catalog: ModelCatalog = {
+    reasoning: {
+      presets: [
+        {
+          id: 'ultra',
+          name: 'Ultra',
+          enabled: true,
+          body: { reasoning_budget: 8192 },
+        },
+        { id: 'instant', enabled: true, body: { reasoning_effort: 'off' } },
+      ],
+    },
+  };
+  assert.deepEqual(
+    reasoningLevels(catalog).slice(0, 2),
+    catalog.reasoning!.presets,
+  );
 });
 
 test('generated IDs avoid common, reserved, saved and unrelated variant IDs', () => {
