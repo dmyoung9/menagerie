@@ -1,4 +1,4 @@
-import { Check, HardDrive } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { Fragment } from 'react';
 import { isRecord } from '@/ui';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -68,7 +68,7 @@ export function InstalledVariants({
               {key === 'quant' ? 'Quantization' : 'Size / quality suffix'}
             </FieldLegend>
             <ToggleGroup
-              variant="outline"
+              variant="primary"
               className="flex-wrap"
               aria-label={`Installed ${key}`}
               value={[choice[key]]}
@@ -93,9 +93,7 @@ export function InstalledVariants({
                       : `${v} not installed`
                   }
                 >
-                  {installed(v).length > 0 && <HardDrive aria-hidden="true" />}
                   {v === 'None' ? 'No suffix' : v}
-                  {choice[key] === v && <Check aria-hidden="true" />}
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>

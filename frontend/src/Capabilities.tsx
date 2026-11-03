@@ -6,15 +6,7 @@ import { NumberControl } from './NumberControl';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldSet, FieldLegend } from '@/components/ui/field';
 import { useId, useRef, useState, type ReactNode } from 'react';
-import {
-  AudioLines,
-  Brain,
-  Check,
-  Image,
-  Type,
-  Video,
-  Wrench,
-} from 'lucide-react';
+import { AudioLines, Brain, Image, Type, Video, Wrench } from 'lucide-react';
 import { Field } from './ui';
 import { jsonObject } from './contracts';
 import type {
@@ -237,7 +229,7 @@ export function Capabilities({
         <FieldLegend>Input modalities</FieldLegend>
         <ToggleGroup
           multiple
-          variant="outline"
+          variant="primary"
           className="flex-wrap"
           aria-label="Input modalities"
           value={caps.input}
@@ -264,7 +256,6 @@ export function Capabilities({
             >
               <Icon />
               {label}
-              {caps.input.includes(id) && <Check />}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
@@ -273,7 +264,7 @@ export function Capabilities({
         <FieldLegend>Output modalities</FieldLegend>
         <ToggleGroup
           multiple
-          variant="outline"
+          variant="primary"
           className="flex-wrap"
           aria-label="Output modalities"
           value={caps.output}
@@ -299,7 +290,6 @@ export function Capabilities({
             >
               <Icon />
               {reasoningLabel(id)}
-              {caps.output.includes(id) && <Check />}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
@@ -309,7 +299,7 @@ export function Capabilities({
       </div>
       <ToggleGroup
         multiple
-        variant="outline"
+        variant="primary"
         className="flex-wrap"
         aria-label="Capabilities"
         value={features.filter((f) => selected(f.id)).map((f) => f.id)}
@@ -331,7 +321,6 @@ export function Capabilities({
           <ToggleGroupItem key={id} value={id}>
             <Icon />
             {label}
-            {selected(id) && <Check />}
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
@@ -344,7 +333,7 @@ export function Capabilities({
           </div>
           <ToggleGroup
             multiple
-            variant="outline"
+            variant="primary"
             className="flex-wrap"
             aria-label="Reasoning options"
             value={options.filter((p) => p.enabled).map((p) => p.id)}
@@ -368,7 +357,6 @@ export function Capabilities({
                   title={p.source}
                 >
                   {reasoningLabel(p.id)}
-                  {p.enabled && <Check />}
                 </ToggleGroupItem>
               );
             })}
