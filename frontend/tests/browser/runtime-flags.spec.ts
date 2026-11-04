@@ -441,9 +441,15 @@ for (const width of [1440, 576, 320]) {
     expect(descriptionBox!.y).toBeGreaterThanOrEqual(
       inputBox!.y + inputBox!.height,
     );
-    await expect(rows.first()).toContainText(
-      '--top-p N · Engine default: 0.95, 1.0 = disabled',
-    );
+    const title = rows.first().locator(':scope > [data-slot="field-label"]');
+    await expect(title).toHaveText('Top-p sampling (--top-p N)');
+    await expect(title.locator('code')).toHaveText('(--top-p N)');
+    await expect(
+      rows.first().locator(':scope > [data-slot="field-description"]'),
+    ).toHaveText('default: 0.95, 1.0 = disabled');
+    await expect(
+      rows.first().locator(':scope > [data-slot="field-description"] code'),
+    ).toHaveCount(0);
     await expect(
       page.getByRole('button', { name: 'Discard', exact: true }),
     ).toBeDisabled();
@@ -466,6 +472,16 @@ for (const width of [1440, 576, 320]) {
     ).toHaveCount(0);
     await expect(drawer.getByRole('spinbutton')).toHaveCount(0);
     await expect(drawer.getByRole('slider')).toHaveCount(0);
+    const available = drawer.locator('[data-slot="item"]').first();
+    await expect(available.locator('[data-slot="item-title"]')).toHaveText(
+      'Penalize repeat sequence of tokens (--repeat-penalty N)',
+    );
+    await expect(available.locator('[data-slot="item-title"] code')).toHaveText(
+      '(--repeat-penalty N)',
+    );
+    await expect(
+      available.locator('[data-slot="item-description"]'),
+    ).toHaveText('default: 1.00, 1.0 = disabled');
     await expect(
       drawer.getByRole('button', { name: 'Add (0)', exact: true }),
     ).toBeDisabled();

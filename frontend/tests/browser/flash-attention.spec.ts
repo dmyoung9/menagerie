@@ -54,6 +54,15 @@ for (const width of [1440, 576, 320]) {
       'Performance flags',
     );
     const field = page.locator('[data-runtime-flag="flash-attn"]');
+    await expect(
+      field.locator(':scope > [data-slot="field-label"]'),
+    ).toHaveText('Flash attention (--flash-attn [on|off|auto])');
+    await expect(
+      field.locator(':scope > [data-slot="field-label"] code'),
+    ).toHaveText('(--flash-attn [on|off|auto])');
+    await expect(
+      field.locator(':scope > [data-slot="field-description"]'),
+    ).toHaveText('default: auto');
     expect(
       await field.evaluate((element) =>
         Array.from(element.children).map(

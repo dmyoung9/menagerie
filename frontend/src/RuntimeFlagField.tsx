@@ -81,6 +81,12 @@ export function RuntimeFlagField({
     form.setFieldValue(`inputs.${inputKey(formPath, flag)}`, String(number));
   };
   const maximum = schema[flag].max ?? Number.MAX_SAFE_INTEGER;
+  const title = (
+    <span>
+      <span id={`${id}-label`}>{runtimeFlags[flag].title}</span>{' '}
+      <code>({runtimeFlags[flag].syntax})</code>
+    </span>
+  );
   return (
     <Item size="sm" role="listitem" className="flex-nowrap">
       <ItemContent className="min-w-0">
@@ -90,11 +96,9 @@ export function RuntimeFlagField({
           data-disabled={disabled}
         >
           {radio ? (
-            <FieldTitle id={`${id}-label`}>
-              {runtimeFlags[flag].title}
-            </FieldTitle>
+            <FieldTitle>{title}</FieldTitle>
           ) : (
-            <FieldLabel htmlFor={id}>{runtimeFlags[flag].title}</FieldLabel>
+            <FieldLabel htmlFor={id}>{title}</FieldLabel>
           )}
           {radio ? (
             <RadioGroup
@@ -173,8 +177,7 @@ export function RuntimeFlagField({
             />
           )}
           <FieldDescription id={`${id}-description`}>
-            <code>{runtimeFlags[flag].syntax}</code> · Engine default:{' '}
-            {flagDefaultNote(flag, schema[flag])}
+            default: {flagDefaultNote(flag, schema[flag])}
           </FieldDescription>
           {invalid && <FieldError id={`${id}-error`}>{error}</FieldError>}
         </Field>

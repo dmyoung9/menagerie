@@ -58,11 +58,13 @@ export function RuntimeFlagCard({
   const content = (key: string) => (
     <ItemContent className="min-w-0">
       <ItemTitle className="line-clamp-none">
-        {runtimeFlags[key].title}
+        <span>
+          <span>{runtimeFlags[key].title}</span>{' '}
+          <code>({runtimeFlags[key].syntax})</code>
+        </span>
       </ItemTitle>
       <ItemDescription className="mb-0 line-clamp-none">
-        <code>{runtimeFlags[key].syntax}</code> · Engine default:{' '}
-        {flagDefaultNote(key, schema[key])}
+        default: {flagDefaultNote(key, schema[key])}
       </ItemDescription>
     </ItemContent>
   );
