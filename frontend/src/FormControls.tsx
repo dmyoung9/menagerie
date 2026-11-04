@@ -14,6 +14,7 @@ import { memory } from '@/lib/formatters';
 import { NumberControl } from './NumberControl';
 import { DraftTokenRange } from './DraftTokenRange';
 import { RuntimeFlagCard } from './RuntimeFlagCard';
+import type { ConfigPath } from './draft-form';
 import type {
   DeploymentDraft,
   GpuSnapshot,
@@ -179,6 +180,7 @@ export function RuntimeSettings({
   before,
   after,
   disabled = false,
+  formPath = 'configuration.config',
 }: {
   schema: Record<string, RuntimeField>;
   value: Record<string, JsonValue>;
@@ -190,6 +192,7 @@ export function RuntimeSettings({
   before?: ReactNode;
   after?: ReactNode;
   disabled?: boolean;
+  formPath?: ConfigPath;
 }) {
   const update = (key: string, v: JsonValue | undefined) => {
     const next = { ...value };
@@ -624,6 +627,7 @@ export function RuntimeSettings({
                 disabled={disabled}
                 before={before}
                 after={after}
+                formPath={formPath}
               />
             );
           const fields = (

@@ -49,6 +49,7 @@ import { RequestHistory } from '@/components/request-history';
 import { DeploymentPerformance } from '@/components/deployment-performance';
 import { go } from './navigation';
 import { ConfigurationFields } from './Editors';
+import { DraftFormProvider, useDraftForm } from './use-draft-form';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
 import { defaults, editable } from './editor-state';
 import { Duration, Placement } from './FormControls';
@@ -316,28 +317,37 @@ export function DeploymentSetEditor({
   embedded?: boolean;
 }) {
   const { confirm, confirmation } = useConfirmation();
-  const [value, setValue] = useState<DeploymentSetDraft>({
-    name: 'New deployment',
-    residency: 'on-demand',
-    priority: 50,
-    idle_timeout: 300,
-    allow_eviction: false,
-    enabled: true,
-    queue_timeout: 300,
-    ...(initial
-      ? {
-          id: initial.id,
-          name: initial.name,
-          residency: initial.residency || 'on-demand',
-          priority: initial.priority ?? 50,
-          idle_timeout: initial.idle_timeout ?? 300,
-          allow_eviction: initial.allow_eviction ?? false,
-          enabled: initial.enabled,
-          queue_timeout: initial.queue_timeout ?? 300,
-        }
-      : {}),
-    members: (initial?.members || []).map((m) => editable('deployments', m)),
-  });
+  const {
+    form,
+    value,
+    setValue,
+    changed: draftChanged,
+    reset,
+  } = useDraftForm<DeploymentSetDraft>(
+    {
+      name: 'New deployment',
+      residency: 'on-demand',
+      priority: 50,
+      idle_timeout: 300,
+      allow_eviction: false,
+      enabled: true,
+      queue_timeout: 300,
+      ...(initial
+        ? {
+            id: initial.id,
+            name: initial.name,
+            residency: initial.residency || 'on-demand',
+            priority: initial.priority ?? 50,
+            idle_timeout: initial.idle_timeout ?? 300,
+            allow_eviction: initial.allow_eviction ?? false,
+            enabled: initial.enabled,
+            queue_timeout: initial.queue_timeout ?? 300,
+          }
+        : {}),
+      members: (initial?.members || []).map((m) => editable('deployments', m)),
+    },
+    (draft) => submit(draft),
+  );
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [separate, setSeparate] = useState(false);
@@ -347,11 +357,8 @@ export function DeploymentSetEditor({
     [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState(0);
   const preview = useResourcePreview(value.members, data.host?.[0]?.ts);
-  const [original] = useState(() => JSON.stringify(value));
-  const [originalValue] = useState(value);
   const [epoch, setEpoch] = useState(0);
-  const changed =
-    JSON.stringify(value) !== original || Object.values(invalid).some(Boolean);
+  const changed = draftChanged || Object.values(invalid).some(Boolean);
   const aliasError = (m: DeploymentDraft) =>
     value.members.some((other) => other !== m && other.alias === m.alias) ||
     (data.deployments || []).some(
@@ -499,7 +506,8 @@ export function DeploymentSetEditor({
       setBusy(false);
     }
   }
-  const submit = async () => {
+  const submit = async (value: DeploymentSetDraft) => {
+    if (busy || Object.values(invalid).some(Boolean)) return;
     setBusy(true);
     setError('');
     try {
@@ -548,287 +556,294 @@ export function DeploymentSetEditor({
           </AlertDescription>
         </Alert>
       )}
-      <form
-        className="resource-editor"
-        onInvalidCapture={(e) => {
-          const target = e.target as HTMLElement;
-          const section = target.closest<HTMLElement>('[data-model-index]');
-          if (section) setSelected(Number(section.dataset.modelIndex));
-          target.closest('details')?.setAttribute('open', '');
-        }}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-      >
-        <FieldSet key={epoch} disabled={busy}>
-          <Field label="Name">
-            <Input
-              required
-              value={value.name}
-              onChange={(e) => set('name', e.target.value)}
-            />
-          </Field>
-          <FieldSet className="model-composer">
-            <FieldLegend>Models</FieldLegend>
-            <Field label="Add installed model">
-              <NativeSelect
-                value={artifactId}
-                onChange={(e) => setArtifactId(e.target.value)}
-              >
-                {(data.models || []).map((m) => (
-                  <NativeSelectOption key={m.id} value={m.id}>
-                    {m.name}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
+      <DraftFormProvider value={form}>
+        <form
+          className="resource-editor"
+          onInvalidCapture={(e) => {
+            const target = e.target as HTMLElement;
+            const section = target.closest<HTMLElement>('[data-model-index]');
+            if (section) setSelected(Number(section.dataset.modelIndex));
+            target.closest('details')?.setAttribute('open', '');
+          }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void form.handleSubmit();
+          }}
+        >
+          <FieldSet key={epoch} disabled={busy}>
+            <Field label="Name">
+              <Input
+                required
+                value={value.name}
+                onChange={(e) => set('name', e.target.value)}
+              />
             </Field>
-            <Button
-              variant="outline"
-              type="button"
-              disabled={!artifactId}
-              onClick={addModel}
-            >
-              Add model
-            </Button>
-            <div className="model-switcher">
-              <ToggleGroup
+            <FieldSet className="model-composer">
+              <FieldLegend>Models</FieldLegend>
+              <Field label="Add installed model">
+                <NativeSelect
+                  value={artifactId}
+                  onChange={(e) => setArtifactId(e.target.value)}
+                >
+                  {(data.models || []).map((m) => (
+                    <NativeSelectOption key={m.id} value={m.id}>
+                      {m.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <Button
                 variant="outline"
-                aria-label="Models"
-                value={[String(selected)]}
-                onValueChange={(next) => {
-                  if (next.length) setSelected(Number(next[0]));
-                }}
+                type="button"
+                disabled={!artifactId}
+                onClick={addModel}
               >
-                {value.members.map((m, index: number) => (
-                  <ToggleGroupItem key={m.id || m.port} value={String(index)}>
-                    {m.name || `Model ${index + 1}`}
-                    {invalid[m.id || m.port] || aliasError(m)
-                      ? ' · Check settings'
-                      : ''}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-            </div>
-            {value.members.map((m, index: number) => (
-              <section
-                hidden={selected !== index}
-                data-model-index={index}
-                className="model-edit-section"
-                key={m.id || m.port}
-              >
-                <h3>{m.name}</h3>
-                <Field label="Model display name">
-                  <Input
-                    required
-                    value={m.name}
-                    onChange={(e) =>
-                      updateMember(index, { name: e.target.value })
+                Add model
+              </Button>
+              <div className="model-switcher">
+                <ToggleGroup
+                  variant="outline"
+                  aria-label="Models"
+                  value={[String(selected)]}
+                  onValueChange={(next) => {
+                    if (next.length) setSelected(Number(next[0]));
+                  }}
+                >
+                  {value.members.map((m, index: number) => (
+                    <ToggleGroupItem key={m.id || m.port} value={String(index)}>
+                      {m.name || `Model ${index + 1}`}
+                      {invalid[m.id || m.port] || aliasError(m)
+                        ? ' · Check settings'
+                        : ''}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
+              {value.members.map((m, index: number) => (
+                <section
+                  hidden={selected !== index}
+                  data-model-index={index}
+                  className="model-edit-section"
+                  key={m.id || m.port}
+                >
+                  <h3>{m.name}</h3>
+                  <Field label="Model display name">
+                    <Input
+                      required
+                      value={m.name}
+                      onChange={(e) =>
+                        updateMember(index, { name: e.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label="API model ID">
+                    <Input
+                      required
+                      aria-label="API model ID"
+                      aria-invalid={aliasError(m)}
+                      pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}"
+                      value={m.alias}
+                      onChange={(e) =>
+                        updateMember(index, { alias: e.target.value })
+                      }
+                    />
+                    {aliasError(m) && (
+                      <small className="error-text" role="alert">
+                        This API model ID is already in use.
+                      </small>
+                    )}
+                  </Field>
+                  <ConfigurationFields
+                    formPath={`members[${index}].configuration.config`}
+                    value={m.configuration!}
+                    data={data}
+                    set={(configuration) =>
+                      updateMember(index, { configuration })
                     }
-                  />
-                </Field>
-                <Field label="API model ID">
-                  <Input
-                    required
-                    aria-label="API model ID"
-                    aria-invalid={aliasError(m)}
-                    pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}"
-                    value={m.alias}
-                    onChange={(e) =>
-                      updateMember(index, { alias: e.target.value })
+                    onValid={(valid) =>
+                      setInvalid((v) => ({ ...v, [m.id || m.port]: !valid }))
                     }
-                  />
-                  {aliasError(m) && (
-                    <small className="error-text" role="alert">
-                      This API model ID is already in use.
-                    </small>
-                  )}
-                </Field>
-                <ConfigurationFields
-                  value={m.configuration!}
-                  data={data}
-                  set={(configuration) =>
-                    updateMember(index, { configuration })
-                  }
-                  onValid={(valid) =>
-                    setInvalid((v) => ({ ...v, [m.id || m.port]: !valid }))
-                  }
-                  recommendation={
-                    preview.data?.members?.[index]?.recommendation
-                  }
-                  modelFields={
-                    m.configuration && (
-                      <ChatTemplateSettings
-                        label="Chat template"
-                        model={data.models.find(
-                          (x) => x.id === m.configuration?.artifact_id,
-                        )}
-                        override={m.template_override || null}
-                        onChange={(selection) =>
-                          updateMember(index, { template_override: selection })
-                        }
+                    recommendation={
+                      preview.data?.members?.[index]?.recommendation
+                    }
+                    modelFields={
+                      m.configuration && (
+                        <ChatTemplateSettings
+                          label="Chat template"
+                          model={data.models.find(
+                            (x) => x.id === m.configuration?.artifact_id,
+                          )}
+                          override={m.template_override || null}
+                          onChange={(selection) =>
+                            updateMember(index, {
+                              template_override: selection,
+                            })
+                          }
+                        />
+                      )
+                    }
+                    placementFields={
+                      <Placement
+                        part="gpu"
+                        value={m}
+                        change={(v) => updateMember(index, v)}
+                        host={data.host?.[0]}
                       />
-                    )
-                  }
-                  placementFields={
+                    }
+                  />
+                  <SettingsSection name="network" title="Networking">
                     <Placement
-                      part="gpu"
+                      part="network"
                       value={m}
                       change={(v) => updateMember(index, v)}
                       host={data.host?.[0]}
                     />
-                  }
-                />
-                <SettingsSection name="network" title="Networking">
-                  <Placement
-                    part="network"
-                    value={m}
-                    change={(v) => updateMember(index, v)}
-                    host={data.host?.[0]}
-                  />
-                </SettingsSection>
-                <Button
-                  variant="destructive"
-                  type="button"
-                  onClick={async () => {
-                    if (
-                      m.id &&
-                      !(await confirm(
-                        'Remove this model from the deployment? It will be kept as an inactive standalone configuration.',
-                      ))
-                    )
-                      return;
-                    set(
-                      'members',
-                      value.members.filter((_, i) => i !== index),
-                    );
-                    setSelected(Math.max(0, selected - 1));
-                    setInvalid((v) => ({ ...v, [m.id || m.port]: false }));
+                  </SettingsSection>
+                  <Button
+                    variant="destructive"
+                    type="button"
+                    onClick={async () => {
+                      if (
+                        m.id &&
+                        !(await confirm(
+                          'Remove this model from the deployment? It will be kept as an inactive standalone configuration.',
+                        ))
+                      )
+                        return;
+                      set(
+                        'members',
+                        value.members.filter((_, i) => i !== index),
+                      );
+                      setSelected(Math.max(0, selected - 1));
+                      setInvalid((v) => ({ ...v, [m.id || m.port]: false }));
+                    }}
+                  >
+                    Remove model
+                  </Button>
+                </section>
+              ))}
+            </FieldSet>
+            <SettingsSection name="lifecycle" title="Lifecycle">
+              <Field label="Mode">
+                <Select
+                  disabled={busy}
+                  items={[
+                    { value: 'on-demand', label: 'On demand' },
+                    { value: 'pinned', label: 'Pinned' },
+                    { value: 'evictable', label: 'Evictable' },
+                  ]}
+                  value={value.residency}
+                  onValueChange={(next) => {
+                    if (next) set('residency', next);
                   }}
                 >
-                  Remove model
-                </Button>
-              </section>
-            ))}
-          </FieldSet>
-          <SettingsSection name="lifecycle" title="Lifecycle">
-            <Field label="Mode">
-              <Select
-                disabled={busy}
-                items={[
-                  { value: 'on-demand', label: 'On demand' },
-                  { value: 'pinned', label: 'Pinned' },
-                  { value: 'evictable', label: 'Evictable' },
-                ]}
-                value={value.residency}
-                onValueChange={(next) => {
-                  if (next) set('residency', next);
-                }}
-              >
-                <SelectTrigger aria-label="Mode" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="on-demand">On demand</SelectItem>
-                    <SelectItem value="pinned">Pinned</SelectItem>
-                    <SelectItem value="evictable">Evictable</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-            {value.residency === 'on-demand' && (
-              <Duration
-                value={value.idle_timeout}
-                change={(v) => set('idle_timeout', v)}
-              />
-            )}
-            {value.residency !== 'pinned' && (
+                  <SelectTrigger aria-label="Mode" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="on-demand">On demand</SelectItem>
+                      <SelectItem value="pinned">Pinned</SelectItem>
+                      <SelectItem value="evictable">Evictable</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+              {value.residency === 'on-demand' && (
+                <Duration
+                  value={value.idle_timeout}
+                  change={(v) => set('idle_timeout', v)}
+                />
+              )}
+              {value.residency !== 'pinned' && (
+                <label className="check">
+                  <Checkbox
+                    checked={value.allow_eviction}
+                    onCheckedChange={(checked) =>
+                      set('allow_eviction', checked)
+                    }
+                  />
+                  Can unload to make room for another deployment
+                </label>
+              )}
+              <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+                <Field label="Priority">
+                  <NumberControl
+                    label="Priority"
+                    required
+                    min={0}
+                    max={100}
+                    value={value.priority}
+                    change={(v) => set('priority', v ?? 0)}
+                  />
+                </Field>
+                <Field label="Switch timeout (seconds)">
+                  <NumberControl
+                    label="Switch timeout (seconds)"
+                    required
+                    min={1}
+                    max={1800}
+                    value={value.queue_timeout}
+                    change={(v) => set('queue_timeout', v ?? 0)}
+                  />
+                </Field>
+              </FieldGroup>
               <label className="check">
-                <Checkbox
-                  checked={value.allow_eviction}
-                  onCheckedChange={(checked) => set('allow_eviction', checked)}
+                <Switch
+                  disabled={busy}
+                  checked={value.enabled}
+                  onCheckedChange={(checked) => set('enabled', checked)}
                 />
-                Can unload to make room for another deployment
+                Enabled for clients
               </label>
-            )}
-            <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-              <Field label="Priority">
-                <NumberControl
-                  label="Priority"
-                  required
-                  min={0}
-                  max={100}
-                  value={value.priority}
-                  change={(v) => set('priority', v ?? 0)}
-                />
-              </Field>
-              <Field label="Switch timeout (seconds)">
-                <NumberControl
-                  label="Switch timeout (seconds)"
-                  required
-                  min={1}
-                  max={1800}
-                  value={value.queue_timeout}
-                  change={(v) => set('queue_timeout', v ?? 0)}
-                />
-              </Field>
-            </FieldGroup>
-            <label className="check">
-              <Switch
-                disabled={busy}
-                checked={value.enabled}
-                onCheckedChange={(checked) => set('enabled', checked)}
-              />
-              Enabled for clients
-            </label>
-          </SettingsSection>
-        </FieldSet>
-        {value.members.length > 0 && (
-          <DraftResources preview={preview.data} error={preview.error} />
-        )}
-        <div className="dialog-actions configuration-save-bar">
-          <span className="muted" role="status">
-            {changed ? 'Unsaved changes' : 'All changes saved'}
-          </span>
-          <Button
-            variant="outline"
-            type="button"
-            disabled={busy || !changed}
-            onClick={() => {
-              setValue(originalValue);
-              setInvalid({});
-              setSelected(0);
-              setEpoch((v) => v + 1);
-              setError('');
-            }}
-          >
-            Discard
-          </Button>
-          {initial && value.members.length > 1 && (
-            <Button
-              variant="destructive"
-              type="button"
-              disabled={busy}
-              onClick={() => setSeparate(true)}
-            >
-              Separate models…
-            </Button>
+            </SettingsSection>
+          </FieldSet>
+          {value.members.length > 0 && (
+            <DraftResources preview={preview.data} error={preview.error} />
           )}
-          <Button
-            variant="default"
-            type="submit"
-            disabled={
-              busy ||
-              value.members.length < 1 ||
-              value.members.some(aliasError) ||
-              Object.values(invalid).some(Boolean)
-            }
-          >
-            {busy ? 'Saving…' : 'Save deployment'}
-          </Button>
-        </div>
-      </form>
+          <div className="dialog-actions configuration-save-bar">
+            <span className="muted" role="status">
+              {changed ? 'Unsaved changes' : 'All changes saved'}
+            </span>
+            <Button
+              variant="outline"
+              type="button"
+              disabled={busy || !changed}
+              onClick={() => {
+                reset();
+                setInvalid({});
+                setSelected(0);
+                setEpoch((v) => v + 1);
+                setError('');
+              }}
+            >
+              Discard
+            </Button>
+            {initial && value.members.length > 1 && (
+              <Button
+                variant="destructive"
+                type="button"
+                disabled={busy}
+                onClick={() => setSeparate(true)}
+              >
+                Separate models…
+              </Button>
+            )}
+            <Button
+              variant="default"
+              type="submit"
+              disabled={
+                busy ||
+                value.members.length < 1 ||
+                value.members.some(aliasError) ||
+                Object.values(invalid).some(Boolean)
+              }
+            >
+              {busy ? 'Saving…' : 'Save deployment'}
+            </Button>
+          </div>
+        </form>
+      </DraftFormProvider>
       {separate && (
         <section className="warning">
           <p>

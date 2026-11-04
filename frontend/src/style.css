@@ -536,26 +536,24 @@ meter::-moz-meter-bar {
   gap: 12px;
   min-width: 0;
 }
-.range-control > [data-slot='slider'] {
+.range-control > [data-slot='field'] > [data-slot='slider'] {
   flex: 2;
   min-width: 60px;
 }
-.range-control > [data-slot='input'] {
+.range-control > [data-slot='field'] > [data-slot='input'] {
   width: 130px;
   flex: 1;
   min-width: 0;
 }
-.runtime-flag-item > [data-slot='item-content'] {
-  flex-basis: 16rem;
-}
-.runtime-flag-item > [data-slot='item-actions'] {
-  flex: 1 1 20rem;
+.runtime-flag-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
   min-width: 0;
 }
-.runtime-flag-item [data-slot='item-actions'] > .range-control {
-  flex: 1;
-}
-.runtime-flag-item [data-slot='item-actions'] > [data-slot='radiogroup'] {
+.runtime-flag-controls > .range-control,
+.runtime-flag-controls > [data-slot='field-set'] {
   flex: 1;
 }
 .control-pair > * {

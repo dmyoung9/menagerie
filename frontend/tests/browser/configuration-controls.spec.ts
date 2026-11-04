@@ -169,7 +169,7 @@ test('numeric flags are absent until added and seed engine rather than policy de
     },
     threads: {
       type: 'integer',
-      min: 1,
+      min: -1,
       max: 256,
       default: 6,
       engine_default: -1,
@@ -177,7 +177,7 @@ test('numeric flags are absent until added and seed engine rather than policy de
     },
     'threads-batch': {
       type: 'integer',
-      min: 1,
+      min: -1,
       max: 256,
       default: 6,
       default_from: 'threads',

@@ -47,6 +47,8 @@ import { ChatTemplateSettings } from './ChatTemplateSettings';
 import { ModelCompanions } from './ModelCompanions';
 import { NumberControl } from './NumberControl';
 import type { RuntimeCapabilities } from './types';
+import { DraftFormProvider, useDraftForm } from './use-draft-form';
+import type { ConfigPath } from './draft-form';
 
 export function ConfigurationFields({
   value,
@@ -56,6 +58,7 @@ export function ConfigurationFields({
   recommendation,
   modelFields,
   placementFields,
+  formPath = 'configuration.config',
 }: {
   value: ProfileDraft;
   data: Registry;
@@ -64,6 +67,7 @@ export function ConfigurationFields({
   recommendation?: RuntimeRecommendation;
   modelFields?: ReactNode;
   placementFields?: ReactNode;
+  formPath?: ConfigPath;
 }) {
   const { confirm, confirmation } = useConfirmation();
   const runtime = data.runtimes?.find((r) => r.id === value.runtime_id);
@@ -294,6 +298,7 @@ export function ConfigurationFields({
                 }
               : {})}
             section={section}
+            formPath={formPath}
           />
         ),
       )}
@@ -354,12 +359,22 @@ type EditorField =
 export function Editor(props: EditorProps) {
   const { initial, data, remove, busy, memberOnly = false } = props;
   const kind = initial.kind;
-  const [value, setValue] = useState<EditorDraft>(initial.value),
-    [invalid, setInvalid] = useState<Record<string, boolean>>({});
-  const [baseline] = useState(() => JSON.stringify(initial.value));
+  const [invalid, setInvalid] = useState<Record<string, boolean>>({});
+  const {
+    form,
+    value,
+    setValue,
+    changed: draftChanged,
+    reset,
+  } = useDraftForm<EditorDraft>(initial.value, (value) => {
+    if (Object.values(invalid).some(Boolean) || busy || props.disabled) return;
+    if (kind === 'profiles') props.save({ kind, value: profileDraft(value) });
+    else if (kind === 'deployments')
+      props.save({ kind, value: deploymentDraft(value) });
+    else props.save({ kind, value: runtimeDraft(value) });
+  });
   const [epoch, setEpoch] = useState(0);
-  const changed =
-    JSON.stringify(value) !== baseline || Object.values(invalid).some(Boolean);
+  const changed = draftChanged || Object.values(invalid).some(Boolean);
   const navigationGuard = useUnsavedChanges(
     !!props.embedded && changed,
     !!props.embedded && busy,
@@ -478,318 +493,317 @@ export function Editor(props: EditorProps) {
     />
   );
   return (
-    <form
-      className={
-        deployment ? 'configuration-editor resource-editor' : undefined
-      }
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!Object.values(invalid).some(Boolean)) {
-          if (kind === 'profiles')
-            props.save({ kind, value: profileDraft(value) });
-          else if (kind === 'deployments')
-            props.save({ kind, value: deploymentDraft(value) });
-          else props.save({ kind, value: runtimeDraft(value) });
+    <DraftFormProvider value={form}>
+      <form
+        className={
+          deployment ? 'configuration-editor resource-editor' : undefined
         }
-      }}
-    >
-      {navigationGuard}
-      {deployment && (
-        <nav
-          aria-label="Configuration sections"
-          className="configuration-jumps"
-        >
-          {(
-            [
-              'identity',
-              'model',
-              'memory',
-              'performance',
-              'generation',
-              'capabilities',
-              'variants',
-              'lifecycle',
-              'network',
-            ] as const
-          )
-            .filter(
-              (name) =>
-                name !== 'performance' ||
-                [
-                  'flash-attn',
-                  'threads',
-                  'threads-batch',
-                  'batch-size',
-                  'ubatch-size',
-                ].some(
-                  (key) =>
-                    data.runtimes.find(
-                      (r) => r.id === deployment.configuration?.runtime_id,
-                    )?.capabilities?.schema?.[key],
-                ),
+        onSubmit={(e) => {
+          e.preventDefault();
+          void form.handleSubmit();
+        }}
+      >
+        {navigationGuard}
+        {deployment && (
+          <nav
+            aria-label="Configuration sections"
+            className="configuration-jumps"
+          >
+            {(
+              [
+                'identity',
+                'model',
+                'memory',
+                'performance',
+                'generation',
+                'capabilities',
+                'variants',
+                'lifecycle',
+                'network',
+              ] as const
             )
-            .map((name) => (
-              <Button
-                key={name}
-                variant="ghost"
-                type="button"
-                onClick={(e) => {
-                  const target = e.currentTarget
-                    .closest('form')
-                    ?.querySelector<HTMLElement>(
-                      `[data-settings-section="${name}"]`,
-                    );
-                  target?.scrollIntoView({ block: 'start' });
-                  target?.focus({ preventScroll: true });
-                }}
-              >
-                {
+              .filter(
+                (name) =>
+                  name !== 'performance' ||
+                  [
+                    'flash-attn',
+                    'threads',
+                    'threads-batch',
+                    'batch-size',
+                    'ubatch-size',
+                  ].some(
+                    (key) =>
+                      data.runtimes.find(
+                        (r) => r.id === deployment.configuration?.runtime_id,
+                      )?.capabilities?.schema?.[key],
+                  ),
+              )
+              .map((name) => (
+                <Button
+                  key={name}
+                  variant="ghost"
+                  type="button"
+                  onClick={(e) => {
+                    const target = e.currentTarget
+                      .closest('form')
+                      ?.querySelector<HTMLElement>(
+                        `[data-settings-section="${name}"]`,
+                      );
+                    target?.scrollIntoView({ block: 'start' });
+                    target?.focus({ preventScroll: true });
+                  }}
+                >
                   {
-                    identity: 'Identity',
-                    model: 'Model & engine',
-                    memory: 'Memory & placement',
-                    performance: 'Performance',
-                    generation: 'Generation',
-                    capabilities: 'Modalities & capabilities',
-                    variants: 'Variants',
-                    lifecycle: 'Lifecycle',
-                    network: 'Networking',
-                  }[name]
-                }
-              </Button>
-            ))}
-        </nav>
-      )}
-      <FieldSet key={epoch} disabled={busy || props.disabled}>
-        <SettingsSection name="identity" title="Identity">
-          <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {input('name', 'Display name')}
-            {deployment && input('alias', 'API model ID')}
-          </FieldGroup>
-        </SettingsSection>
-        {kind === 'profiles' && profile && (
-          <>
-            {select('artifact_id', data.models || [], 'Model')}
-            {select('runtime_id', data.runtimes || [], 'Engine')}
-            <RuntimeSettings
-              schema={
-                data.runtimes?.find((r) => r.id === profile.runtime_id)
-                  ?.capabilities?.schema || {}
-              }
-              value={profile.config}
-              change={(config) => set('config', config)}
-              host={data.host?.[0]}
-            />
-            <details>
-              <summary>Advanced</summary>
-              {json('config', 'Runtime options (JSON)')}
-              {json('raw_args', 'Arguments (JSON array)')}
-              {json('catalog', 'Client capabilities (JSON)')}
-            </details>
-            <p className="muted">
-              Running deployments keep their saved revision.
-            </p>
-          </>
+                    {
+                      identity: 'Identity',
+                      model: 'Model & engine',
+                      memory: 'Memory & placement',
+                      performance: 'Performance',
+                      generation: 'Generation',
+                      capabilities: 'Modalities & capabilities',
+                      variants: 'Variants',
+                      lifecycle: 'Lifecycle',
+                      network: 'Networking',
+                    }[name]
+                  }
+                </Button>
+              ))}
+          </nav>
         )}
-        {kind === 'deployments' && deployment && (
-          <>
-            {deployment.configuration && (
-              <ConfigurationFields
-                value={deployment.configuration}
-                data={data}
-                set={(configuration) => set('configuration', configuration)}
-                onValid={(valid) =>
-                  setInvalid((prev) => ({ ...prev, configuration: !valid }))
+        <FieldSet key={epoch} disabled={busy || props.disabled}>
+          <SettingsSection name="identity" title="Identity">
+            <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {input('name', 'Display name')}
+              {deployment && input('alias', 'API model ID')}
+            </FieldGroup>
+          </SettingsSection>
+          {kind === 'profiles' && profile && (
+            <>
+              {select('artifact_id', data.models || [], 'Model')}
+              {select('runtime_id', data.runtimes || [], 'Engine')}
+              <RuntimeSettings
+                schema={
+                  data.runtimes?.find((r) => r.id === profile.runtime_id)
+                    ?.capabilities?.schema || {}
                 }
-                recommendation={preview.data?.members?.[0]?.recommendation}
-                modelFields={
-                  <ChatTemplateSettings
-                    label="Chat template"
-                    model={data.models.find(
-                      (m) => m.id === deployment.configuration?.artifact_id,
-                    )}
-                    override={deployment.template_override || null}
-                    onChange={(selection) =>
-                      set('template_override', selection)
-                    }
-                  />
-                }
-                placementFields={
-                  <Placement
-                    part="gpu"
-                    value={deployment}
-                    change={(placement) =>
-                      setValue((previous) =>
-                        decode({ ...previous, ...placement }),
-                      )
-                    }
-                    host={data.host?.[0]}
-                  />
-                }
+                value={profile.config}
+                change={(config) => set('config', config)}
+                host={data.host?.[0]}
+                formPath="config"
               />
-            )}
-            <SettingsSection name="lifecycle" title="Lifecycle">
-              {!memberOnly && (
-                <>
-                  <Field label="Mode">
-                    <NativeSelect
-                      value={deployment.residency}
-                      onChange={(e) => set('residency', e.target.value)}
-                    >
-                      <NativeSelectOption value="on-demand">
-                        On demand
-                      </NativeSelectOption>
-                      <NativeSelectOption value="pinned">
-                        Pinned
-                      </NativeSelectOption>
-                      <NativeSelectOption value="evictable">
-                        Evictable
-                      </NativeSelectOption>
-                    </NativeSelect>
-                  </Field>
-                  {deployment.residency === 'on-demand' && (
-                    <Duration
-                      value={deployment.idle_timeout}
-                      change={(v) => set('idle_timeout', v)}
+              <details>
+                <summary>Advanced</summary>
+                {json('config', 'Runtime options (JSON)')}
+                {json('raw_args', 'Arguments (JSON array)')}
+                {json('catalog', 'Client capabilities (JSON)')}
+              </details>
+              <p className="muted">
+                Running deployments keep their saved revision.
+              </p>
+            </>
+          )}
+          {kind === 'deployments' && deployment && (
+            <>
+              {deployment.configuration && (
+                <ConfigurationFields
+                  value={deployment.configuration}
+                  data={data}
+                  set={(configuration) => set('configuration', configuration)}
+                  onValid={(valid) =>
+                    setInvalid((prev) => ({ ...prev, configuration: !valid }))
+                  }
+                  recommendation={preview.data?.members?.[0]?.recommendation}
+                  modelFields={
+                    <ChatTemplateSettings
+                      label="Chat template"
+                      model={data.models.find(
+                        (m) => m.id === deployment.configuration?.artifact_id,
+                      )}
+                      override={deployment.template_override || null}
+                      onChange={(selection) =>
+                        set('template_override', selection)
+                      }
                     />
-                  )}
-                </>
+                  }
+                  placementFields={
+                    <Placement
+                      part="gpu"
+                      value={deployment}
+                      change={(placement) =>
+                        setValue((previous) =>
+                          decode({ ...previous, ...placement }),
+                        )
+                      }
+                      host={data.host?.[0]}
+                    />
+                  }
+                />
               )}
-              <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <SettingsSection name="lifecycle" title="Lifecycle">
                 {!memberOnly && (
                   <>
-                    {input('priority', 'Priority', 'number', 0, 100)}
-                    {input(
-                      'queue_timeout',
-                      'Queue timeout (seconds)',
-                      'number',
-                      1,
-                      1800,
+                    <Field label="Mode">
+                      <NativeSelect
+                        value={deployment.residency}
+                        onChange={(e) => set('residency', e.target.value)}
+                      >
+                        <NativeSelectOption value="on-demand">
+                          On demand
+                        </NativeSelectOption>
+                        <NativeSelectOption value="pinned">
+                          Pinned
+                        </NativeSelectOption>
+                        <NativeSelectOption value="evictable">
+                          Evictable
+                        </NativeSelectOption>
+                      </NativeSelect>
+                    </Field>
+                    {deployment.residency === 'on-demand' && (
+                      <Duration
+                        value={deployment.idle_timeout}
+                        change={(v) => set('idle_timeout', v)}
+                      />
                     )}
                   </>
                 )}
-              </FieldGroup>
-              {!memberOnly &&
-                deployment.residency !== 'pinned' &&
-                check(
-                  'allow_eviction',
-                  'Can unload to make room for another deployment',
-                )}
-              {!memberOnly && check('enabled', 'Enabled for clients')}
-            </SettingsSection>
-            <SettingsSection name="network" title="Networking">
-              <Placement
-                part="network"
-                value={{
-                  gpu: deployment.gpu,
-                  port: deployment.port,
-                }}
-                change={(placement) =>
-                  setValue((previous) => decode({ ...previous, ...placement }))
-                }
-                host={data.host?.[0]}
-              />
-            </SettingsSection>
-          </>
-        )}
-        {kind === 'runtimes' && runtime && (
-          <>
-            <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-              <Field label="Engine">
-                <NativeSelect
-                  value={runtime.engine}
-                  onChange={(e) => set('engine', e.target.value)}
-                >
-                  {['llama.cpp', 'prism', 'vllm', 'sglang', 'custom'].map(
-                    (v) => (
-                      <NativeSelectOption key={v}>{v}</NativeSelectOption>
-                    ),
+                <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {!memberOnly && (
+                    <>
+                      {input('priority', 'Priority', 'number', 0, 100)}
+                      {input(
+                        'queue_timeout',
+                        'Queue timeout (seconds)',
+                        'number',
+                        1,
+                        1800,
+                      )}
+                    </>
                   )}
-                </NativeSelect>
-              </Field>
-              <Field label="Execution">
-                <NativeSelect
-                  value={runtime.execution_kind}
-                  onChange={(e) => set('execution_kind', e.target.value)}
-                >
-                  {['native', 'docker', 'podman'].map((v) => (
-                    <NativeSelectOption key={v}>{v}</NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-            </FieldGroup>
-            {input(
-              'executable',
-              runtime.execution_kind === 'native'
-                ? 'Executable path'
-                : 'Image (pinned digest)',
-            )}
-            <details>
-              <summary>Advanced</summary>
-              {input('commit', 'Source commit')}
-              {input('fork_url', 'Source repository')}
-              {json('env', 'Environment (JSON)')}
-              {runtime.engine === 'custom' &&
-                json('command_template', 'Command template (JSON array)')}
-            </details>
-            <p className="warning">
-              Registration runs the executable to check its version and
-              supported options.
-            </p>
-            {check('trust', 'I trust this executable or image')}
-          </>
+                </FieldGroup>
+                {!memberOnly &&
+                  deployment.residency !== 'pinned' &&
+                  check(
+                    'allow_eviction',
+                    'Can unload to make room for another deployment',
+                  )}
+                {!memberOnly && check('enabled', 'Enabled for clients')}
+              </SettingsSection>
+              <SettingsSection name="network" title="Networking">
+                <Placement
+                  part="network"
+                  value={{
+                    gpu: deployment.gpu,
+                    port: deployment.port,
+                  }}
+                  change={(placement) =>
+                    setValue((previous) =>
+                      decode({ ...previous, ...placement }),
+                    )
+                  }
+                  host={data.host?.[0]}
+                />
+              </SettingsSection>
+            </>
+          )}
+          {kind === 'runtimes' && runtime && (
+            <>
+              <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+                <Field label="Engine">
+                  <NativeSelect
+                    value={runtime.engine}
+                    onChange={(e) => set('engine', e.target.value)}
+                  >
+                    {['llama.cpp', 'prism', 'vllm', 'sglang', 'custom'].map(
+                      (v) => (
+                        <NativeSelectOption key={v}>{v}</NativeSelectOption>
+                      ),
+                    )}
+                  </NativeSelect>
+                </Field>
+                <Field label="Execution">
+                  <NativeSelect
+                    value={runtime.execution_kind}
+                    onChange={(e) => set('execution_kind', e.target.value)}
+                  >
+                    {['native', 'docker', 'podman'].map((v) => (
+                      <NativeSelectOption key={v}>{v}</NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </Field>
+              </FieldGroup>
+              {input(
+                'executable',
+                runtime.execution_kind === 'native'
+                  ? 'Executable path'
+                  : 'Image (pinned digest)',
+              )}
+              <details>
+                <summary>Advanced</summary>
+                {input('commit', 'Source commit')}
+                {input('fork_url', 'Source repository')}
+                {json('env', 'Environment (JSON)')}
+                {runtime.engine === 'custom' &&
+                  json('command_template', 'Command template (JSON array)')}
+              </details>
+              <p className="warning">
+                Registration runs the executable to check its version and
+                supported options.
+              </p>
+              {check('trust', 'I trust this executable or image')}
+            </>
+          )}
+        </FieldSet>
+        {deployment?.configuration && (
+          <aside className="configuration-resources">
+            <DraftResources
+              compact
+              preview={preview.data}
+              error={preview.error}
+            />
+          </aside>
         )}
-      </FieldSet>
-      {deployment?.configuration && (
-        <aside className="configuration-resources">
-          <DraftResources
-            compact
-            preview={preview.data}
-            error={preview.error}
-          />
-        </aside>
-      )}
-      <div className="dialog-actions configuration-save-bar">
-        {deployment && (
-          <>
-            <span className="muted" role="status">
-              {changed ? 'Unsaved changes' : 'All changes saved'}
-            </span>
-            <Button
-              variant="outline"
-              type="button"
-              disabled={busy || props.disabled || !changed}
-              onClick={() => {
-                setValue(initial.value);
-                setInvalid({});
-                setEpoch((e) => e + 1);
-              }}
-            >
-              Discard
-            </Button>
-          </>
-        )}
-        {remove && (
-          <Menu label="More deployment actions">
-            <DropdownMenuItem
-              variant="destructive"
-              disabled={busy}
-              onClick={remove}
-            >
-              Remove
-            </DropdownMenuItem>
-          </Menu>
-        )}
-        <Button
-          variant="default"
-          type="submit"
-          disabled={
-            busy || props.disabled || Object.values(invalid).some(Boolean)
-          }
-        >
-          {busy ? 'Saving…' : kind === 'profiles' ? 'Save revision' : 'Save'}
-        </Button>
-      </div>
-    </form>
+        <div className="dialog-actions configuration-save-bar">
+          {deployment && (
+            <>
+              <span className="muted" role="status">
+                {changed ? 'Unsaved changes' : 'All changes saved'}
+              </span>
+              <Button
+                variant="outline"
+                type="button"
+                disabled={busy || props.disabled || !changed}
+                onClick={() => {
+                  reset();
+                  setInvalid({});
+                  setEpoch((e) => e + 1);
+                }}
+              >
+                Discard
+              </Button>
+            </>
+          )}
+          {remove && (
+            <Menu label="More deployment actions">
+              <DropdownMenuItem
+                variant="destructive"
+                disabled={busy}
+                onClick={remove}
+              >
+                Remove
+              </DropdownMenuItem>
+            </Menu>
+          )}
+          <Button
+            variant="default"
+            type="submit"
+            disabled={
+              busy || props.disabled || Object.values(invalid).some(Boolean)
+            }
+          >
+            {busy ? 'Saving…' : kind === 'profiles' ? 'Save revision' : 'Save'}
+          </Button>
+        </div>
+      </form>
+    </DraftFormProvider>
   );
 }
