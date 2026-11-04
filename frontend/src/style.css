@@ -545,16 +545,6 @@ meter::-moz-meter-bar {
   flex: 1;
   min-width: 0;
 }
-.runtime-flag-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-.runtime-flag-controls > .range-control,
-.runtime-flag-controls > [data-slot='radiogroup'] {
-  flex: 1;
-}
 .control-pair > * {
   min-width: 0;
   flex: 1;

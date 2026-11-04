@@ -415,7 +415,24 @@ for (const width of [1440, 576, 320]) {
             (child) => child.getAttribute('data-slot') || 'controls',
           ),
         ),
-    ).toEqual(['field-label', 'controls', 'field-description']);
+    ).toEqual(['field-label', 'field-group', 'field-description']);
+    const item = rows.first().locator('..').locator('..');
+    await expect(item).toHaveAttribute('data-slot', 'item');
+    await expect(item).toHaveAttribute('data-size', 'sm');
+    await expect(
+      item.locator(':scope > [data-slot="item-content"] > [data-runtime-flag]'),
+    ).toHaveCount(1);
+    await expect(
+      item.locator(':scope > [data-slot="item-actions"] > button'),
+    ).toHaveAccessibleName('Remove Top-p override');
+    await expect(
+      rows.first().getByRole('button', { name: /Remove/ }),
+    ).toHaveCount(0);
+    await expect(
+      group
+        .getByRole('list', { name: 'Generation flag items', exact: true })
+        .getByRole('listitem'),
+    ).toHaveCount(2);
     const inputBox = await rows.first().getByRole('spinbutton').boundingBox();
     const descriptionBox = await rows
       .first()

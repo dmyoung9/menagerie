@@ -89,20 +89,22 @@ export function RuntimeFlagCard({
         <FieldLegend className="sr-only">{title} flags</FieldLegend>
         <FieldGroup>
           {before}
-          {supported
-            .filter((key) => value[key] !== undefined)
-            .map((key) => (
-              <RuntimeFlagField
-                key={key}
-                flag={key}
-                schema={schema}
-                value={value}
-                change={change}
-                host={host}
-                disabled={disabled}
-                formPath={formPath}
-              />
-            ))}
+          <ItemGroup aria-label={`${title} flag items`}>
+            {supported
+              .filter((key) => value[key] !== undefined)
+              .map((key) => (
+                <RuntimeFlagField
+                  key={key}
+                  flag={key}
+                  schema={schema}
+                  value={value}
+                  change={change}
+                  host={host}
+                  disabled={disabled}
+                  formPath={formPath}
+                />
+              ))}
+          </ItemGroup>
           {after}
         </FieldGroup>
       </FieldSet>

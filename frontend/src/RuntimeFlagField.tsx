@@ -10,6 +10,7 @@ import {
   FieldTitle,
 } from '@/components/ui/field';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Item, ItemActions, ItemContent } from '@/components/ui/item';
 import { NumberControl } from './NumberControl';
 import { useSharedDraftForm } from './use-draft-form';
 import {
@@ -81,89 +82,104 @@ export function RuntimeFlagField({
   };
   const maximum = schema[flag].max ?? Number.MAX_SAFE_INTEGER;
   return (
-    <Field
-      data-runtime-flag={flag}
-      data-invalid={invalid}
-      data-disabled={disabled}
-    >
-      {radio ? (
-        <FieldTitle id={`${id}-label`}>{runtimeFlags[flag].title}</FieldTitle>
-      ) : (
-        <FieldLabel htmlFor={id}>{runtimeFlags[flag].title}</FieldLabel>
-      )}
-      <div className="runtime-flag-controls">
-        {radio ? (
-          <RadioGroup
-            aria-label={label}
-            aria-labelledby={`${id}-label`}
-            aria-describedby={describedBy}
-            aria-invalid={invalid}
-            value={String(field.state.value)}
-            disabled={disabled}
-            onBlur={field.handleBlur}
-            onValueChange={(next) => {
-              if (typeof next === 'string') {
-                field.handleChange(next);
-                change({ ...value, [flag]: next });
+    <Item size="sm" role="listitem" className="flex-nowrap">
+      <ItemContent className="min-w-0">
+        <Field
+          data-runtime-flag={flag}
+          data-invalid={invalid}
+          data-disabled={disabled}
+        >
+          {radio ? (
+            <FieldTitle id={`${id}-label`}>
+              {runtimeFlags[flag].title}
+            </FieldTitle>
+          ) : (
+            <FieldLabel htmlFor={id}>{runtimeFlags[flag].title}</FieldLabel>
+          )}
+          {radio ? (
+            <RadioGroup
+              aria-label={label}
+              aria-labelledby={`${id}-label`}
+              aria-describedby={describedBy}
+              aria-invalid={invalid}
+              value={String(field.state.value)}
+              disabled={disabled}
+              onBlur={field.handleBlur}
+              onValueChange={(next) => {
+                if (typeof next === 'string') {
+                  field.handleChange(next);
+                  change({ ...value, [flag]: next });
+                }
+              }}
+              className="flex flex-wrap gap-4"
+            >
+              {['auto', 'on', 'off'].map((option) => (
+                <Field key={option} orientation="horizontal" className="w-auto">
+                  <RadioGroupItem
+                    id={`${id}-${option}`}
+                    value={option}
+                    nativeButton
+                    render={<button type="button" />}
+                    disabled={
+                      option === 'off' &&
+                      (value['cache-type-v'] ??
+                        schema['cache-type-v']?.engine_default ??
+                        schema['cache-type-v']?.default ??
+                        'f16') !== 'f16'
+                    }
+                  />
+                  <FieldLabel htmlFor={`${id}-${option}`}>
+                    {option === 'auto'
+                      ? 'Auto'
+                      : option === 'on'
+                        ? 'On'
+                        : 'Off'}
+                  </FieldLabel>
+                </Field>
+              ))}
+            </RadioGroup>
+          ) : (
+            <NumberControl
+              id={id}
+              label={label}
+              describedBy={describedBy}
+              invalid={invalid}
+              value={typeof value[flag] === 'number' ? value[flag] : undefined}
+              text={String(field.state.value ?? '')}
+              onTextChange={(text) => field.handleChange(text)}
+              onBlur={() => {
+                field.handleBlur();
+                if (!validate({ value: field.state.value }))
+                  commit(Number(field.state.value));
+              }}
+              min={schema[flag].min ?? runtimeFlags[flag].min ?? 0}
+              max={schema[flag].max}
+              sliderMax={
+                flag === 'top-k'
+                  ? 200
+                  : flag === 'reasoning-budget'
+                    ? 32768
+                    : flag.startsWith('threads') && host.cpu_count
+                      ? Math.min(maximum, host.cpu_count)
+                      : maximum === Number.MAX_SAFE_INTEGER
+                        ? 1024
+                        : maximum
               }
-            }}
-            className="flex flex-wrap gap-4"
-          >
-            {['auto', 'on', 'off'].map((option) => (
-              <Field key={option} orientation="horizontal" className="w-auto">
-                <RadioGroupItem
-                  id={`${id}-${option}`}
-                  value={option}
-                  nativeButton
-                  render={<button type="button" />}
-                  disabled={
-                    option === 'off' &&
-                    (value['cache-type-v'] ??
-                      schema['cache-type-v']?.engine_default ??
-                      schema['cache-type-v']?.default ??
-                      'f16') !== 'f16'
-                  }
-                />
-                <FieldLabel htmlFor={`${id}-${option}`}>
-                  {option === 'auto' ? 'Auto' : option === 'on' ? 'On' : 'Off'}
-                </FieldLabel>
-              </Field>
-            ))}
-          </RadioGroup>
-        ) : (
-          <NumberControl
-            id={id}
-            label={label}
-            describedBy={describedBy}
-            invalid={invalid}
-            value={typeof value[flag] === 'number' ? value[flag] : undefined}
-            text={String(field.state.value ?? '')}
-            onTextChange={(text) => field.handleChange(text)}
-            onBlur={() => {
-              field.handleBlur();
-              if (!validate({ value: field.state.value }))
-                commit(Number(field.state.value));
-            }}
-            min={schema[flag].min ?? runtimeFlags[flag].min ?? 0}
-            max={schema[flag].max}
-            sliderMax={
-              flag === 'top-k'
-                ? 200
-                : flag === 'reasoning-budget'
-                  ? 32768
-                  : flag.startsWith('threads') && host.cpu_count
-                    ? Math.min(maximum, host.cpu_count)
-                    : maximum === Number.MAX_SAFE_INTEGER
-                      ? 1024
-                      : maximum
-            }
-            step={schema[flag].type === 'number' ? 0.01 : 1}
-            inputStep={schema[flag].type === 'number' ? 'any' : 1}
-            required
-            disabled={disabled}
-            change={commit}
-          />
-        )}
+              step={schema[flag].type === 'number' ? 0.01 : 1}
+              inputStep={schema[flag].type === 'number' ? 'any' : 1}
+              required
+              disabled={disabled}
+              change={commit}
+            />
+          )}
+          <FieldDescription id={`${id}-description`}>
+            <code>{runtimeFlags[flag].syntax}</code> · Engine default:{' '}
+            {flagDefaultNote(flag, schema[flag])}
+          </FieldDescription>
+          {invalid && <FieldError id={`${id}-error`}>{error}</FieldError>}
+        </Field>
+      </ItemContent>
+      <ItemActions>
         <Button
           type="button"
           variant="ghost"
@@ -180,12 +196,7 @@ export function RuntimeFlagField({
         >
           <Trash2 />
         </Button>
-      </div>
-      <FieldDescription id={`${id}-description`}>
-        <code>{runtimeFlags[flag].syntax}</code> · Engine default:{' '}
-        {flagDefaultNote(flag, schema[flag])}
-      </FieldDescription>
-      {invalid && <FieldError id={`${id}-error`}>{error}</FieldError>}
-    </Field>
+      </ItemActions>
+    </Item>
   );
 }

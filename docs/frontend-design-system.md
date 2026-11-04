@@ -102,8 +102,10 @@ without improving its existing time-series behavior.
 
 Performance and Generation group their card contents in `FieldSet`, with a
 screen-reader legend (the visible title remains in CardHeader) and a `FieldGroup`.
-Explicit engine flags use vertical `Field` composition: label, control with
-icon-only trash action, syntax/default `FieldDescription`, then `FieldError`.
+Explicit engine flags are compact `Item` rows (`size="sm"`) in an `ItemGroup`.
+`ItemContent` contains the complete vertical `Field`: label, control,
+syntax/default `FieldDescription`, then `FieldError`. The icon-only trash button
+belongs separately in `ItemActions`, not inside the field.
 Descriptions and errors stay below the controls at every viewport size.
 Header Add opens a responsive Drawer of
 supported, absent flags (`size="default"`), using leading checkboxes without value

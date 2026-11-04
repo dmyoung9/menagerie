@@ -60,7 +60,13 @@ for (const width of [1440, 576, 320]) {
           (child) => child.getAttribute('data-slot') || 'controls',
         ),
       ),
-    ).toEqual(['field-label', 'controls', 'field-description']);
+    ).toEqual(['field-label', 'radio-group', 'field-description']);
+    const item = field.locator('..').locator('..');
+    await expect(item).toHaveAttribute('data-slot', 'item');
+    await expect(
+      item.locator(':scope > [data-slot="item-actions"] > button'),
+    ).toHaveAccessibleName('Remove Flash attention override');
+    await expect(field.getByRole('button', { name: /Remove/ })).toHaveCount(0);
     const controlBox = await radios.boundingBox();
     const descriptionBox = await field
       .locator(':scope > [data-slot="field-description"]')
