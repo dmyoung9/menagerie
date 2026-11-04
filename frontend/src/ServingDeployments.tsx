@@ -454,7 +454,7 @@ export function DeploymentSetEditor({
         runtime_id: runtime?.id || '',
         config,
         raw_args: [],
-        catalog: {},
+        catalog: structuredClone(defaults.profiles.catalog),
       },
     };
     set('members', [...value.members, member]);

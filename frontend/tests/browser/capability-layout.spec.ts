@@ -3,7 +3,7 @@ import { test, expect } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 
 for (const width of [1440, 576, 320]) {
-  test(`modalities precede capabilities and disabled reasoning stays hidden at ${width}px`, async ({
+  test(`variants stay visible and editable independently of Reasoning at ${width}px`, async ({
     page,
     fixture,
   }, testInfo) => {
@@ -33,16 +33,9 @@ for (const width of [1440, 576, 320]) {
       },
     });
     const original = structuredClone(catalog.reasoning);
-    fixture.registry.runtimes[0].capabilities!.schema!['reasoning-budget'] = {
-      type: 'integer',
-      min: -1,
-      max: 1048576,
-      engine_default: -1,
-      label: 'Default reasoning budget',
-    };
     await page.goto('/#/deployments/idle/configuration');
     const panel = page.getByRole('region', {
-      name: 'Capabilities and reasoning',
+      name: 'Modalities and capabilities',
       exact: true,
     });
     await expect(
@@ -50,39 +43,39 @@ for (const width of [1440, 576, 320]) {
         ':scope > fieldset > legend, :scope > .capability-heading > h3',
       ),
     ).toHaveText(['Input modalities', 'Output modalities', 'Capabilities']);
-    await expect(
-      page.getByText('Available to clients', { exact: true }),
-    ).toHaveCount(0);
-    const options = panel.getByRole('region', {
-      name: 'Reasoning options',
+    const variants = page.getByRole('region', {
+      name: 'Variants',
       exact: true,
     });
-    await expect(options).toHaveCount(0);
+    await expect(variants).toBeVisible();
     await expect(
-      panel.getByLabel('Default reasoning budget', { exact: true }),
+      variants.getByText('Configure to enable', { exact: true }),
     ).toHaveCount(0);
+    await expect(
+      variants.getByRole('switch', {
+        name: 'Enable Instant variant',
+        exact: true,
+      }),
+    ).toBeChecked();
+    await expect(
+      variants.getByRole('switch', { name: 'Enable Low variant', exact: true }),
+    ).toBeEnabled();
+    await variants.getByRole('button', { name: 'Low', exact: true }).click();
+    const drawer = page.getByRole('dialog', { name: 'Edit Low', exact: true });
+    await expect(
+      drawer.getByLabel('Effort value', { exact: true }),
+    ).toBeEnabled();
+    await expect(
+      drawer.getByLabel('Effort value', { exact: true }),
+    ).toHaveValue('low');
+    await drawer.getByRole('button', { name: 'Cancel', exact: true }).click();
     const reasoning = panel
       .getByRole('group', { name: 'Capabilities', exact: true })
       .getByRole('button', { name: 'Reasoning', exact: true });
     await reasoning.click();
-    await expect(options).toBeVisible();
-    await expect(
-      options.getByRole('combobox', { name: 'Instant thinking', exact: true }),
-    ).toHaveValue('false');
-    await expect(
-      options.getByRole('combobox', {
-        name: 'High control',
-        exact: true,
-      }),
-    ).toHaveValue('thinking_budget');
-    await expect(
-      options.getByRole('button', {
-        name: 'Low',
-        exact: true,
-      }),
-    ).toHaveAttribute('aria-pressed', 'false');
+    await expect(variants).toBeVisible();
     await reasoning.click();
-    await expect(options).toHaveCount(0);
+    await expect(variants).toBeVisible();
     await page
       .getByLabel('Display name', { exact: true })
       .fill('Capability review');
@@ -100,10 +93,10 @@ for (const width of [1440, 576, 320]) {
     expect(saved.reasoning).toEqual(original);
     expect(saved.model?.capabilities?.reasoning).toEqual({ supported: false });
     await page.reload();
-    await expect(options).toHaveCount(0);
-    await panel.scrollIntoViewIfNeeded();
+    await expect(variants).toBeVisible();
+    await variants.scrollIntoViewIfNeeded();
     await page.screenshot({
-      path: testInfo.outputPath(`capabilities-off-${width}.png`),
+      path: testInfo.outputPath(`variants-reasoning-off-${width}.png`),
     });
     expect(
       await page.evaluate(
@@ -117,108 +110,61 @@ for (const width of [1440, 576, 320]) {
           .analyze()
       ).violations,
     ).toEqual([]);
-    await reasoning.click();
-    await expect(options).toBeVisible();
-    await expect(
-      options.getByRole('combobox', { name: 'Instant thinking', exact: true }),
-    ).toHaveValue('false');
-    await expect(
-      options.getByRole('combobox', {
-        name: 'High control',
-        exact: true,
-      }),
-    ).toHaveValue('thinking_budget');
-    expect(
-      (
-        await new AxeBuilder({ page })
-          .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
-          .analyze()
-      ).violations,
-    ).toEqual([]);
-    await page.getByRole('button', { name: 'Discard', exact: true }).click();
-    await expect(options).toHaveCount(0);
   });
 }
 
-test('turning reasoning off clears hidden mapping errors without deleting saved mappings', async ({
+test('variants can be edited, enabled and selected as default while Reasoning stays off; saved Ultra is custom', async ({
   page,
   fixture,
 }) => {
-  const catalog = fixture.registry.deployments.find((d) => d.id === 'idle')!
-    .profile_snapshot!.catalog;
-  Object.assign(catalog, {
-    model: {
-      capabilities: {
-        tools: false,
-        input: ['text'],
-        output: ['text'],
-        reasoning: { supported: true },
-      },
-    },
+  fixture.registry.deployments.find(
+    (d) => d.id === 'idle',
+  )!.profile_snapshot!.catalog = {
+    model: { capabilities: { reasoning: false } },
     reasoning: {
       presets: [
-        { id: 'default', enabled: true, body: {} },
-        { id: 'instant', enabled: true, body: { reasoning_effort: 'none' } },
-        { id: 'high', enabled: true, body: { reasoning_effort: 'high' } },
+        {
+          id: 'ultra',
+          name: 'Ultra',
+          enabled: false,
+          body: { reasoning_effort: 'ultra' },
+        },
       ],
     },
-  });
-  const original = structuredClone(catalog.reasoning);
+  };
   await page.goto('/#/deployments/idle/configuration');
-  const section = page.getByRole('region', {
-    name: 'Reasoning options',
-    exact: true,
-  });
-  for (const name of ['Instant', 'High']) {
-    await section
-      .getByLabel(name + ' control', { exact: true })
-      .selectOption('custom');
-    await section
-      .getByRole('textbox', {
-        name: name + ' custom settings',
-        exact: true,
-      })
-      .fill('{invalid');
-  }
+  const section = page.getByRole('region', { name: 'Variants', exact: true });
+  await section
+    .getByRole('button', { name: 'Ultra variant actions', exact: true })
+    .click();
   await expect(
-    page.getByRole('button', { name: 'Save', exact: true }),
-  ).toBeDisabled();
-  const reasoning = page
-    .getByRole('group', { name: 'Capabilities', exact: true })
-    .getByRole('button', { name: 'Reasoning', exact: true });
-  await reasoning.click();
-  await expect(section).toHaveCount(0);
-  await expect(
-    page.getByRole('button', { name: 'Save', exact: true }),
+    page.getByRole('menuitem', { name: 'Remove', exact: true }),
   ).toBeEnabled();
+  await page.getByRole('menuitem', { name: 'Edit', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: 'Edit Ultra', exact: true });
+  await drawer
+    .getByRole('button', { name: 'Token budget', exact: true })
+    .click();
+  await drawer.getByLabel('Token budget', { exact: true }).fill('8192');
+  await drawer.getByRole('button', { name: 'Apply changes' }).click();
+  await section
+    .getByRole('switch', { name: 'Enable Ultra variant', exact: true })
+    .check();
+  await section
+    .getByLabel('Default variant', { exact: true })
+    .selectOption('ultra');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
     )
     .toBe(2);
-  expect(
-    deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
-        .body,
-    ).configuration!.catalog.reasoning,
-  ).toEqual(original);
-});
-
-test('legacy boolean Reasoning enabled displays its options', async ({
-  page,
-  fixture,
-}) => {
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog.model = { capabilities: { reasoning: true } };
-  await page.goto('/#/deployments/idle/configuration');
-  await expect(
-    page
-      .getByRole('group', { name: 'Capabilities', exact: true })
-      .getByRole('button', { name: 'Reasoning', exact: true }),
-  ).toHaveAttribute('aria-pressed', 'true');
-  await expect(
-    page.getByRole('region', { name: 'Reasoning options', exact: true }),
-  ).toBeVisible();
+  const saved = deploymentDraft(
+    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
+  ).configuration!.catalog;
+  expect(saved.model?.capabilities?.reasoning).toBe(false);
+  expect(saved.reasoning?.default_mode).toBe('ultra');
+  expect(saved.reasoning?.presets?.find((p) => p.id === 'ultra')).toMatchObject(
+    { enabled: true, body: { reasoning_budget: 8192 } },
+  );
 });

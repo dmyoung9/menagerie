@@ -124,9 +124,9 @@ def normalize(profile, alias=None):
                 ),
             }
             for p in presets
-            if p["enabled"] and not disabled
+            if p["enabled"]
         ]
-        if catalog["reasoning"].get("default_mode") and not disabled:
+        if catalog["reasoning"].get("default_mode"):
             model["variants"].append(
                 {"id": MODEL_DEFAULT, "body": {"menagerie_variant": MODEL_DEFAULT}}
             )

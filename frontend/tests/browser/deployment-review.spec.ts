@@ -92,7 +92,7 @@ for (const width of [1440, 576, 320]) {
       'Memory & placement',
       'Performance',
       'Generation',
-      'Capabilities & reasoning',
+      'Modalities & capabilities',
       'Lifecycle',
       'Networking',
     ]) {

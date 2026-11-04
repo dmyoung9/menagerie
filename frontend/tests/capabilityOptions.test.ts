@@ -7,20 +7,22 @@ import {
   mappingKind,
   setReasoningOptions,
   validModeId,
+  defaultReasoningOptions,
+  newModeId,
 } from '../src/capabilityOptions.ts';
 import type { ModelCatalog } from '../src/types';
 
-test('fresh models offer only the four standard unconfigured choices without saving defaults', () => {
+test('existing empty catalogs offer disabled common choices without saving or exposing defaults', () => {
   assert.deepEqual(reasoningOptions({}), []);
   assert.deepEqual(
     reasoningLevels({}).map((mode) => mode.id),
-    ['instant', 'low', 'medium', 'high'],
+    ['instant', 'low', 'medium', 'high', 'xhigh', 'max'],
   );
-  assert(
-    reasoningLevels({}).every(
-      (mode) => !mode.enabled && !Object.keys(mode.body).length,
-    ),
-  );
+  assert(reasoningLevels({}).every((mode) => !mode.enabled));
+  assert.deepEqual(reasoningLevels({})[0].body, {
+    chat_template_kwargs: { enable_thinking: false },
+  });
+  assert.deepEqual(reasoningLevels({})[4].body, { reasoning_effort: 'xhigh' });
 });
 
 test('custom toggle choices come only from saved user levels, with no guessed settings', () => {
@@ -41,11 +43,79 @@ test('custom toggle choices come only from saved user levels, with no guessed se
   const levels = reasoningLevels(catalog);
   assert.deepEqual(
     levels.map((mode) => mode.id),
-    ['instant', 'low', 'medium', 'high', 'research'],
+    ['research', 'instant', 'low', 'medium', 'high', 'xhigh', 'max'],
   );
-  assert.deepEqual(levels[0], catalog.reasoning!.presets![1]);
-  assert.deepEqual(levels.at(-1), catalog.reasoning!.presets![0]);
+  assert.deepEqual(levels[1], {
+    ...catalog.reasoning!.presets![1],
+    body: { chat_template_kwargs: { enable_thinking: false } },
+  });
+  assert.deepEqual(levels[0], catalog.reasoning!.presets![0]);
   assert.deepEqual(catalog, before);
+});
+
+test('six ordered common defaults configure Instant off and expose only Low/Medium/High', () => {
+  const modes = defaultReasoningOptions();
+  assert.deepEqual(
+    modes.filter((mode) => mode.enabled).map((mode) => mode.id),
+    ['low', 'medium', 'high'],
+  );
+  assert.deepEqual(
+    modes.map((mode) => mode.id),
+    ['instant', 'low', 'medium', 'high', 'xhigh', 'max'],
+  );
+  assert.deepEqual(modes[0], {
+    id: 'instant',
+    enabled: false,
+    body: { chat_template_kwargs: { enable_thinking: false } },
+  });
+  for (const mode of modes.slice(1))
+    assert.deepEqual(mode.body, { reasoning_effort: mode.id });
+  modes[1].body.reasoning_effort = 'changed';
+  assert.equal(defaultReasoningOptions()[1].body.reasoning_effort, 'low');
+});
+
+test('saved Ultra remains custom and blank common fallbacks never overwrite configured settings', () => {
+  const catalog: ModelCatalog = {
+    reasoning: {
+      presets: [
+        {
+          id: 'ultra',
+          name: 'Ultra',
+          enabled: true,
+          body: { reasoning_budget: 8192 },
+        },
+        { id: 'instant', enabled: true, body: { reasoning_effort: 'off' } },
+      ],
+    },
+  };
+  assert.deepEqual(
+    reasoningLevels(catalog).slice(0, 2),
+    catalog.reasoning!.presets,
+  );
+});
+
+test('generated IDs avoid common, reserved, saved and unrelated variant IDs', () => {
+  const catalog: ModelCatalog = {
+    reasoning: { presets: [{ id: 'research', enabled: false, body: {} }] },
+    model: { variants: [{ id: 'research-2' }] },
+  };
+  assert.equal(newModeId('Research', catalog), 'research-3');
+  assert.equal(newModeId('XHigh', catalog), 'xhigh-2');
+  assert.equal(newModeId('Model Default', catalog), 'model-default-2');
+  assert.equal(newModeId('研究', catalog), 'variant');
+  const long = 'a'.repeat(80);
+  const id = newModeId(long, { model: { variants: [{ id: 'a'.repeat(64) }] } });
+  assert(validModeId(id));
+  assert.equal(id.length, 64);
+});
+
+test('saved order wins and missing common choices do not exceed the 64-entry limit', () => {
+  const presets = Array.from({ length: 64 }, (_, i) => ({
+    id: `custom-${i}`,
+    enabled: false,
+    body: {},
+  }));
+  assert.deepEqual(reasoningLevels({ reasoning: { presets } }), presets);
 });
 
 test('compact mappings recognize simple controls and keep composites in custom settings', () => {

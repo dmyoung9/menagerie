@@ -457,7 +457,7 @@ export default function App() {
     }
     open({ type: 'deployment-set', modelId });
   };
-  const depView = route[1] || 'enabled',
+  const depView = route[1] === 'disabled' ? 'inactive' : route[1] || 'enabled',
     detail =
       page === 'deployments' && !['enabled', 'inactive'].includes(depView);
   const selected = detail

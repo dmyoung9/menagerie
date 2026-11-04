@@ -348,9 +348,10 @@ export function Field({
   if (control)
     nodes[direct] = cloneElement(control, {
       id: control.props.id || id,
-      'aria-describedby': hint
-        ? `${id}-hint`
-        : control.props['aria-describedby'],
+      'aria-describedby':
+        [control.props['aria-describedby'], hint ? `${id}-hint` : undefined]
+          .filter(Boolean)
+          .join(' ') || undefined,
     });
   return (
     <FieldRoot className="mb-4" data-invalid={control?.props['aria-invalid']}>

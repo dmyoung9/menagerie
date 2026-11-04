@@ -171,12 +171,12 @@ for (const width of [1440, 576, 320]) {
     };
     await page.goto('/#/deployments/idle/configuration');
     const panel = page.getByRole('region', {
-      name: 'Capabilities and reasoning',
+      name: 'Modalities and capabilities',
       exact: true,
     });
     const colors = await primaryColors(page);
     const selected = panel.locator('button[aria-pressed="true"]');
-    await expect(selected).toHaveCount(6);
+    await expect(selected).toHaveCount(4);
     for (const button of await selected.all())
       await expectPrimary(button, colors);
     await expect(panel.locator('.lucide-check')).toHaveCount(0);
@@ -198,21 +198,20 @@ for (const width of [1440, 576, 320]) {
     await expect(text).toHaveAttribute('aria-pressed', 'false');
     await expect(text).not.toHaveCSS('background-color', colors.background);
     await expect(image).toBeDisabled();
-    const options = panel.getByRole('region', {
-      name: 'Reasoning options',
+    const options = page.getByRole('region', {
+      name: 'Variants',
       exact: true,
     });
-    const instant = options.getByRole('button', {
-      name: 'Instant',
+    const instant = options.getByRole('switch', {
+      name: 'Enable Instant variant',
       exact: true,
     });
-    await expect(instant.locator('svg')).toHaveCount(0);
-    await instant.click();
-    await expect(instant).toHaveAttribute('aria-pressed', 'false');
-    await expect(instant).not.toHaveCSS('background-color', colors.background);
+    await expect(instant).toBeChecked();
+    await instant.uncheck();
+    await expect(instant).not.toBeChecked();
     await page.getByRole('button', { name: 'Discard', exact: true }).click();
     await expectPrimary(text, colors);
-    await expectPrimary(instant, colors);
+    await expect(instant).toBeChecked();
     await panel.scrollIntoViewIfNeeded();
     await page.screenshot({
       path: testInfo.outputPath(`primary-capabilities-${width}.png`),

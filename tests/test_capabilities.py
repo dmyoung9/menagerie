@@ -108,7 +108,7 @@ def test_reasoning_support_is_independent_of_preset_exposure():
 
 
 @pytest.mark.parametrize("declared", [False, {"supported": False}])
-def test_explicit_reasoning_off_preserves_presets_without_reenabling_exposure(declared):
+def test_reasoning_off_preserves_independent_variant_exposure_and_application(declared):
     p = profile()
     p["catalog"]["model"] = {
         "capabilities": {
@@ -123,7 +123,19 @@ def test_explicit_reasoning_off_preserves_presets_without_reenabling_exposure(de
     off = normalize(p)
     assert p == original
     assert off["model"]["capabilities"]["reasoning"] == {"supported": False}
-    assert [v["id"] for v in off["model"]["variants"]] == ["custom"]
+    assert [v["id"] for v in off["model"]["variants"]] == [
+        "custom",
+        "default",
+        "instant",
+        "high",
+    ]
+    assert apply_reasoning({"menagerie_variant": "instant"}, p) == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
+    p["catalog"]["reasoning"]["default_mode"] = "high"
+    assert apply_reasoning({}, p) == {"reasoning_effort": "high"}
+    assert apply_reasoning({"menagerie_variant": "model-default"}, p) == {}
+    p["catalog"]["reasoning"].pop("default_mode")
     assert off["reasoning"] == p["catalog"]["reasoning"]
     assert normalize(p | {"catalog": off}) == off
     off["model"]["capabilities"]["reasoning"] = {"supported": True}

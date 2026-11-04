@@ -100,6 +100,26 @@ without improving its existing time-series behavior.
 
 ## Verification
 
+The Variants editor composes shadcn Item rows in an ItemGroup. Its Add variant
+button is in the CardHeader's CardAction, with the default selector in
+CardContent and no introductory, default-selector or footer advisory text.
+Rows have their name in ItemContent and the enablement Switch and overflow menu
+in ItemActions.
+Custom entries have a secondary Custom badge anchored to the right edge of the
+name cell, independent of name length; built-ins and legacy Default do not.
+The legacy Default row stays editable and reorderable but has no exposure Switch;
+it must not imply control over the client's built-in no-variant Default choice.
+Configuration summaries and drag handles are deliberately omitted; editing and
+Move up/down live in the menu. Keyed rows preserve control focus across updates.
+A Base UI Drawer opens on the right on desktop and from the bottom on narrow viewports;
+the owned wrapper is scoped to those directions. Apply updates the parent draft,
+not the server. Nested navigation guards protect both unapplied Drawer edits and
+the builder draft. New drafts seed common reasoning defaults; existing catalogs
+are never reset by merely viewing or saving unrelated settings.
+Variants remain visible and editable independently of the Reasoning capability.
+Their client exposure/defaults and gateway transformations are independent too;
+the declaration is metadata, not a gate on saved variants.
+
 ```sh
 cd frontend
 npm run check

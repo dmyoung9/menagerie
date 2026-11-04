@@ -16,6 +16,8 @@ import { Duration, Placement, RuntimeSettings } from './FormControls';
 import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
 import { Capabilities, OutputLimit } from './Capabilities';
+import { Variants } from './ReasoningVariants';
+import { supportsReasoning } from './capabilityOptions';
 import { useConfirmation } from '@/hooks/use-confirmation';
 import { readApi } from './ui';
 import {
@@ -159,6 +161,7 @@ export function ConfigurationFields({
   const catalog = structuredClone(value.catalog || {});
   delete catalog.catalog_id;
   if (catalog.model) delete catalog.model.name;
+  const hasReasoning = supportsReasoning(catalog);
   return (
     <FieldSet className="configuration-fields">
       <FieldLegend className="sr-only">Model configuration</FieldLegend>
@@ -285,10 +288,20 @@ export function ConfigurationFields({
             {...(section === 'generation'
               ? {
                   after: (
-                    <OutputLimit
-                      catalog={catalog}
-                      change={(catalog) => set({ ...value, catalog })}
-                    />
+                    <>
+                      <OutputLimit
+                        catalog={catalog}
+                        change={(catalog) => set({ ...value, catalog })}
+                      />
+                      {hasReasoning && (
+                        <RuntimeSettings
+                          section="reasoning"
+                          schema={schema}
+                          value={value.config}
+                          change={(config) => set({ ...value, config })}
+                        />
+                      )}
+                    </>
                   ),
                 }
               : {})}
@@ -296,23 +309,19 @@ export function ConfigurationFields({
           />
         ),
       )}
-      <SettingsSection name="capabilities" title="Capabilities & reasoning">
+      <SettingsSection name="capabilities" title="Modalities & capabilities">
         <Capabilities
           key={value.artifact_id + ':' + value.runtime_id}
           catalog={catalog}
           change={(catalog) => set({ ...value, catalog })}
           valid={valid}
           showOutputLimit={false}
-          reasoningControls={
-            <RuntimeSettings
-              section="reasoning"
-              schema={schema}
-              value={value.config}
-              change={(config) => set({ ...value, config })}
-            />
-          }
         />
       </SettingsSection>
+      <Variants
+        catalog={catalog}
+        change={(catalog) => set({ ...value, catalog })}
+      />
       <details key={value.runtime_id}>
         <summary>Advanced model settings</summary>
         <JsonEdit
@@ -510,6 +519,7 @@ export function Editor(props: EditorProps) {
               'performance',
               'generation',
               'capabilities',
+              'variants',
               'lifecycle',
               'network',
             ] as const
@@ -552,7 +562,8 @@ export function Editor(props: EditorProps) {
                     memory: 'Memory & placement',
                     performance: 'Performance',
                     generation: 'Generation',
-                    capabilities: 'Capabilities & reasoning',
+                    capabilities: 'Modalities & capabilities',
+                    variants: 'Variants',
                     lifecycle: 'Lifecycle',
                     network: 'Networking',
                   }[name]

@@ -64,48 +64,73 @@ than silently shadowing the selection.
 
 ## Configure deployment-owned reasoning modes
 
-Under **Capabilities & reasoning**, enable the Reasoning declaration to show
-**Reasoning options**. This declares support and enables your configured levels; it
-does not force the model to think or stop thinking. Turning it off hides and
-deactivates the modes without deleting them. Input/output modalities remain separate.
+The **Reasoning** declaration under **Modalities & capabilities** describes model
+support; it does not force thinking on or off. The separate **Variants** card is
+always available. Its settings, exposure and default selection work independently
+of that declaration, including when Reasoning is disabled.
 
-Use the **Instant / Low / Medium / High** toggle buttons to select the levels
-exposed to clients. These are the only built-in level choices. A level stays
-unavailable until its request control is configured; merely opening the editor
+Use each row's **Enabled** switch to select variants exposed to clients.
+Legacy **Default** entries remain editable but have no enablement switch: the
+client's built-in Default/no-variant choice is not controlled by that row.
+Common choices, in default order, are **Instant, Low, Medium, High, XHigh and Max**.
+Merely opening the editor
 does not save presets or change model behavior. Existing saved presets retain
 their IDs, order, settings and exposure choices, including custom settings on a
 mode named Default.
 
-Use **Add custom level** for your own name and stable client ID. The new level
-appears in the same toggle row, not a separate preset catalog. Custom levels
-come only from saved/user-created settings, never from template text or model
-names. Remove a custom level with its row action.
+New configurations start with Low, Medium and High enabled using request-field
+effort. XHigh and Max use their matching effort values but start disabled.
+Instant starts disabled with `chat_template_kwargs.enable_thinking: false`.
+These defaults do not certify runtime support. Existing configurations are not
+reset or automatically enabled, and a saved Ultra variant remains a custom entry.
+Previously blank common entries receive the sensible default in the editor,
+without rewriting stored settings until a variant change is applied.
 
-Compact mapping rows below the toggles offer:
+Click a variant's name or choose **Edit** from its actions menu to open the editor
+Drawer. **Add variant** uses the same form and asks only for a name; Menagerie
+generates a unique, stable client ID. Renaming does not change that ID. Each compact
+row keeps its enablement switch and overflow menu together. Use **Move up / Move down**
+in the menu to reorder variants, with the same actions available by keyboard.
+The saved order is used for advertised variants;
+clients may apply their own display order. Remove custom variants through their
+actions menu.
 
-- **Native effort:** a `reasoning_effort` string.
-- **Template effort:** a `chat_template_kwargs.reasoning_effort` string.
-- **Thinking (template):** On or Off via `enable_thinking`.
-- **Reasoning/thinking token budgets:** a token count, or `-1` for
+The editor offers:
+
+- **Effort:** a named value sent through the **Request field** (`reasoning_effort`)
+  or **Chat template** (`chat_template_kwargs.reasoning_effort`).
+- **Thinking toggle:** On or Off via `chat_template_kwargs.enable_thinking`.
+- **Token budget:** a token count sent through `reasoning_budget` or
+  `thinking_budget`, or `-1` for
   unlimited **only when the engine supports that field and sentinel**.
-- **Custom request settings:** JSON for combinations of these controls and
-  additional bounded template arguments. An optional prompt prefix is available
-  here for models that use prompt tags. Reserved conversation/tool/template-
-  structure arguments cannot be replaced.
+- **Custom:** combinations of these controls and additional bounded template
+  arguments through **Request JSON**. Reserved conversation/tool/template-structure
+  arguments cannot be replaced.
+
+**Prompt prefix** and **Request JSON** are available with every control. The JSON
+is the complete override object, synchronized with the guided fields, not an
+additional override layer. A prompt prefix can also be used on its own. Invalid
+JSON blocks applying changes; Cancel, Escape and outside dismissal protect
+unapplied edits. **Apply changes** updates the builder draft; use the builder's
+**Save** action to persist it.
+New custom variants start with request-field effort `medium`. A variant cannot
+be added or cleared to an empty request object without a nonblank prompt prefix;
+legacy empty Default entries remain supported for client compatibility.
 
 Do not assume these fields are interchangeable or supported by every engine.
-Native effort and template effort may be different bindings. Budgets are separate
+Request-field effort and chat-template effort may be different bindings. The two
+budget names are runtime-specific request keys, not a universal distinction
+between reasoning and thinking. Budgets are separate
 from the maximum output-token limit and from an engine's startup reasoning budget.
 Zero tokens, hidden reasoning output and a mode named "Off" do not necessarily
 disable thinking. Confirm the engine/template binding before exposing a level.
-Selecting **Not configured** removes that level's body mapping, not its saved
-prompt prefix; clear both to remove all effects. Nothing is executed to discover levels.
+Nothing is executed to discover levels.
 
 ### Defaults and request precedence
 
 - **Model default (no overrides)** leaves request reasoning controls unchanged.
   This can still mean the model thinks by default.
-- Choosing a named **Default reasoning mode** applies it to requests without a
+- Choosing a named **Default variant** applies it to requests without a
   selected mode. Explicit caller fields win over these default fields; template
   arguments merge by key. A default mode need not be exposed as a client choice.
 - Explicitly selecting an exposed mode overrides only its mapped fields, preserving
@@ -120,7 +145,7 @@ require a new chat. Returning to Model default does not erase past tags.
 
 ## Client exposure
 
-Only levels selected in the **Reasoning options** toggle row are emitted as catalog variants in `/v1/models`,
+Only enabled variants in the **Variants** list are emitted as catalog variants in `/v1/models`,
 the OpenCode configuration export, and the existing OpenCode discovery plugin.
 Their gateway selectors survive the plugin's SDK validation. Clients may display
 the stable ID rather than the editable name. The metadata

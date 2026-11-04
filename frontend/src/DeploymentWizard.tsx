@@ -18,6 +18,9 @@ import { Choices, RuntimeSettings } from './FormControls';
 import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
 import { Capabilities } from './Capabilities';
+import { Variants } from './ReasoningVariants';
+import { defaultReasoningOptions } from './capabilityOptions';
+import { SettingsSection } from '@/components/settings-section';
 import type {
   Deployment,
   DeploymentDraft,
@@ -54,9 +57,15 @@ export function DeploymentWizard({
     [idle, setIdle] = useState(300);
   const [catalog, setCatalog] = useState<ModelCatalog>({
     model: {
-      capabilities: { tools: false, input: ['text'], output: ['text'] },
+      capabilities: {
+        tools: false,
+        reasoning: false,
+        input: ['text'],
+        output: ['text'],
+      },
       limit: { output: 1024 },
     },
+    reasoning: { presets: defaultReasoningOptions() },
   });
   const [extra, setExtra] = useState<Record<string, JsonValue>>({}),
     [args, setArgs] = useState<string[]>([]),
@@ -433,12 +442,18 @@ export function DeploymentWizard({
                   </NativeSelect>
                 </Field>
               )}
-              <Capabilities
-                key={artifactId + ':' + runtime?.id}
-                catalog={catalog}
-                change={setCatalog}
-                valid={(key, ok) => setInvalid((v) => ({ ...v, [key]: !ok }))}
-              />
+              <SettingsSection
+                name="capabilities"
+                title="Modalities & capabilities"
+              >
+                <Capabilities
+                  key={artifactId + ':' + runtime?.id}
+                  catalog={catalog}
+                  change={setCatalog}
+                  valid={(key, ok) => setInvalid((v) => ({ ...v, [key]: !ok }))}
+                />
+              </SettingsSection>
+              <Variants catalog={catalog} change={setCatalog} />
               {artifact?.metadata?.projector && schema.mmproj && (
                 <Button
                   variant="outline"

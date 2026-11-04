@@ -1,12 +1,10 @@
 import { FieldSet, FieldLegend } from '@/components/ui/field';
-import type { ReactNode } from 'react';
 import { AudioLines, Brain, Image, Type, Video, Wrench } from 'lucide-react';
 import { NumberControl } from './NumberControl';
 import { Field } from './ui';
 import type { ModelCapabilities, ModelCatalog } from './types';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { reasoningLabel } from './capabilityOptions';
-import { ReasoningModes } from './ReasoningModes';
 import './capabilities.css';
 
 export function OutputLimit({
@@ -41,13 +39,11 @@ export function Capabilities({
   catalog,
   change,
   valid,
-  reasoningControls,
   showOutputLimit = true,
 }: {
   catalog: ModelCatalog;
   change: (catalog: ModelCatalog) => void;
   valid: (key: string, ok: boolean) => void;
-  reasoningControls?: ReactNode;
   showOutputLimit?: boolean;
 }) {
   const model = catalog.model || {};
@@ -74,7 +70,7 @@ export function Capabilities({
   return (
     <section
       className="capabilities-panel"
-      aria-label="Capabilities and reasoning"
+      aria-label="Modalities and capabilities"
     >
       {(['input', 'output'] as const).map((direction) => (
         <FieldSet key={direction} className="output-capabilities">
@@ -152,14 +148,6 @@ export function Capabilities({
         </ToggleGroupItem>
       </ToggleGroup>
       {showOutputLimit && <OutputLimit catalog={catalog} change={change} />}
-      {reasoning && (
-        <ReasoningModes
-          catalog={catalog}
-          change={change}
-          valid={valid}
-          reasoningControls={reasoningControls}
-        />
-      )}
     </section>
   );
 }

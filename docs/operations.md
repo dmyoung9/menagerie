@@ -26,7 +26,7 @@ updating clients. Immutable revisions remain internal for history/recovery.
 See [multi-model deployments](multi-model-deployments.md).
 
 Configuration groups identity, model/engine, memory placement, performance,
-generation, capabilities/reasoning, lifecycle and networking into open sections.
+generation, modalities/capabilities, variants, lifecycle and networking into open sections.
 Jump buttons scroll without switching tabs. Save and Discard stay available in
 the bottom bar; raw JSON overrides remain under **Advanced model settings**.
 The resource preview sits alongside the form on wide screens; on narrow screens
@@ -39,7 +39,8 @@ also depend on advertised engine flags: select its supported speculative type
 set draft-token limits. Blank new controls retain engine defaults. Engine flag
 availability does not establish model compatibility or inference acceptance.
 Layer and MoE-expert CPU offload live with memory placement; the default reasoning
-budget lives beside the composable reasoning modes. Modes can have custom names,
+budget lives with generation settings. The separate Variants list opens a Drawer
+for editing each variant. Variants can have custom names,
 effort values, budgets and template controls; choose the deployment default
 separately from client exposure. See [reasoning modes](model-capabilities.md#configure-deployment-owned-reasoning-modes).
 Text input can be deselected

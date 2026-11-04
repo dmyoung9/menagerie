@@ -6,7 +6,7 @@ import type {
 } from './types';
 
 export const reasoningLabel = (id: string) =>
-  id.charAt(0).toUpperCase() + id.slice(1);
+  id === 'xhigh' ? 'XHigh' : id.charAt(0).toUpperCase() + id.slice(1);
 export const modeLabel = (mode: ReasoningPreset) =>
   mode.name || reasoningLabel(mode.id);
 export const validModeId = (id: string) =>
@@ -43,25 +43,79 @@ export function reasoningOptions(catalog: ModelCatalog): ReasoningPreset[] {
   });
 }
 
-export const standardReasoningIds = ['instant', 'low', 'medium', 'high'];
+export const standardReasoningIds = [
+  'instant',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+/** Seed only new builder drafts; saved catalogs remain authoritative. */
+export function defaultReasoningOptions(): ReasoningPreset[] {
+  return standardReasoningIds.map((id): ReasoningPreset => ({
+    id,
+    enabled: ['low', 'medium', 'high'].includes(id),
+    body:
+      id === 'instant'
+        ? { chat_template_kwargs: { enable_thinking: false } }
+        : { reasoning_effort: id },
+  }));
+}
+
+export const configuredMode = (mode: ReasoningPreset) =>
+  Object.entries(mode.body).some(
+    ([key, value]) =>
+      key !== 'chat_template_kwargs' ||
+      (value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        Object.keys(value).length > 0),
+  ) || !!mode.prompt_prefix?.trim();
+
+export function supportsReasoning(catalog: ModelCatalog): boolean {
+  const value = catalog.model?.capabilities?.reasoning;
+  return value === true || (typeof value === 'object' && value.supported);
+}
+
+export function newModeId(name: string, catalog: ModelCatalog): string {
+  const used = new Set([
+    ...standardReasoningIds,
+    'default',
+    'model-default',
+    ...reasoningOptions(catalog).map((mode) => mode.id),
+    ...(catalog.model?.variants || []).map((mode) => mode.id),
+  ]);
+  const base = modeSlug(name) || 'variant';
+  let id = base;
+  for (let n = 2; used.has(id); n++) {
+    const suffix = `-${n}`;
+    id = base.slice(0, 64 - suffix.length) + suffix;
+  }
+  return id;
+}
 
 /** Standard placeholders are UI choices only, never saved/exposed automatically. */
 export function reasoningLevels(catalog: ModelCatalog): ReasoningPreset[] {
   const saved = reasoningOptions(catalog);
+  const defaults = defaultReasoningOptions();
   return [
-    ...saved.filter((mode) => mode.id === 'default'),
-    ...standardReasoningIds.map(
-      (id) =>
-        saved.find((mode) => mode.id === id) || {
-          id,
-          enabled: false,
-          body: {},
-        },
-    ),
-    ...saved.filter(
-      (mode) =>
-        mode.id !== 'default' && !standardReasoningIds.includes(mode.id),
-    ),
+    // Fill legacy blank common choices in the editor only; never rewrite saved
+    // mappings on read or change a configured mapping, saved name or exposure.
+    ...saved.map((mode) => {
+      const fallback = defaults.find((row) => row.id === mode.id);
+      return fallback && !configuredMode(mode)
+        ? { ...mode, body: fallback.body }
+        : mode;
+    }),
+    ...defaults
+      .filter((mode) => !saved.some((row) => row.id === mode.id))
+      .slice(0, 64 - saved.length)
+      .map((mode) => ({
+        ...mode,
+        enabled: false,
+      })),
   ];
 }
 
