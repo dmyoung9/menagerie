@@ -12,6 +12,15 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
     min: 0,
     max: 1048576,
   };
+  fixture.registry.runtimes[0].capabilities!.schema!['top-p'] = {
+    type: 'number',
+    label: 'Top-p',
+    min: 0,
+    max: 1,
+  };
+  fixture.registry.deployments.find(
+    (d) => d.id === 'idle',
+  )!.profile_snapshot!.config['top-p'] = 0.955;
   fixture.registry.deployments.find(
     (d) => d.id === 'idle',
   )!.profile_snapshot!.config['top-k'] = 0;
@@ -39,7 +48,38 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
     fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
   ).configuration!.config;
   expect(saved['top-k']).toBe(0);
+  expect(saved['top-p']).toBe(0.955);
   expect(saved).not.toHaveProperty('threads');
+});
+
+test('saved thread counts above host concurrency remain editable and save unchanged', async ({
+  page,
+  fixture,
+}) => {
+  fixture.registry.runtimes[0].capabilities!.schema!.threads.label =
+    'CPU threads';
+  fixture.registry.deployments.find(
+    (d) => d.id === 'idle',
+  )!.profile_snapshot!.config.threads = 16;
+  await page.goto('/#/deployments/idle/configuration');
+  await expect(page.getByLabel('CPU threads', { exact: true })).toHaveValue(
+    '16',
+  );
+  await page
+    .getByLabel('Display name', { exact: true })
+    .fill('Oversubscribed fixture');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect
+    .poll(
+      () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
+    )
+    .toBe(2);
+  expect(
+    deploymentDraft(
+      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+        .body,
+    ).configuration!.config.threads,
+  ).toBe(16);
 });
 
 for (const width of [1440, 576, 320]) {

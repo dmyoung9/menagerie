@@ -117,9 +117,7 @@ export function RuntimeFlagCard({
               value['batch-size'] ?? flagDefault('batch-size', schema, value),
             ),
           )
-        : key.startsWith('threads') && host.cpu_count
-          ? Math.min(fieldMax, host.cpu_count)
-          : fieldMax;
+        : fieldMax;
     return (
       <NumberControl
         label={label}
@@ -131,11 +129,14 @@ export function RuntimeFlagCard({
             ? 200
             : key === 'reasoning-budget'
               ? 32768
-              : max === Number.MAX_SAFE_INTEGER
-                ? 1024
-                : max
+              : key.startsWith('threads') && host.cpu_count
+                ? Math.min(max, host.cpu_count)
+                : max === Number.MAX_SAFE_INTEGER
+                  ? 1024
+                  : max
         }
         step={field.type === 'number' ? 0.01 : 1}
+        inputStep={field.type === 'number' ? 'any' : 1}
         required
         disabled={disabled}
         // A blank required value stays in the draft, keeping the item mounted

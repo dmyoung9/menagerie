@@ -10,6 +10,7 @@ export function NumberControl({
   max,
   sliderMax = max ?? 1024,
   step = 1,
+  inputStep = step,
   disabled = false,
   required = false,
   change,
@@ -21,6 +22,7 @@ export function NumberControl({
   max?: number;
   sliderMax?: number;
   step?: number;
+  inputStep?: number | 'any';
   disabled?: boolean;
   required?: boolean;
   change: (value: number | undefined) => void;
@@ -44,7 +46,7 @@ export function NumberControl({
         type="number"
         min={lower}
         max={max}
-        step={step}
+        step={inputStep}
         disabled={disabled}
         required={required}
         value={effective ?? ''}
