@@ -4,11 +4,9 @@ import { Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Field,
-  FieldContent,
   FieldDescription,
   FieldError,
   FieldLabel,
-  FieldSet,
   FieldTitle,
 } from '@/components/ui/field';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -84,67 +82,54 @@ export function RuntimeFlagField({
   const maximum = schema[flag].max ?? Number.MAX_SAFE_INTEGER;
   return (
     <Field
-      orientation="responsive"
       data-runtime-flag={flag}
       data-invalid={invalid}
       data-disabled={disabled}
     >
-      <FieldContent className="min-w-0">
-        {radio ? (
-          <FieldTitle id={`${id}-label`}>{runtimeFlags[flag].title}</FieldTitle>
-        ) : (
-          <FieldLabel htmlFor={id}>{runtimeFlags[flag].title}</FieldLabel>
-        )}
-        <FieldDescription id={`${id}-description`}>
-          <code>{runtimeFlags[flag].syntax}</code> · Engine default:{' '}
-          {flagDefaultNote(flag, schema[flag])}
-        </FieldDescription>
-        {invalid && <FieldError id={`${id}-error`}>{error}</FieldError>}
-      </FieldContent>
+      {radio ? (
+        <FieldTitle id={`${id}-label`}>{runtimeFlags[flag].title}</FieldTitle>
+      ) : (
+        <FieldLabel htmlFor={id}>{runtimeFlags[flag].title}</FieldLabel>
+      )}
       <div className="runtime-flag-controls">
         {radio ? (
-          <FieldSet>
-            <RadioGroup
-              aria-label={label}
-              aria-describedby={describedBy}
-              aria-invalid={invalid}
-              value={String(field.state.value)}
-              disabled={disabled}
-              onBlur={field.handleBlur}
-              onValueChange={(next) => {
-                if (typeof next === 'string') {
-                  field.handleChange(next);
-                  change({ ...value, [flag]: next });
-                }
-              }}
-              className="flex flex-wrap gap-4"
-            >
-              {['auto', 'on', 'off'].map((option) => (
-                <Field key={option} orientation="horizontal" className="w-auto">
-                  <RadioGroupItem
-                    id={`${id}-${option}`}
-                    value={option}
-                    nativeButton
-                    render={<button type="button" />}
-                    disabled={
-                      option === 'off' &&
-                      (value['cache-type-v'] ??
-                        schema['cache-type-v']?.engine_default ??
-                        schema['cache-type-v']?.default ??
-                        'f16') !== 'f16'
-                    }
-                  />
-                  <FieldLabel htmlFor={`${id}-${option}`}>
-                    {option === 'auto'
-                      ? 'Auto'
-                      : option === 'on'
-                        ? 'On'
-                        : 'Off'}
-                  </FieldLabel>
-                </Field>
-              ))}
-            </RadioGroup>
-          </FieldSet>
+          <RadioGroup
+            aria-label={label}
+            aria-labelledby={`${id}-label`}
+            aria-describedby={describedBy}
+            aria-invalid={invalid}
+            value={String(field.state.value)}
+            disabled={disabled}
+            onBlur={field.handleBlur}
+            onValueChange={(next) => {
+              if (typeof next === 'string') {
+                field.handleChange(next);
+                change({ ...value, [flag]: next });
+              }
+            }}
+            className="flex flex-wrap gap-4"
+          >
+            {['auto', 'on', 'off'].map((option) => (
+              <Field key={option} orientation="horizontal" className="w-auto">
+                <RadioGroupItem
+                  id={`${id}-${option}`}
+                  value={option}
+                  nativeButton
+                  render={<button type="button" />}
+                  disabled={
+                    option === 'off' &&
+                    (value['cache-type-v'] ??
+                      schema['cache-type-v']?.engine_default ??
+                      schema['cache-type-v']?.default ??
+                      'f16') !== 'f16'
+                  }
+                />
+                <FieldLabel htmlFor={`${id}-${option}`}>
+                  {option === 'auto' ? 'Auto' : option === 'on' ? 'On' : 'Off'}
+                </FieldLabel>
+              </Field>
+            ))}
+          </RadioGroup>
         ) : (
           <NumberControl
             id={id}
@@ -196,6 +181,11 @@ export function RuntimeFlagField({
           <Trash2 />
         </Button>
       </div>
+      <FieldDescription id={`${id}-description`}>
+        <code>{runtimeFlags[flag].syntax}</code> · Engine default:{' '}
+        {flagDefaultNote(flag, schema[flag])}
+      </FieldDescription>
+      {invalid && <FieldError id={`${id}-error`}>{error}</FieldError>}
     </Field>
   );
 }

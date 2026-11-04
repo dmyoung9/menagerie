@@ -18,7 +18,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
-import { FieldGroup } from '@/components/ui/field';
+import { FieldGroup, FieldLegend, FieldSet } from '@/components/ui/field';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { RuntimeFlagField } from './RuntimeFlagField';
 import type { ConfigPath } from './draft-form';
@@ -85,24 +85,27 @@ export function RuntimeFlagCard({
         </Button>
       }
     >
-      {before}
-      <FieldGroup role="group" aria-label={`${title} flags`}>
-        {supported
-          .filter((key) => value[key] !== undefined)
-          .map((key) => (
-            <RuntimeFlagField
-              key={key}
-              flag={key}
-              schema={schema}
-              value={value}
-              change={change}
-              host={host}
-              disabled={disabled}
-              formPath={formPath}
-            />
-          ))}
-      </FieldGroup>
-      {after}
+      <FieldSet disabled={disabled}>
+        <FieldLegend className="sr-only">{title} flags</FieldLegend>
+        <FieldGroup>
+          {before}
+          {supported
+            .filter((key) => value[key] !== undefined)
+            .map((key) => (
+              <RuntimeFlagField
+                key={key}
+                flag={key}
+                schema={schema}
+                value={value}
+                change={change}
+                host={host}
+                disabled={disabled}
+                formPath={formPath}
+              />
+            ))}
+          {after}
+        </FieldGroup>
+      </FieldSet>
       {selected !== null && (
         <Drawer
           open

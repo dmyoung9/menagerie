@@ -100,9 +100,12 @@ without improving its existing time-series behavior.
 
 ## Verification
 
-Performance and Generation show only explicit engine flags in a `FieldGroup`,
-with responsive `Field` rows, labeled controls, syntax/default descriptions,
-inline errors and icon-only trash actions. Header Add opens a responsive Drawer of
+Performance and Generation group their card contents in `FieldSet`, with a
+screen-reader legend (the visible title remains in CardHeader) and a `FieldGroup`.
+Explicit engine flags use vertical `Field` composition: label, control with
+icon-only trash action, syntax/default `FieldDescription`, then `FieldError`.
+Descriptions and errors stay below the controls at every viewport size.
+Header Add opens a responsive Drawer of
 supported, absent flags (`size="default"`), using leading checkboxes without value
 editors. Cancel discards the selection; Add (N) seeds explicit values in the parent
 draft. Installed help defaults take precedence over the llama.cpp server README

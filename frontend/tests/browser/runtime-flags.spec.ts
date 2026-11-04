@@ -131,6 +131,16 @@ test('clearing is an editing buffer; blur validates without substituting zero an
   await expect(input).toHaveValue('');
   await expect(input).toHaveAttribute('aria-invalid', 'true');
   await expect(row.getByRole('alert')).toHaveText('Enter a number.');
+  await expect(row.locator(':scope > [data-slot="field-error"]')).toHaveText(
+    'Enter a number.',
+  );
+  expect(
+    await row.evaluate((element) =>
+      element.lastElementChild?.previousElementSibling?.getAttribute(
+        'data-slot',
+      ),
+    ),
+  ).toBe('field-description');
   await expect(input).toHaveAttribute('aria-describedby', /-error/);
   await input.fill('12');
   await expect(input).toHaveValue('12');
@@ -384,8 +394,36 @@ for (const width of [1440, 576, 320]) {
     await page.goto('/#/deployments/idle/configuration');
     const card = page.getByRole('region', { name: 'Generation', exact: true });
     const rows = card.locator('[data-runtime-flag]');
+    const group = card.getByRole('group', {
+      name: 'Generation flags',
+      exact: true,
+    });
+    await expect(group).toHaveJSProperty('tagName', 'FIELDSET');
+    await expect(group.locator(':scope > legend')).toHaveText(
+      'Generation flags',
+    );
+    await expect(
+      group.locator(':scope > [data-slot="field-group"]'),
+    ).toHaveCount(1);
     await expect(rows).toHaveCount(2);
     await expect(rows.first()).toHaveAttribute('data-slot', 'field');
+    expect(
+      await rows
+        .first()
+        .evaluate((element) =>
+          Array.from(element.children).map(
+            (child) => child.getAttribute('data-slot') || 'controls',
+          ),
+        ),
+    ).toEqual(['field-label', 'controls', 'field-description']);
+    const inputBox = await rows.first().getByRole('spinbutton').boundingBox();
+    const descriptionBox = await rows
+      .first()
+      .locator(':scope > [data-slot="field-description"]')
+      .boundingBox();
+    expect(descriptionBox!.y).toBeGreaterThanOrEqual(
+      inputBox!.y + inputBox!.height,
+    );
     await expect(rows.first()).toContainText(
       '--top-p N · Engine default: 0.95, 1.0 = disabled',
     );

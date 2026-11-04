@@ -549,11 +549,10 @@ meter::-moz-meter-bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 1;
   min-width: 0;
 }
 .runtime-flag-controls > .range-control,
-.runtime-flag-controls > [data-slot='field-set'] {
+.runtime-flag-controls > [data-slot='radiogroup'] {
   flex: 1;
 }
 .control-pair > * {

@@ -45,6 +45,29 @@ for (const width of [1440, 576, 320]) {
       exact: true,
     });
     await expect(radios.getByRole('radio')).toHaveCount(3);
+    const group = page.getByRole('group', {
+      name: 'Performance flags',
+      exact: true,
+    });
+    await expect(group).toHaveJSProperty('tagName', 'FIELDSET');
+    await expect(group.locator(':scope > legend')).toHaveText(
+      'Performance flags',
+    );
+    const field = page.locator('[data-runtime-flag="flash-attn"]');
+    expect(
+      await field.evaluate((element) =>
+        Array.from(element.children).map(
+          (child) => child.getAttribute('data-slot') || 'controls',
+        ),
+      ),
+    ).toEqual(['field-label', 'controls', 'field-description']);
+    const controlBox = await radios.boundingBox();
+    const descriptionBox = await field
+      .locator(':scope > [data-slot="field-description"]')
+      .boundingBox();
+    expect(descriptionBox!.y).toBeGreaterThanOrEqual(
+      controlBox!.y + controlBox!.height,
+    );
     await expect(radios.locator('label')).toHaveText(['Auto', 'On', 'Off']);
     for (const name of ['Auto', 'On', 'Off'])
       await expect(
