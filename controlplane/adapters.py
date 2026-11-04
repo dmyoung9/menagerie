@@ -60,14 +60,14 @@ FIELDS = {
     },
     "threads": {
         "type": "integer",
-        "min": 1,
+        "min": -1,
         "max": 256,
         "default": 6,
         "label": "CPU threads",
     },
     "threads-batch": {
         "type": "integer",
-        "min": 1,
+        "min": -1,
         "max": 256,
         "default": 6,
         "label": "Batch threads",
@@ -608,7 +608,13 @@ def validate_profile(profile, artifact, runtime, selection=None):
             errors.append(f"{key} exceeds the model context limit ({maximum})")
     if "ctx-size" in config and number("ctx-size", 8192) < parallel * 32:
         errors.append("Context pool must provide at least 32 tokens per parallel slot")
-    if number("ubatch-size", 256) > number("batch-size", 512):
+    # An omitted flag uses the engine's default, not a historical UI preset.
+    # Without probed evidence, leave the combination to the engine to validate.
+    batch = config.get("batch-size", schema.get("batch-size", {}).get("engine_default"))
+    ubatch = config.get(
+        "ubatch-size", schema.get("ubatch-size", {}).get("engine_default")
+    )
+    if type(batch) is int and type(ubatch) is int and ubatch > batch:
         errors.append("Physical batch must not exceed batch size")
     for minimum, maximum in (
         ("spec-draft-n-min", "spec-draft-n-max"),

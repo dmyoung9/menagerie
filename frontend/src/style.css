@@ -545,6 +545,19 @@ meter::-moz-meter-bar {
   flex: 1;
   min-width: 0;
 }
+.runtime-flag-item > [data-slot='item-content'] {
+  flex-basis: 16rem;
+}
+.runtime-flag-item > [data-slot='item-actions'] {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+.runtime-flag-item [data-slot='item-actions'] > .range-control {
+  flex: 1;
+}
+.runtime-flag-item [data-slot='item-actions'] > [data-slot='radiogroup'] {
+  flex: 1;
+}
 .control-pair > * {
   min-width: 0;
   flex: 1;

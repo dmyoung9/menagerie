@@ -100,6 +100,17 @@ without improving its existing time-series behavior.
 
 ## Verification
 
+Performance and Generation show only explicit engine flags in `ItemGroup` rows
+(`size="sm"`), with the upstream flag description as title, syntax/default reference,
+value editor and icon-only trash action. Header Add opens a responsive Drawer of
+supported, absent flags (`size="default"`), using leading checkboxes without value
+editors. Cancel discards the selection; Add (N) seeds explicit values in the parent
+draft. Installed help defaults take precedence over the llama.cpp server README
+reference; historical application presets are not engine defaults. Removing a flag
+omits it rather than passing a disabled value. Existing explicit values, including
+zero and values equal to defaults, remain explicit. Thinking budget is a Generation
+flag; max output tokens remains separate client catalog metadata.
+
 The Variants editor composes shadcn Item rows in an ItemGroup. Its Add variant
 button is in the CardHeader's CardAction, with the default selector in
 CardContent and no introductory, default-selector or footer advisory text.

@@ -23,6 +23,23 @@ for (const width of [1440, 576, 320]) {
       },
     });
     await page.goto('/#/deployments/idle/configuration');
+    await expect(
+      page.getByRole('radiogroup', { name: 'Flash attention', exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Discard', exact: true }),
+    ).toBeDisabled();
+    await page
+      .getByRole('button', { name: 'Add performance flags', exact: true })
+      .click();
+    const drawer = page.getByRole('dialog', {
+      name: 'Add performance flags',
+      exact: true,
+    });
+    await drawer
+      .getByRole('checkbox', { name: 'Flash attention', exact: true })
+      .check();
+    await drawer.getByRole('button', { name: 'Add (1)', exact: true }).click();
     const radios = page.getByRole('radiogroup', {
       name: 'Flash attention',
       exact: true,
@@ -35,9 +52,6 @@ for (const width of [1440, 576, 320]) {
       ).toBeVisible();
     const auto = radios.getByRole('radio', { name: 'Auto', exact: true });
     await expect(auto).toBeChecked();
-    await expect(
-      page.getByRole('button', { name: 'Discard', exact: true }),
-    ).toBeDisabled();
     await auto.focus();
     await page.keyboard.press('ArrowRight');
     await expect(
@@ -152,6 +166,9 @@ test('Flash Attention Off remains unavailable for quantized V cache and radios r
       label: 'V cache',
     },
   });
+  fixture.registry.deployments.find(
+    (d) => d.id === 'idle',
+  )!.profile_snapshot!.config['flash-attn'] = 'auto';
   await page.goto('/#/deployments/idle/configuration');
   const radios = page.getByRole('radiogroup', {
     name: 'Flash attention',

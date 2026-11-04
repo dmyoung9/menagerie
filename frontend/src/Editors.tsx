@@ -17,7 +17,6 @@ import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
 import { Capabilities, OutputLimit } from './Capabilities';
 import { Variants } from './ReasoningVariants';
-import { supportsReasoning } from './capabilityOptions';
 import { useConfirmation } from '@/hooks/use-confirmation';
 import { readApi } from './ui';
 import {
@@ -161,7 +160,6 @@ export function ConfigurationFields({
   const catalog = structuredClone(value.catalog || {});
   delete catalog.catalog_id;
   if (catalog.model) delete catalog.model.name;
-  const hasReasoning = supportsReasoning(catalog);
   return (
     <FieldSet className="configuration-fields">
       <FieldLegend className="sr-only">Model configuration</FieldLegend>
@@ -288,20 +286,10 @@ export function ConfigurationFields({
             {...(section === 'generation'
               ? {
                   after: (
-                    <>
-                      <OutputLimit
-                        catalog={catalog}
-                        change={(catalog) => set({ ...value, catalog })}
-                      />
-                      {hasReasoning && (
-                        <RuntimeSettings
-                          section="reasoning"
-                          schema={schema}
-                          value={value.config}
-                          change={(config) => set({ ...value, config })}
-                        />
-                      )}
-                    </>
+                    <OutputLimit
+                      catalog={catalog}
+                      change={(catalog) => set({ ...value, catalog })}
+                    />
                   ),
                 }
               : {})}
