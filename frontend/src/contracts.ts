@@ -218,6 +218,7 @@ const lifecycle = d.object<T.DeploymentLifecycle>({
 });
 export const deployment: d.Decoder<T.Deployment> = (value, path) =>
   d.object<T.Deployment>({
+    draining: opt(d.boolean),
     engine_pool: opt(d.boolean),
     max_loaded: opt(d.number),
     id: d.string,
@@ -281,6 +282,7 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
       d.fail(`${path}.${key}`, 'no member-specific field on a serving group');
   }
   const common = d.object({
+    draining: opt(d.boolean),
     id: d.string,
     name: d.string,
     enabled: d.boolean,

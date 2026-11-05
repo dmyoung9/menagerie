@@ -530,6 +530,7 @@ export function DeploymentWizard({
                   <summary>Advanced</summary>
                   <>
                     <RuntimeSettings
+                      engineSelected={Boolean(runtime)}
                       formPath="config"
                       schema={Object.fromEntries(
                         Object.entries(schema).filter(

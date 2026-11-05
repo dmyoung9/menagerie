@@ -169,6 +169,22 @@ FIELDS = {
         "label": "MoE expert layers on CPU",
     },
 }
+OPTION_HELP = {
+    "fit": "Let the engine adjust unspecified settings to available device memory. Explicit overrides still constrain fitting.",
+    "fit-target": "Free memory to leave on each device, in MiB. A larger margin leaves more room for the desktop or other models; comma-separated values set different device margins.",
+    "fit-ctx": "Smallest context automatic fitting may choose. Raise this when your workload needs a minimum usable context.",
+    "device": "Engine device identifiers, comma-separated. Use none for CPU-only execution; omit to let the engine choose available devices.",
+    "split-mode": "How to distribute work across multiple GPUs. Usually leave this to the engine; it is not needed for a single GPU.",
+    "tensor-split": "Relative model shares for multiple GPUs, such as 3,1. Useful for unequal devices; omit for engine-selected proportions.",
+    "override-tensor": "Expert-only tensor placement rules. Use when particular tensors must live in a specific buffer; ordinary offloading does not need this.",
+    "cpu-moe": "Keep mixture-of-experts weights in system RAM to reduce VRAM use, potentially at a substantial speed cost.",
+    "n-cpu-moe": "Keep expert weights from this many initial MoE layers in system RAM. Trades generation speed for lower VRAM usage.",
+    "n-cpu-ffn": "Keep feed-forward weights from this many initial dense layers in system RAM. Advanced speed-versus-memory tradeoff.",
+    "cache-type-k": "Precision of the key cache. Lower precision can save memory for longer context; compatibility and quality depend on the model and runtime.",
+    "cache-type-v": "Precision of the value cache. Lower precision can save memory; quantized values may require flash attention.",
+    "gpu-memory-utilization": "Fraction of GPU memory this vLLM instance may use. Reduce it to leave capacity for other workloads.",
+}
+
 OWNED = {
     "model",
     "model-path",
@@ -428,7 +444,7 @@ def option_schema(runtime, flags=None, help_text=None):
             if modern in flags
         }
         schema = {
-            k: v | {"restart_required": True}
+            k: v | {"restart_required": True, "description": OPTION_HELP.get(k, "")}
             for k, v in FIELDS.items()
             if k in flags and k not in retired
         }
@@ -455,6 +471,7 @@ def option_schema(runtime, flags=None, help_text=None):
                 "restart_required": True,
             },
             "gpu-memory-utilization": {
+                "description": OPTION_HELP["gpu-memory-utilization"],
                 "type": "number",
                 "min": 0.05,
                 "max": 0.95,

@@ -100,6 +100,12 @@ without improving its existing time-series behavior.
 
 ## Verification
 
+Memory & placement keeps context/concurrency visible and places uncommon native
+controls behind a keyboard-accessible **Advanced memory and placement** disclosure.
+Descriptions explain the tradeoffs without activating omitted flags. Performance
+and Generation have explicit engine-default, no-engine and unsupported-option
+empty states; Add remains unavailable until supported options exist.
+
 Performance and Generation group their card contents in `FieldSet`, with a
 screen-reader legend (the visible title remains in CardHeader) and a `FieldGroup`.
 Explicit engine flags are compact `Item` rows (`size="sm"`) in an `ItemGroup`.

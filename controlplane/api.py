@@ -109,6 +109,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     | {
                         "unit_id": unit["id"],
                         "unit_name": unit["name"],
+                        "draining": bool(manager.draining.get(unit["id"])),
                         "lifecycle": lifecycle.describe(d, settings)
                         | {"serving": published},
                     }
@@ -119,6 +120,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         totals = store.request_totals()
         return [
             deployment_sets.describe(u, manager.settings(), manager.inflight, totals)
+            | {"draining": bool(manager.draining.get(u["id"]))}
             for u in deployment_sets.units(store)
         ]
 
@@ -620,11 +622,18 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         )
 
     @app.post("/api/serving-deployments/{ident}/stop")
-    async def stop_serving(ident: str):
+    async def stop_serving(ident: str, request: Request):
+        cancel = (await request.json()).get("cancel_requests", False)
+        if not isinstance(cancel, bool):
+            raise ValueError("cancel_requests must be true or false")
         unit = manager.unit(ident)
         return jobs.submit(
             "Unload " + unit["name"],
-            lambda job: manager.stop(ident),
+            lambda job: manager.stop(
+                ident,
+                cancel_requests=cancel,
+                progress=lambda text: jobs.progress(job, text),
+            ),
             deployment_id=ident,
             operation="unload",
         )
@@ -899,8 +908,18 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         )
 
     @app.post("/api/deployments/{ident}/stop")
-    async def stop(ident: str):
-        return jobs.submit("Stop deployment", lambda job: manager.stop(ident))
+    async def stop(ident: str, request: Request):
+        cancel = (await request.json()).get("cancel_requests", False)
+        if not isinstance(cancel, bool):
+            raise ValueError("cancel_requests must be true or false")
+        return jobs.submit(
+            "Stop deployment",
+            lambda job: manager.stop(
+                ident,
+                cancel_requests=cancel,
+                progress=lambda text: jobs.progress(job, text),
+            ),
+        )
 
     @app.post("/api/deployments/{ident}/enabled")
     async def set_deployed(ident: str, request: Request):
@@ -1491,7 +1510,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             "output_tokens": None,
         }
 
+        finished = False
+
         def finish(error=None):
+            nonlocal finished
+            if finished:
+                return
+            finished = True
             manager.release(d)
             record.update(latency=time.monotonic() - started, error=error)
             with store.connect() as c:
@@ -1568,9 +1593,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 502,
             )
         if upstream.status_code != 200:
-            raw = await upstream.aread()
-            await upstream.aclose()
-            finish(f"Upstream HTTP {upstream.status_code}")
+            try:
+                raw = await upstream.aread()
+            finally:
+                try:
+                    await upstream.aclose()
+                finally:
+                    finish(f"Upstream HTTP {upstream.status_code}")
             return PlainTextResponse(
                 raw,
                 status_code=upstream.status_code,
@@ -1642,8 +1671,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 error = redact(str(exc))
                 raise
             finally:
-                await upstream.aclose()
-                finish(error)
+                try:
+                    await upstream.aclose()
+                finally:
+                    finish(error)
 
         return StreamingResponse(
             relay(),

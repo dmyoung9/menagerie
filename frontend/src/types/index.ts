@@ -184,6 +184,7 @@ export type DeploymentLifecycle = {
   last_stop_reason?: string | null;
 };
 export type Deployment = {
+  draining?: boolean;
   id: string;
   name: string;
   engine_pool?: boolean;

@@ -21,6 +21,7 @@ import {
 import { FieldGroup, FieldLegend, FieldSet } from '@/components/ui/field';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { RuntimeFlagField } from './RuntimeFlagField';
+import { Empty } from './ui';
 import type { ConfigPath } from './draft-form';
 import { flagDefault, flagDefaultNote, runtimeFlags } from './runtime-flags';
 import type { HostSnapshot, JsonValue, RuntimeField } from './types';
@@ -37,6 +38,7 @@ export function RuntimeFlagCard({
   before,
   after,
   formPath,
+  engineSelected = true,
 }: {
   name: string;
   title: string;
@@ -49,6 +51,7 @@ export function RuntimeFlagCard({
   before?: ReactNode;
   after?: ReactNode;
   formPath: ConfigPath;
+  engineSelected?: boolean;
 }) {
   const [selected, setSelected] = useState<string[] | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -107,6 +110,23 @@ export function RuntimeFlagCard({
                 />
               ))}
           </ItemGroup>
+          {!supported.some((key) => value[key] !== undefined) && (
+            <Empty
+              title={
+                !engineSelected
+                  ? 'Choose an engine'
+                  : !supported.length
+                    ? 'No supported options'
+                    : 'Using engine defaults'
+              }
+            >
+              {!engineSelected
+                ? `Choose an engine to see its supported ${name} options.`
+                : !supported.length
+                  ? `This engine does not advertise supported ${name} options.`
+                  : 'Add an override only when you need to tune a specific setting.'}
+            </Empty>
+          )}
           {after}
         </FieldGroup>
       </FieldSet>

@@ -295,6 +295,7 @@ export function ConfigurationFields({
                 }
               : {})}
             section={section}
+            engineSelected={Boolean(runtime)}
             formPath={formPath}
           />
         ),
@@ -579,6 +580,7 @@ export function Editor(props: EditorProps) {
               {select('artifact_id', data.models || [], 'Model')}
               {select('runtime_id', data.runtimes || [], 'Engine')}
               <RuntimeSettings
+                engineSelected={Boolean(profile.runtime_id)}
                 schema={
                   data.runtimes?.find((r) => r.id === profile.runtime_id)
                     ?.capabilities?.schema || {}

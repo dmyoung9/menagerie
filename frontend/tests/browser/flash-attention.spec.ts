@@ -241,6 +241,9 @@ test('Flash Attention Off remains unavailable for quantized V cache and radios r
   const off = radios.getByRole('radio', { name: 'Off', exact: true });
   await expect(off).toBeDisabled();
   await page
+    .getByText('Advanced memory and placement', { exact: true })
+    .click();
+  await page
     .getByRole('combobox', { name: 'V cache', exact: true })
     .selectOption('f16');
   await expect(off).toBeEnabled();

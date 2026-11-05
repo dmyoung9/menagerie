@@ -101,6 +101,7 @@ for (const width of [1440, 576, 320]) {
       ).toBeVisible();
     }
     await expect(config.locator('summary')).toHaveText([
+      'Advanced memory and placement',
       'Advanced model settings',
       'Runtime options (JSON)',
       'Engine arguments',
@@ -283,6 +284,9 @@ for (const width of [1440, 576, 320]) {
       config.getByLabel('MTP / draft model path', { exact: true }),
     ).toHaveCount(0);
     await config.getByLabel('Maximum draft tokens', { exact: true }).fill('4');
+    await config
+      .getByText('Advanced memory and placement', { exact: true })
+      .click();
     await config
       .getByLabel('MoE expert layers on CPU', { exact: true })
       .fill('4');

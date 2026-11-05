@@ -190,6 +190,7 @@ export function RuntimeSettings({
   before,
   after,
   disabled = false,
+  engineSelected = Object.keys(schema).length > 0,
   formPath = 'configuration.config',
 }: {
   schema: Record<string, RuntimeField>;
@@ -202,6 +203,7 @@ export function RuntimeSettings({
   before?: ReactNode;
   after?: ReactNode;
   disabled?: boolean;
+  engineSelected?: boolean;
   formPath?: ConfigPath;
 }) {
   const update = (key: string, v: JsonValue | undefined) => {
@@ -504,7 +506,7 @@ export function RuntimeSettings({
                 ? 'Automatic slots'
                 : effective === -1 && key === 'reasoning-budget'
                   ? 'Unlimited'
-                  : f.units
+                  : f.description || f.units
           }
         >
           <NumberControl
@@ -523,7 +525,7 @@ export function RuntimeSettings({
     }
     if (f.type === 'boolean')
       return (
-        <Field key={key} label={label}>
+        <Field key={key} label={label} hint={f.description}>
           <NativeSelect
             value={current === undefined ? '' : String(current)}
             onChange={(e) =>
@@ -541,7 +543,7 @@ export function RuntimeSettings({
       );
     if (f.choices)
       return (
-        <Field key={key} label={label}>
+        <Field key={key} label={label} hint={f.description}>
           <NativeSelect
             value={
               typeof current === 'string' || typeof current === 'number'
@@ -591,7 +593,7 @@ export function RuntimeSettings({
               ? `${effective.toLocaleString()} tokens shared across ${value.parallel ?? schema.parallel.engine_default ?? schema.parallel.default ?? 1} concurrent requests`
               : thread && host.cpu_count
                 ? `${host.cpu_count} host threads available`
-                : f.units
+                : f.description || f.units
         }
       >
         <div className="range-control">
@@ -652,7 +654,11 @@ export function RuntimeSettings({
         .filter(
           ([name, , keys]) =>
             (!section || section === name) &&
-            (keys.some((k) => schema[k]) || before || after),
+            (keys.some((k) => schema[k]) ||
+              before ||
+              after ||
+              name === 'performance' ||
+              name === 'memory'),
         )
         .map(([name, title, keys]) => {
           if (name === 'performance' || name === 'generation')
@@ -670,6 +676,7 @@ export function RuntimeSettings({
                 before={before}
                 after={after}
                 formPath={formPath}
+                engineSelected={engineSelected}
               />
             );
           const fields = (
@@ -689,6 +696,10 @@ export function RuntimeSettings({
                   .filter(
                     (k) =>
                       schema[k] &&
+                      (name !== 'memory' ||
+                        ['ctx-size', 'max-model-len', 'parallel'].includes(
+                          k,
+                        )) &&
                       !(name === 'mtp' && draftKeys?.includes(k)) &&
                       !(
                         name === 'mtp' &&
@@ -701,6 +712,42 @@ export function RuntimeSettings({
                   )
                   .map(control)}
               </FieldGroup>
+              {name === 'memory' && (
+                <>
+                  <p className="text-muted-foreground text-sm">
+                    The engine manages memory and placement by default. Set
+                    context or concurrency only when your workload needs an
+                    explicit limit.
+                  </p>
+                  {keys.some(
+                    (key) =>
+                      schema[key] &&
+                      !['ctx-size', 'max-model-len', 'parallel'].includes(key),
+                  ) && (
+                    <details>
+                      <summary>Advanced memory and placement</summary>
+                      <p className="text-muted-foreground text-sm">
+                        Overrides for offloading, cache precision and
+                        multi-device layouts. Most deployments do not need
+                        these; omitted settings remain engine-managed.
+                      </p>
+                      <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+                        {keys
+                          .filter(
+                            (key) =>
+                              schema[key] &&
+                              ![
+                                'ctx-size',
+                                'max-model-len',
+                                'parallel',
+                              ].includes(key),
+                          )
+                          .map(control)}
+                      </FieldGroup>
+                    </details>
+                  )}
+                </>
+              )}
               {after}
             </>
           );

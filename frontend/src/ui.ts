@@ -153,7 +153,10 @@ export function effectiveTemplate(
   if (override) return first(override);
   return first(modelDefault);
 }
-export function state(d: Pick<Deployment, 'enabled' | 'state'>): string {
+export function state(
+  d: Pick<Deployment, 'enabled' | 'state' | 'draining'>,
+): string {
+  if (d.draining && d.state !== 'STOPPING') return 'Waiting to unload';
   if (d.state === 'FAILED' || d.state === 'ERROR') return 'Errored';
   if (!d.enabled) return 'Inactive';
   return (
