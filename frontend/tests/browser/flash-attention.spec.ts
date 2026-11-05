@@ -89,20 +89,25 @@ for (const width of [1440, 576, 320]) {
       item.locator(':scope > [data-slot="item-actions"] > button'),
     ).toHaveAccessibleName('Remove Flash attention override');
     await expect(field.getByRole('button', { name: /Remove/ })).toHaveCount(0);
-    const controlBox = await radios.boundingBox();
-    const titleBox = await field
-      .locator(':scope > div[data-slot="field-label"]')
-      .boundingBox();
-    const syntaxBox = await syntax.boundingBox();
-    expect(syntaxBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height);
-    expect(controlBox!.y).toBeGreaterThanOrEqual(
-      syntaxBox!.y + syntaxBox!.height,
-    );
-    const descriptionBox = await field
-      .locator(':scope > [data-slot="field-description"]')
-      .boundingBox();
-    expect(descriptionBox!.y).toBeGreaterThanOrEqual(
-      controlBox!.y + controlBox!.height,
+    // Resource-preview text above this card can reflow between protocol calls.
+    const [titleBox, syntaxBox, controlBox, descriptionBox] =
+      await field.evaluate((element) =>
+        [
+          ':scope > div[data-slot="field-label"]',
+          ':scope > label[data-slot="field-label"]',
+          ':scope > [data-slot="radio-group"]',
+          ':scope > [data-slot="field-description"]',
+        ].map((selector) => {
+          const { y, height } = element
+            .querySelector(selector)!
+            .getBoundingClientRect();
+          return { y, height };
+        }),
+      );
+    expect(syntaxBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
+    expect(controlBox.y).toBeGreaterThanOrEqual(syntaxBox.y + syntaxBox.height);
+    expect(descriptionBox.y).toBeGreaterThanOrEqual(
+      controlBox.y + controlBox.height,
     );
     await expect(radios.locator('label')).toHaveText(['Auto', 'On', 'Off']);
     for (const name of ['Auto', 'On', 'Off'])

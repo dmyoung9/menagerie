@@ -438,14 +438,6 @@ for (const width of [1440, 576, 320]) {
         .getByRole('list', { name: 'Generation flag items', exact: true })
         .getByRole('listitem'),
     ).toHaveCount(2);
-    const inputBox = await rows.first().getByRole('spinbutton').boundingBox();
-    const descriptionBox = await rows
-      .first()
-      .locator(':scope > [data-slot="field-description"]')
-      .boundingBox();
-    expect(descriptionBox!.y).toBeGreaterThanOrEqual(
-      inputBox!.y + inputBox!.height,
-    );
     const title = rows.first().locator(':scope > div[data-slot="field-label"]');
     const syntax = rows
       .first()
@@ -457,11 +449,26 @@ for (const width of [1440, 576, 320]) {
     expect(
       await syntax.evaluate((label: HTMLLabelElement) => label.control?.id),
     ).toBe(await rows.first().getByRole('spinbutton').getAttribute('id'));
-    const titleBox = await title.boundingBox();
-    const syntaxBox = await syntax.boundingBox();
-    expect(syntaxBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height);
-    expect(inputBox!.y).toBeGreaterThanOrEqual(
-      syntaxBox!.y + syntaxBox!.height,
+    // Read relative geometry atomically while the resource preview may reflow.
+    const [titleBox, syntaxBox, inputBox, descriptionBox] = await rows
+      .first()
+      .evaluate((element) =>
+        [
+          ':scope > div[data-slot="field-label"]',
+          ':scope > label[data-slot="field-label"]',
+          'input[type="number"]',
+          ':scope > [data-slot="field-description"]',
+        ].map((selector) => {
+          const { y, height } = element
+            .querySelector(selector)!
+            .getBoundingClientRect();
+          return { y, height };
+        }),
+      );
+    expect(syntaxBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
+    expect(inputBox.y).toBeGreaterThanOrEqual(syntaxBox.y + syntaxBox.height);
+    expect(descriptionBox.y).toBeGreaterThanOrEqual(
+      inputBox.y + inputBox.height,
     );
     await expect(
       rows.first().locator(':scope > [data-slot="field-description"]'),
