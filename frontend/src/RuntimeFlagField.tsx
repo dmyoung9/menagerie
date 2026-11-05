@@ -82,7 +82,7 @@ export function RuntimeFlagField({
   };
   const maximum = schema[flag].max ?? Number.MAX_SAFE_INTEGER;
   const title = (
-    <span>
+    <span className="flex min-w-0 flex-col items-start gap-1">
       <span id={`${id}-label`}>{runtimeFlags[flag].title}</span>{' '}
       <code>({runtimeFlags[flag].syntax})</code>
     </span>

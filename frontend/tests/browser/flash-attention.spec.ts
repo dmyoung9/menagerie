@@ -77,6 +77,16 @@ for (const width of [1440, 576, 320]) {
     ).toHaveAccessibleName('Remove Flash attention override');
     await expect(field.getByRole('button', { name: /Remove/ })).toHaveCount(0);
     const controlBox = await radios.boundingBox();
+    const titleBox = await field
+      .locator(':scope > [data-slot="field-label"] span[id]')
+      .boundingBox();
+    const syntaxBox = await field
+      .locator(':scope > [data-slot="field-label"] code')
+      .boundingBox();
+    expect(syntaxBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height);
+    expect(controlBox!.y).toBeGreaterThanOrEqual(
+      syntaxBox!.y + syntaxBox!.height,
+    );
     const descriptionBox = await field
       .locator(':scope > [data-slot="field-description"]')
       .boundingBox();

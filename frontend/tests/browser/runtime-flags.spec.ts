@@ -444,6 +444,13 @@ for (const width of [1440, 576, 320]) {
     const title = rows.first().locator(':scope > [data-slot="field-label"]');
     await expect(title).toHaveText('Top-p sampling (--top-p N)');
     await expect(title.locator('code')).toHaveText('(--top-p N)');
+    await expect(title).toHaveJSProperty('tagName', 'LABEL');
+    const titleBox = await title.locator('span[id]').boundingBox();
+    const syntaxBox = await title.locator('code').boundingBox();
+    expect(syntaxBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height);
+    expect(inputBox!.y).toBeGreaterThanOrEqual(
+      syntaxBox!.y + syntaxBox!.height,
+    );
     await expect(
       rows.first().locator(':scope > [data-slot="field-description"]'),
     ).toHaveText('default: 0.95, 1.0 = disabled');
@@ -478,6 +485,15 @@ for (const width of [1440, 576, 320]) {
     );
     await expect(available.locator('[data-slot="item-title"] code')).toHaveText(
       '(--repeat-penalty N)',
+    );
+    const pickerTitleBox = await available
+      .locator('[data-slot="item-title"] > span > span')
+      .boundingBox();
+    const pickerSyntaxBox = await available
+      .locator('[data-slot="item-title"] code')
+      .boundingBox();
+    expect(pickerSyntaxBox!.y).toBeGreaterThanOrEqual(
+      pickerTitleBox!.y + pickerTitleBox!.height,
     );
     await expect(
       available.locator('[data-slot="item-description"]'),

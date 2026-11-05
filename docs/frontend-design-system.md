@@ -103,8 +103,9 @@ without improving its existing time-series behavior.
 Performance and Generation group their card contents in `FieldSet`, with a
 screen-reader legend (the visible title remains in CardHeader) and a `FieldGroup`.
 Explicit engine flags are compact `Item` rows (`size="sm"`) in an `ItemGroup`.
-`ItemContent` contains the complete vertical `Field`: label with parenthesized
-inline-code flag syntax (for example, Temperature `(--temp N)`), control,
+`ItemContent` contains the complete vertical `Field`: a two-line label with the
+human title above parenthesized inline-code flag syntax (for example, Temperature
+then `(--temp N)`), control,
 `FieldDescription` beginning with `default:` and retaining miscellaneous notes,
 then `FieldError`. The same title/default wording applies in the picker.
 The icon-only trash button

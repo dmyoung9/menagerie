@@ -58,7 +58,7 @@ export function RuntimeFlagCard({
   const content = (key: string) => (
     <ItemContent className="min-w-0">
       <ItemTitle className="line-clamp-none">
-        <span>
+        <span className="flex min-w-0 flex-col items-start gap-1">
           <span>{runtimeFlags[key].title}</span>{' '}
           <code>({runtimeFlags[key].syntax})</code>
         </span>
