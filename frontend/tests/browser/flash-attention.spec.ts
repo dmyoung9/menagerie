@@ -23,11 +23,92 @@ for (const width of [1440, 576, 320]) {
       },
     });
     await page.goto('/#/deployments/idle/configuration');
+    await expect(
+      page.getByRole('radiogroup', { name: 'Flash attention', exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Discard', exact: true }),
+    ).toBeDisabled();
+    await page
+      .getByRole('button', { name: 'Add performance flags', exact: true })
+      .click();
+    const drawer = page.getByRole('dialog', {
+      name: 'Add performance flags',
+      exact: true,
+    });
+    await drawer
+      .getByRole('checkbox', { name: 'Flash attention', exact: true })
+      .check();
+    await drawer.getByRole('button', { name: 'Add (1)', exact: true }).click();
     const radios = page.getByRole('radiogroup', {
       name: 'Flash attention',
       exact: true,
     });
     await expect(radios.getByRole('radio')).toHaveCount(3);
+    const group = page.getByRole('group', {
+      name: 'Performance flags',
+      exact: true,
+    });
+    await expect(group).toHaveJSProperty('tagName', 'FIELDSET');
+    await expect(group.locator(':scope > legend')).toHaveText(
+      'Performance flags',
+    );
+    const field = page.locator('[data-runtime-flag="flash-attn"]');
+    await expect(
+      field.locator(':scope > div[data-slot="field-label"]'),
+    ).toHaveText('Flash attention');
+    await expect(
+      field.locator(':scope > div[data-slot="field-label"] code'),
+    ).toHaveCount(0);
+    const syntax = field.locator(':scope > label[data-slot="field-label"]');
+    await expect(syntax).toHaveText('(--flash-attn [on|off|auto])');
+    await expect(syntax.locator(':scope > code')).toHaveText(
+      '(--flash-attn [on|off|auto])',
+    );
+    await expect(radios).toHaveAccessibleDescription(
+      '(--flash-attn [on|off|auto]) default: auto',
+    );
+    await expect(
+      field.locator(':scope > [data-slot="field-description"]'),
+    ).toHaveText('default: auto');
+    expect(
+      await field.evaluate((element) =>
+        Array.from(element.children).map(
+          (child) => child.getAttribute('data-slot') || 'controls',
+        ),
+      ),
+    ).toEqual([
+      'field-label',
+      'field-label',
+      'radio-group',
+      'field-description',
+    ]);
+    const item = field.locator('..').locator('..');
+    await expect(item).toHaveAttribute('data-slot', 'item');
+    await expect(
+      item.locator(':scope > [data-slot="item-actions"] > button'),
+    ).toHaveAccessibleName('Remove Flash attention override');
+    await expect(field.getByRole('button', { name: /Remove/ })).toHaveCount(0);
+    // Resource-preview text above this card can reflow between protocol calls.
+    const [titleBox, syntaxBox, controlBox, descriptionBox] =
+      await field.evaluate((element) =>
+        [
+          ':scope > div[data-slot="field-label"]',
+          ':scope > label[data-slot="field-label"]',
+          ':scope > [data-slot="radio-group"]',
+          ':scope > [data-slot="field-description"]',
+        ].map((selector) => {
+          const { y, height } = element
+            .querySelector(selector)!
+            .getBoundingClientRect();
+          return { y, height };
+        }),
+      );
+    expect(syntaxBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
+    expect(controlBox.y).toBeGreaterThanOrEqual(syntaxBox.y + syntaxBox.height);
+    expect(descriptionBox.y).toBeGreaterThanOrEqual(
+      controlBox.y + controlBox.height,
+    );
     await expect(radios.locator('label')).toHaveText(['Auto', 'On', 'Off']);
     for (const name of ['Auto', 'On', 'Off'])
       await expect(
@@ -35,9 +116,6 @@ for (const width of [1440, 576, 320]) {
       ).toBeVisible();
     const auto = radios.getByRole('radio', { name: 'Auto', exact: true });
     await expect(auto).toBeChecked();
-    await expect(
-      page.getByRole('button', { name: 'Discard', exact: true }),
-    ).toBeDisabled();
     await auto.focus();
     await page.keyboard.press('ArrowRight');
     await expect(
@@ -152,6 +230,9 @@ test('Flash Attention Off remains unavailable for quantized V cache and radios r
       label: 'V cache',
     },
   });
+  fixture.registry.deployments.find(
+    (d) => d.id === 'idle',
+  )!.profile_snapshot!.config['flash-attn'] = 'auto';
   await page.goto('/#/deployments/idle/configuration');
   const radios = page.getByRole('radiogroup', {
     name: 'Flash attention',

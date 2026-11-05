@@ -1,10 +1,4 @@
-import {
-  FieldGroup,
-  FieldSet,
-  FieldLegend,
-  Field as FieldRow,
-  FieldLabel,
-} from '@/components/ui/field';
+import { FieldGroup, FieldSet, FieldLegend } from '@/components/ui/field';
 import {
   NativeSelect,
   NativeSelectOption,
@@ -13,13 +7,14 @@ import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Field } from './ui';
-import { useId, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { SettingsSection } from '@/components/settings-section';
 import { memory } from '@/lib/formatters';
 import { NumberControl } from './NumberControl';
 import { DraftTokenRange } from './DraftTokenRange';
+import { RuntimeFlagCard } from './RuntimeFlagCard';
+import type { ConfigPath } from './draft-form';
 import type {
   DeploymentDraft,
   GpuSnapshot,
@@ -185,6 +180,7 @@ export function RuntimeSettings({
   before,
   after,
   disabled = false,
+  formPath = 'configuration.config',
 }: {
   schema: Record<string, RuntimeField>;
   value: Record<string, JsonValue>;
@@ -192,18 +188,12 @@ export function RuntimeSettings({
   host?: HostSnapshot;
   recommendation?: RuntimeRecommendation;
   section?:
-    | 'multimodal'
-    | 'mtp'
-    | 'memory'
-    | 'performance'
-    | 'generation'
-    | 'reasoning'
-    | 'other';
+    'multimodal' | 'mtp' | 'memory' | 'performance' | 'generation' | 'other';
   before?: ReactNode;
   after?: ReactNode;
   disabled?: boolean;
+  formPath?: ConfigPath;
 }) {
-  const radioId = useId();
   const update = (key: string, v: JsonValue | undefined) => {
     const next = { ...value };
     if (v === undefined) delete next[key];
@@ -253,9 +243,16 @@ export function RuntimeSettings({
     [
       'generation',
       'Generation',
-      ['temp', 'top-p', 'top-k', 'min-p', 'presence-penalty', 'repeat-penalty'],
+      [
+        'temp',
+        'top-p',
+        'top-k',
+        'min-p',
+        'presence-penalty',
+        'repeat-penalty',
+        'reasoning-budget',
+      ],
     ],
-    ['reasoning', 'Reasoning', ['reasoning-budget']],
   ];
   groups.push([
     'other',
@@ -500,45 +497,6 @@ export function RuntimeSettings({
         </Field>
       );
     }
-    if (key === 'flash-attn')
-      return (
-        <FieldSet key={key}>
-          <FieldLegend variant="label">{label}</FieldLegend>
-          <RadioGroup
-            aria-label={label}
-            value={typeof current === 'string' ? current : 'auto'}
-            disabled={disabled}
-            onValueChange={(v) => {
-              if (typeof v === 'string') update(key, v);
-            }}
-            className="flex flex-wrap gap-6"
-          >
-            {(['auto', 'on', 'off'] as const).map((option) => (
-              <FieldRow
-                key={option}
-                orientation="horizontal"
-                className="w-auto"
-              >
-                <RadioGroupItem
-                  value={option}
-                  id={`${radioId}-${option}`}
-                  nativeButton
-                  render={<button type="button" />}
-                  disabled={
-                    option === 'off' &&
-                    (value['cache-type-v'] ??
-                      schema['cache-type-v']?.default ??
-                      'f16') !== 'f16'
-                  }
-                />
-                <FieldLabel htmlFor={`${radioId}-${option}`}>
-                  {option === 'auto' ? 'Auto' : option === 'on' ? 'On' : 'Off'}
-                </FieldLabel>
-              </FieldRow>
-            ))}
-          </RadioGroup>
-        </FieldSet>
-      );
     if (f.choices)
       return (
         <Field key={key} label={label}>
@@ -655,6 +613,23 @@ export function RuntimeSettings({
             (keys.some((k) => schema[k]) || before || after),
         )
         .map(([name, title, keys]) => {
+          if (name === 'performance' || name === 'generation')
+            return (
+              <RuntimeFlagCard
+                key={name}
+                name={name}
+                title={title}
+                keys={keys}
+                schema={schema}
+                value={value}
+                change={change}
+                host={host}
+                disabled={disabled}
+                before={before}
+                after={after}
+                formPath={formPath}
+              />
+            );
           const fields = (
             <>
               {before}
@@ -687,9 +662,7 @@ export function RuntimeSettings({
               {after}
             </>
           );
-          return section === 'multimodal' ||
-            section === 'mtp' ||
-            section === 'reasoning' ? (
+          return section === 'multimodal' || section === 'mtp' ? (
             <div key={name}>{fields}</div>
           ) : (
             <SettingsSection key={name} name={name} title={title}>

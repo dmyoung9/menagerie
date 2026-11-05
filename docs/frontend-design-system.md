@@ -100,6 +100,42 @@ without improving its existing time-series behavior.
 
 ## Verification
 
+Performance and Generation group their card contents in `FieldSet`, with a
+screen-reader legend (the visible title remains in CardHeader) and a `FieldGroup`.
+Explicit engine flags are compact `Item` rows (`size="sm"`) in an `ItemGroup`.
+`ItemContent` contains the complete vertical `Field`: a `FieldTitle` containing
+only the human title, a separate sibling `FieldLabel` containing parenthesized
+inline-code flag syntax, then the control,
+`FieldDescription` beginning with `default:` and retaining miscellaneous notes,
+then `FieldError`. The syntax label targets numeric inputs; radio groups retain
+their human title as the accessible name and reference syntax/default notes as
+descriptions. The picker uses the same stacked title/syntax/default wording.
+The icon-only trash button
+belongs separately in `ItemActions`, not inside the field.
+Descriptions and errors stay below the controls at every viewport size.
+Header Add opens a responsive Drawer of
+supported, absent flags (`size="default"`), using leading checkboxes without value
+editors. Cancel discards the selection; Add (N) seeds explicit values in the parent
+draft. Installed help defaults take precedence over the llama.cpp server README
+reference; historical application presets are not engine defaults. Removing a flag
+omits it rather than passing a disabled value. Existing explicit values, including
+zero and values equal to defaults, remain explicit. Thinking budget is a Generation
+flag; max output tokens remains separate client catalog metadata.
+
+TanStack Form owns the editor draft and transient numeric text together; cards
+do not create independent forms. A module-level Zod schema checks known flag
+types without supplying defaults or stripping extensions. Installed capability
+constraints are validated alongside it. Batch comparisons require explicit values
+or installed-engine defaults, never reference presets. Numeric controls compose
+`FieldGroup`/`Field` with an input and slider. Clearing the input preserves blank
+text while typing; blur validates and commits valid numbers without substituting
+zero or an automatic sentinel. Submission validates any pending text before
+serialization. Invalid text participates in dirty/navigation protection; Discard
+resets text and errors. JSON replacements reconcile changed values, capability
+refreshes preserve edits, and model membership changes keep buffers with their
+original member. Backend validation and wire decoders remain authoritative at
+their boundaries.
+
 The Variants editor composes shadcn Item rows in an ItemGroup. Its Add variant
 button is in the CardHeader's CardAction, with the default selector in
 CardContent and no introductory, default-selector or footer advisory text.

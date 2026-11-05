@@ -65,6 +65,9 @@ jobs:
             uv run --no-sync python -m scripts.prepare_release
           fi
       - run: uv run --no-sync python -m scripts.check_distribution dist/*.whl dist/*.tar.gz
+      # uv builds the dashboard in an isolated source tree, not this checkout.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: frontend
       - run: npm test
         working-directory: frontend
       - run: uv venv /tmp/menagerie-wheel-check

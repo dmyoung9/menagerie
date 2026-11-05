@@ -130,7 +130,7 @@ test('a model name containing MTP does not offer Embedded without GGUF evidence'
   ).toHaveText(['None']);
 });
 
-test('numeric engine defaults are real values, editable by sliders, and stay implicit until edited', async ({
+test('numeric flags are absent until added and seed engine rather than policy defaults', async ({
   page,
   fixture,
 }) => {
@@ -169,7 +169,7 @@ test('numeric engine defaults are real values, editable by sliders, and stay imp
     },
     threads: {
       type: 'integer',
-      min: 1,
+      min: -1,
       max: 256,
       default: 6,
       engine_default: -1,
@@ -177,7 +177,7 @@ test('numeric engine defaults are real values, editable by sliders, and stay imp
     },
     'threads-batch': {
       type: 'integer',
-      min: 1,
+      min: -1,
       max: 256,
       default: 6,
       default_from: 'threads',
@@ -185,6 +185,32 @@ test('numeric engine defaults are real values, editable by sliders, and stay imp
     },
   });
   await page.goto('/#/deployments/idle/configuration');
+  await expect(page.getByLabel('Temperature', { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Discard', exact: true }),
+  ).toBeDisabled();
+  for (const [category, labels] of [
+    [
+      'performance',
+      ['Batch size', 'Physical batch', 'CPU threads', 'Batch threads'],
+    ],
+    ['generation', ['Temperature', 'Top-p']],
+  ] as const) {
+    await page
+      .getByRole('button', { name: `Add ${category} flags`, exact: true })
+      .click();
+    const drawer = page.getByRole('dialog', {
+      name: `Add ${category} flags`,
+      exact: true,
+    });
+    await expect(drawer.getByRole('spinbutton')).toHaveCount(0);
+    await expect(drawer.getByRole('slider')).toHaveCount(0);
+    for (const label of labels)
+      await drawer.getByRole('checkbox', { name: label, exact: true }).check();
+    await drawer
+      .getByRole('button', { name: `Add (${labels.length})`, exact: true })
+      .click();
+  }
   for (const [label, value] of [
     ['Temperature', '0.8'],
     ['Top-p', '0.95'],
@@ -198,9 +224,6 @@ test('numeric engine defaults are real values, editable by sliders, and stay imp
       page.getByRole('slider', { name: label + ' range', exact: true }),
     ).toBeEnabled();
   }
-  await expect(
-    page.getByRole('button', { name: 'Discard', exact: true }),
-  ).toBeDisabled();
   const temp = page.getByRole('slider', {
     name: 'Temperature range',
     exact: true,
@@ -212,7 +235,7 @@ test('numeric engine defaults are real values, editable by sliders, and stay imp
   );
   await page.getByLabel('CPU threads', { exact: true }).fill('4');
   await expect(page.getByLabel('Batch threads', { exact: true })).toHaveValue(
-    '4',
+    '-1',
   );
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect
@@ -223,9 +246,14 @@ test('numeric engine defaults are real values, editable by sliders, and stay imp
   const saved = deploymentDraft(
     fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
   ).configuration!.config;
-  expect(saved).toMatchObject({ temp: 0.81, threads: 4 });
-  for (const key of ['threads-batch', 'batch-size', 'ubatch-size', 'top-p'])
-    expect(saved).not.toHaveProperty(key);
+  expect(saved).toMatchObject({
+    temp: 0.81,
+    threads: 4,
+    'threads-batch': -1,
+    'batch-size': 2048,
+    'ubatch-size': 512,
+    'top-p': 0.95,
+  });
 });
 
 for (const width of [1440, 576, 320]) {
@@ -275,6 +303,14 @@ for (const width of [1440, 576, 320]) {
         label: 'Min-p',
       },
     });
+    Object.assign(
+      fixture.registry.deployments.find((d) => d.id === 'idle')!
+        .profile_snapshot!.config,
+      {
+        'top-p': 0.95,
+        'min-p': 0.05,
+      },
+    );
     await page.goto('/#/deployments/idle/configuration');
     const range = page.getByRole('group', {
       name: 'Draft tokens',

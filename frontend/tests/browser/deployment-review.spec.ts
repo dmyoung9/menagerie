@@ -227,6 +227,30 @@ for (const width of [1440, 576, 320]) {
       .click();
     await expect(
       config.getByLabel('Default reasoning budget', { exact: true }),
+    ).toHaveCount(0);
+    await config
+      .getByRole('button', { name: 'Add generation flags', exact: true })
+      .click();
+    const picker = page.getByRole('dialog', {
+      name: 'Add generation flags',
+      exact: true,
+    });
+    for (const key of [
+      'temp',
+      'top-p',
+      'top-k',
+      'min-p',
+      'presence-penalty',
+      'repeat-penalty',
+      'Default reasoning budget',
+    ])
+      await picker.getByRole('checkbox', { name: key, exact: true }).check();
+    await expect(
+      picker.getByRole('button', { name: 'Add (7)', exact: true }),
+    ).toBeInViewport();
+    await picker.getByRole('button', { name: 'Add (7)', exact: true }).click();
+    await expect(
+      config.getByLabel('Default reasoning budget', { exact: true }),
     ).toBeVisible();
     await expect(
       inputs.getByRole('button', { name: 'Images', exact: true }),

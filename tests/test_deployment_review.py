@@ -122,6 +122,24 @@ def test_executable_defaults_are_scoped_wrapped_and_backend_specific():
     assert adapters.option_schema(saved)["spec-draft-n-max"]["engine_default"] == 2
 
 
+@pytest.mark.parametrize("key", ["threads", "threads-batch"])
+def test_explicit_automatic_threads_are_valid_and_remain_explicit(key):
+    runtime = {
+        "engine": "llama.cpp",
+        "execution_kind": "native",
+        "capabilities": {"flags": [key]},
+    }
+    profile = {"config": {key: -1}, "raw_args": []}
+    assert adapters.validate_profile(profile, {"format": "unknown"}, runtime) == []
+    assert profile["config"] == {key: -1}
+    assert any(
+        key in error
+        for error in adapters.validate_profile(
+            profile | {"config": {key: -2}}, {"format": "unknown"}, runtime
+        )
+    )
+
+
 @pytest.mark.asyncio
 async def test_engine_help_defaults_are_cached_without_mutating_runtime(
     tmp_path, monkeypatch

@@ -7,7 +7,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type SetStateAction,
+} from 'react';
 import { reconcileRuntimeOptions } from './runtime-options';
 import { readApi } from './ui';
 import { deployment } from './contracts';
@@ -26,9 +32,11 @@ import type {
   DeploymentDraft,
   JsonValue,
   ModelCatalog,
+  ProfileDraft,
   TemplateSelection,
 } from './types';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
+import { DraftFormProvider, useDraftForm } from './use-draft-form';
 
 export function DeploymentWizard({
   data,
@@ -67,8 +75,27 @@ export function DeploymentWizard({
     },
     reasoning: { presets: defaultReasoningOptions() },
   });
-  const [extra, setExtra] = useState<Record<string, JsonValue>>({}),
-    [args, setArgs] = useState<string[]>([]),
+  const {
+    form,
+    value: extraDraft,
+    setValue: setExtraDraft,
+  } = useDraftForm<ProfileDraft>(
+    { ...defaults.profiles, config: {} },
+    (draft) => {
+      setExtraDraft(draft);
+      advance();
+    },
+  );
+  const extra = extraDraft.config;
+  const setExtra = useCallback(
+    (update: SetStateAction<Record<string, JsonValue>>) =>
+      setExtraDraft((draft) => ({
+        ...draft,
+        config: typeof update === 'function' ? update(draft.config) : update,
+      })),
+    [setExtraDraft],
+  );
+  const [args, setArgs] = useState<string[]>([]),
     [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [templateOverride, setTemplateOverride] =
     useState<TemplateSelection | null>(null);
@@ -107,12 +134,21 @@ export function DeploymentWizard({
     const keys = stringArray(JSON.parse(schemaKeys) as unknown);
     const nextDefaults = jsonObject(JSON.parse(extraDefaults) as unknown);
     previousRuntime.current = { id: runtime?.id, keys };
-    setExtra((current) =>
-      !previous || previous.id !== runtime?.id
-        ? nextDefaults
-        : reconcileRuntimeOptions(current, nextDefaults, previous.keys, keys),
-    );
-  }, [runtime?.id, extraDefaults, schemaKeys]);
+    setExtraDraft((draft) => ({
+      ...draft,
+      runtime_id: runtime?.id || '',
+      artifact_id: artifactId,
+      config:
+        !previous || previous.id !== runtime?.id
+          ? nextDefaults
+          : reconcileRuntimeOptions(
+              draft.config,
+              nextDefaults,
+              previous.keys,
+              keys,
+            ),
+    }));
+  }, [runtime?.id, artifactId, extraDefaults, schemaKeys, setExtraDraft]);
   const contextKey = runtime?.engine === 'vllm' ? 'max-model-len' : 'ctx-size';
   const hasContext = Boolean(schema[contextKey]),
     hasParallel = Boolean(schema.parallel);
@@ -234,404 +270,412 @@ export function DeploymentWizard({
           </AlertDescription>
         </Alert>
       )}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (step < 2) advance();
-        }}
-      >
-        <FieldSet disabled={busy}>
-          {step === 0 && (
-            <>
+      <DraftFormProvider value={form}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (step < 2) void form.handleSubmit();
+          }}
+        >
+          <FieldSet disabled={busy}>
+            {step === 0 && (
               <>
-                <Field label="Model">
-                  <NativeSelect
-                    required
-                    value={artifactId}
-                    onChange={(e) => {
-                      setArtifactId(e.target.value);
-                      setRuntimeId('');
-                      setExtra({});
-                      setTemplateOverride(null);
-                    }}
-                  >
-                    <NativeSelectOption value="" disabled>
-                      Select model…
-                    </NativeSelectOption>
-                    {(data.models || []).map((m) => (
-                      <NativeSelectOption key={m.id} value={m.id}>
-                        {m.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                {engines.length ? (
-                  <Field label="Engine">
+                <>
+                  <Field label="Model">
                     <NativeSelect
-                      value={runtime?.id}
+                      required
+                      value={artifactId}
                       onChange={(e) => {
-                        setRuntimeId(e.target.value);
+                        setArtifactId(e.target.value);
+                        setRuntimeId('');
                         setExtra({});
+                        setTemplateOverride(null);
                       }}
                     >
-                      {engines.map((r) => (
-                        <NativeSelectOption key={r.id} value={r.id}>
-                          {r.name}
+                      <NativeSelectOption value="" disabled>
+                        Select model…
+                      </NativeSelectOption>
+                      {(data.models || []).map((m) => (
+                        <NativeSelectOption key={m.id} value={m.id}>
+                          {m.name}
                         </NativeSelectOption>
                       ))}
                     </NativeSelect>
                   </Field>
-                ) : (
-                  <div className="empty">
-                    <h3>No compatible engine</h3>
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={setupEngine}
-                    >
-                      Set up engine
-                    </Button>
-                  </div>
-                )}
-                {artifact && (
-                  <ChatTemplateSettings
-                    label="Chat template"
-                    model={artifact}
-                    override={templateOverride}
-                    onChange={setTemplateOverride}
-                  />
-                )}
-              </>
-            </>
-          )}
-          {step === 1 && (
-            <>
-              <Field label="Name">
-                <Input
-                  required
-                  value={displayName}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </Field>
-              <Field label="API model">
-                <Input
-                  required
-                  pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}"
-                  value={apiAlias}
-                  onChange={(e) => setAlias(e.target.value)}
-                />
-              </Field>
-              <>
-                {hasContext && (
-                  <Field
-                    label="Context / request"
-                    hint={
-                      suggestedContext
-                        ? `Suggested ceiling: ${suggestedContext.toLocaleString()} tokens per request (estimated)`
-                        : 'Capacity recommendation unavailable or minimum context does not fit'
-                    }
-                  >
-                    <Choices
-                      label="Context size"
-                      value={custom ? 'custom' : String(context)}
-                      options={[
-                        ...[8192, 16384, 32768].map((n) => ({
-                          value: String(n),
-                          label: `${n / 1024}K${suggestedContext && n > suggestedContext ? ' ⚠' : ''}`,
-                          disabled:
-                            n * (hasParallel ? parallel : 1) >
-                            (schema[contextKey].max || 1048576),
-                        })),
-                        { value: 'custom', label: 'Custom' },
-                      ]}
-                      change={(next) => {
-                        setCustom(next === 'custom');
-                        if (next !== 'custom') setContext(Number(next));
-                      }}
-                    />
-                    {typeof recommendedContext === 'number' && (
+                  {engines.length ? (
+                    <Field label="Engine">
+                      <NativeSelect
+                        value={runtime?.id}
+                        onChange={(e) => {
+                          setRuntimeId(e.target.value);
+                          setExtra({});
+                        }}
+                      >
+                        {engines.map((r) => (
+                          <NativeSelectOption key={r.id} value={r.id}>
+                            {r.name}
+                          </NativeSelectOption>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                  ) : (
+                    <div className="empty">
+                      <h3>No compatible engine</h3>
                       <Button
                         variant="outline"
                         type="button"
-                        onClick={() => {
-                          setContext(
-                            Math.max(
-                              schema[contextKey].min || 512,
-                              Math.floor(
-                                recommendedContext /
-                                  (hasParallel ? parallel : 1),
-                              ),
-                            ),
-                          );
-                          setCustom(true);
-                        }}
+                        onClick={setupEngine}
                       >
-                        Use suggested default
+                        Set up engine
                       </Button>
-                    )}
-                    {custom && (
-                      <Input
-                        aria-label="Custom context / request"
-                        type="number"
-                        required
-                        min={schema[contextKey].min || 512}
-                        max={
-                          (schema[contextKey].max || 1048576) /
-                          (hasParallel ? parallel : 1)
-                        }
-                        value={context}
-                        onChange={(e) => setContext(Number(e.target.value))}
-                      />
-                    )}
-                  </Field>
-                )}
-                {hasParallel && (
-                  <Field
-                    label="Concurrent requests"
-                    hint={`Shared context pool: ${(context * parallel).toLocaleString()} tokens`}
-                  >
-                    <Input
-                      type="number"
-                      min={1}
-                      max={schema.parallel.max || 64}
-                      required
-                      value={parallel}
-                      onChange={(e) => setParallel(Number(e.target.value))}
-                    />
-                  </Field>
-                )}
-                {!hasContext && (
-                  <p className="muted">
-                    This engine requires manual context configuration in
-                    Advanced.
-                  </p>
-                )}
-              </>
-              <Field label="Mode">
-                <NativeSelect
-                  value={residency}
-                  onChange={(e) => setResidency(e.target.value)}
-                >
-                  <NativeSelectOption value="on-demand">
-                    On demand
-                  </NativeSelectOption>
-                  <NativeSelectOption value="pinned">Pinned</NativeSelectOption>
-                  <NativeSelectOption value="evictable">
-                    Evictable
-                  </NativeSelectOption>
-                </NativeSelect>
-                <small>
-                  {residency === 'on-demand'
-                    ? 'Loads when a client sends a request.'
-                    : residency === 'pinned'
-                      ? 'Never automatically unloaded to make room.'
-                      : 'Loads manually; can make room when idle and authorized.'}
-                </small>
-              </Field>
-              {residency === 'on-demand' && (
-                <Field label="Unload after idle">
-                  <NativeSelect
-                    value={idle}
-                    onChange={(e) => setIdle(Number(e.target.value))}
-                  >
-                    {[60, 300, 900, 1800, 0].map((s) => (
-                      <NativeSelectOption key={s} value={s}>
-                        {s ? s / 60 + ' minutes' : 'Never'}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-              )}
-              <SettingsSection
-                name="capabilities"
-                title="Modalities & capabilities"
-              >
-                <Capabilities
-                  key={artifactId + ':' + runtime?.id}
-                  catalog={catalog}
-                  change={setCatalog}
-                  valid={(key, ok) => setInvalid((v) => ({ ...v, [key]: !ok }))}
-                />
-              </SettingsSection>
-              <Variants catalog={catalog} change={setCatalog} />
-              {artifact?.metadata?.projector && schema.mmproj && (
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() =>
-                    setExtra({
-                      ...extra,
-                      mmproj: artifact.metadata?.projector?.path || '',
-                    })
-                  }
-                >
-                  Use downloaded projector: {artifact.metadata?.projector?.name}
-                </Button>
-              )}
-              <details>
-                <summary>Advanced</summary>
-                <>
-                  <RuntimeSettings
-                    schema={Object.fromEntries(
-                      Object.entries(schema).filter(
-                        ([key]) =>
-                          !['ctx-size', 'max-model-len', 'parallel'].includes(
-                            key,
-                          ),
-                      ),
-                    )}
-                    value={extra}
-                    change={setExtra}
-                    host={data.host?.[0]}
-                    recommendation={recommendation}
-                  />
-                  {!hasContext && (
-                    <JsonEdit
-                      label="Runtime options (JSON)"
-                      decode={jsonObject}
-                      value={extra}
-                      onChange={setExtra}
-                      onValid={(valid) =>
-                        setInvalid((v) => ({ ...v, config: !valid }))
-                      }
+                    </div>
+                  )}
+                  {artifact && (
+                    <ChatTemplateSettings
+                      label="Chat template"
+                      model={artifact}
+                      override={templateOverride}
+                      onChange={setTemplateOverride}
                     />
                   )}
-                  <JsonEdit
-                    label="Additional engine arguments"
-                    decode={stringArray}
-                    value={args}
-                    onChange={setArgs}
-                    onValid={(valid) =>
-                      setInvalid((v) => ({ ...v, args: !valid }))
-                    }
-                  />
                 </>
-                <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-                  {(
-                    [
-                      ['port', 'Private port', 1024, 65535],
-                      ['gpu', 'GPU index', 0, 31],
-                      ['priority', 'Priority', 0, 100],
-                      ['queue_timeout', 'Queue timeout (seconds)', 1, 1800],
-                    ] as const
-                  ).map(([key, label, min, max]) => (
-                    <Field key={String(key)} label={String(label)}>
+              </>
+            )}
+            {step === 1 && (
+              <>
+                <Field label="Name">
+                  <Input
+                    required
+                    value={displayName}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </Field>
+                <Field label="API model">
+                  <Input
+                    required
+                    pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}"
+                    value={apiAlias}
+                    onChange={(e) => setAlias(e.target.value)}
+                  />
+                </Field>
+                <>
+                  {hasContext && (
+                    <Field
+                      label="Context / request"
+                      hint={
+                        suggestedContext
+                          ? `Suggested ceiling: ${suggestedContext.toLocaleString()} tokens per request (estimated)`
+                          : 'Capacity recommendation unavailable or minimum context does not fit'
+                      }
+                    >
+                      <Choices
+                        label="Context size"
+                        value={custom ? 'custom' : String(context)}
+                        options={[
+                          ...[8192, 16384, 32768].map((n) => ({
+                            value: String(n),
+                            label: `${n / 1024}K${suggestedContext && n > suggestedContext ? ' ⚠' : ''}`,
+                            disabled:
+                              n * (hasParallel ? parallel : 1) >
+                              (schema[contextKey].max || 1048576),
+                          })),
+                          { value: 'custom', label: 'Custom' },
+                        ]}
+                        change={(next) => {
+                          setCustom(next === 'custom');
+                          if (next !== 'custom') setContext(Number(next));
+                        }}
+                      />
+                      {typeof recommendedContext === 'number' && (
+                        <Button
+                          variant="outline"
+                          type="button"
+                          onClick={() => {
+                            setContext(
+                              Math.max(
+                                schema[contextKey].min || 512,
+                                Math.floor(
+                                  recommendedContext /
+                                    (hasParallel ? parallel : 1),
+                                ),
+                              ),
+                            );
+                            setCustom(true);
+                          }}
+                        >
+                          Use suggested default
+                        </Button>
+                      )}
+                      {custom && (
+                        <Input
+                          aria-label="Custom context / request"
+                          type="number"
+                          required
+                          min={schema[contextKey].min || 512}
+                          max={
+                            (schema[contextKey].max || 1048576) /
+                            (hasParallel ? parallel : 1)
+                          }
+                          value={context}
+                          onChange={(e) => setContext(Number(e.target.value))}
+                        />
+                      )}
+                    </Field>
+                  )}
+                  {hasParallel && (
+                    <Field
+                      label="Concurrent requests"
+                      hint={`Shared context pool: ${(context * parallel).toLocaleString()} tokens`}
+                    >
                       <Input
-                        required
                         type="number"
-                        min={min}
-                        max={max}
-                        value={advanced[key]}
-                        onChange={(e) =>
-                          setAdvanced({
-                            ...advanced,
-                            [key]: Number(e.target.value),
-                          })
-                        }
+                        min={1}
+                        max={schema.parallel.max || 64}
+                        required
+                        value={parallel}
+                        onChange={(e) => setParallel(Number(e.target.value))}
                       />
                     </Field>
-                  ))}
-                </FieldGroup>
-                {residency !== 'pinned' && (
-                  <label className="check">
-                    <Checkbox
-                      checked={advanced.allow_eviction}
-                      onCheckedChange={(checked) =>
-                        setAdvanced({ ...advanced, allow_eviction: checked })
+                  )}
+                  {!hasContext && (
+                    <p className="muted">
+                      This engine requires manual context configuration in
+                      Advanced.
+                    </p>
+                  )}
+                </>
+                <Field label="Mode">
+                  <NativeSelect
+                    value={residency}
+                    onChange={(e) => setResidency(e.target.value)}
+                  >
+                    <NativeSelectOption value="on-demand">
+                      On demand
+                    </NativeSelectOption>
+                    <NativeSelectOption value="pinned">
+                      Pinned
+                    </NativeSelectOption>
+                    <NativeSelectOption value="evictable">
+                      Evictable
+                    </NativeSelectOption>
+                  </NativeSelect>
+                  <small>
+                    {residency === 'on-demand'
+                      ? 'Loads when a client sends a request.'
+                      : residency === 'pinned'
+                        ? 'Never automatically unloaded to make room.'
+                        : 'Loads manually; can make room when idle and authorized.'}
+                  </small>
+                </Field>
+                {residency === 'on-demand' && (
+                  <Field label="Unload after idle">
+                    <NativeSelect
+                      value={idle}
+                      onChange={(e) => setIdle(Number(e.target.value))}
+                    >
+                      {[60, 300, 900, 1800, 0].map((s) => (
+                        <NativeSelectOption key={s} value={s}>
+                          {s ? s / 60 + ' minutes' : 'Never'}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                )}
+                <SettingsSection
+                  name="capabilities"
+                  title="Modalities & capabilities"
+                >
+                  <Capabilities
+                    key={artifactId + ':' + runtime?.id}
+                    catalog={catalog}
+                    change={setCatalog}
+                    valid={(key, ok) =>
+                      setInvalid((v) => ({ ...v, [key]: !ok }))
+                    }
+                  />
+                </SettingsSection>
+                <Variants catalog={catalog} change={setCatalog} />
+                {artifact?.metadata?.projector && schema.mmproj && (
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={() =>
+                      setExtra({
+                        ...extra,
+                        mmproj: artifact.metadata?.projector?.path || '',
+                      })
+                    }
+                  >
+                    Use downloaded projector:{' '}
+                    {artifact.metadata?.projector?.name}
+                  </Button>
+                )}
+                <details>
+                  <summary>Advanced</summary>
+                  <>
+                    <RuntimeSettings
+                      formPath="config"
+                      schema={Object.fromEntries(
+                        Object.entries(schema).filter(
+                          ([key]) =>
+                            !['ctx-size', 'max-model-len', 'parallel'].includes(
+                              key,
+                            ),
+                        ),
+                      )}
+                      value={extra}
+                      change={setExtra}
+                      host={data.host?.[0]}
+                      recommendation={recommendation}
+                    />
+                    {!hasContext && (
+                      <JsonEdit
+                        label="Runtime options (JSON)"
+                        decode={jsonObject}
+                        value={extra}
+                        onChange={setExtra}
+                        onValid={(valid) =>
+                          setInvalid((v) => ({ ...v, config: !valid }))
+                        }
+                      />
+                    )}
+                    <JsonEdit
+                      label="Additional engine arguments"
+                      decode={stringArray}
+                      value={args}
+                      onChange={setArgs}
+                      onValid={(valid) =>
+                        setInvalid((v) => ({ ...v, args: !valid }))
                       }
                     />
-                    Allow automatic unloading when idle
-                  </label>
-                )}
-              </details>
-            </>
-          )}
-          {step === 2 && (
-            <>
-              <h3>{displayName}</h3>
-              <dl className="properties">
-                <dt>API model</dt>
-                <dd>
-                  <code>{apiAlias}</code>
-                </dd>
-                <dt>Engine</dt>
-                <dd>{runtime?.name}</dd>
-                {hasContext && (
-                  <>
-                    <dt>Context / request</dt>
-                    <dd>{context.toLocaleString()}</dd>
                   </>
-                )}
-                <dt>Mode</dt>
-                <dd>
+                  <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+                    {(
+                      [
+                        ['port', 'Private port', 1024, 65535],
+                        ['gpu', 'GPU index', 0, 31],
+                        ['priority', 'Priority', 0, 100],
+                        ['queue_timeout', 'Queue timeout (seconds)', 1, 1800],
+                      ] as const
+                    ).map(([key, label, min, max]) => (
+                      <Field key={String(key)} label={String(label)}>
+                        <Input
+                          required
+                          type="number"
+                          min={min}
+                          max={max}
+                          value={advanced[key]}
+                          onChange={(e) =>
+                            setAdvanced({
+                              ...advanced,
+                              [key]: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </Field>
+                    ))}
+                  </FieldGroup>
+                  {residency !== 'pinned' && (
+                    <label className="check">
+                      <Checkbox
+                        checked={advanced.allow_eviction}
+                        onCheckedChange={(checked) =>
+                          setAdvanced({ ...advanced, allow_eviction: checked })
+                        }
+                      />
+                      Allow automatic unloading when idle
+                    </label>
+                  )}
+                </details>
+              </>
+            )}
+            {step === 2 && (
+              <>
+                <h3>{displayName}</h3>
+                <dl className="properties">
+                  <dt>API model</dt>
+                  <dd>
+                    <code>{apiAlias}</code>
+                  </dd>
+                  <dt>Engine</dt>
+                  <dd>{runtime?.name}</dd>
+                  {hasContext && (
+                    <>
+                      <dt>Context / request</dt>
+                      <dd>{context.toLocaleString()}</dd>
+                    </>
+                  )}
+                  <dt>Mode</dt>
+                  <dd>
+                    {residency === 'on-demand'
+                      ? 'On demand'
+                      : residency === 'pinned'
+                        ? 'Pinned'
+                        : 'Evictable'}
+                  </dd>
+                  {residency === 'on-demand' && (
+                    <>
+                      <dt>Unload after idle</dt>
+                      <dd>{idle ? idle / 60 + ' minutes' : 'Never'}</dd>
+                    </>
+                  )}
+                </dl>
+                <p className="muted">
+                  Loading requires a capacity review. Creating without loading
+                  leaves this enabled for clients
                   {residency === 'on-demand'
-                    ? 'On demand'
-                    : residency === 'pinned'
-                      ? 'Pinned'
-                      : 'Evictable'}
-                </dd>
-                {residency === 'on-demand' && (
-                  <>
-                    <dt>Unload after idle</dt>
-                    <dd>{idle ? idle / 60 + ' minutes' : 'Never'}</dd>
-                  </>
-                )}
-              </dl>
-              <p className="muted">
-                Loading requires a capacity review. Creating without loading
-                leaves this enabled for clients
-                {residency === 'on-demand'
-                  ? '; the first request can trigger loading'
-                  : ''}
-                .
-              </p>
-            </>
-          )}
-        </FieldSet>
-        {step > 0 && (
-          <DraftResources preview={preview.data} error={preview.error} />
-        )}
-        <div className="dialog-actions">
+                    ? '; the first request can trigger loading'
+                    : ''}
+                  .
+                </p>
+              </>
+            )}
+          </FieldSet>
           {step > 0 && (
-            <Button
-              variant="outline"
-              type="button"
-              disabled={busy}
-              onClick={() => setStep((s) => s - 1)}
-            >
-              Back
-            </Button>
+            <DraftResources preview={preview.data} error={preview.error} />
           )}
-          {step < 2 ? (
-            <Button
-              variant="default"
-              type="submit"
-              disabled={Object.values(invalid).some(Boolean) || !runtime}
-            >
-              Next
-            </Button>
-          ) : (
-            <>
+          <div className="dialog-actions">
+            {step > 0 && (
               <Button
                 variant="outline"
                 type="button"
                 disabled={busy}
-                onClick={() => void submit(false)}
+                onClick={() => setStep((s) => s - 1)}
               >
-                Create without loading
+                Back
               </Button>
+            )}
+            {step < 2 ? (
               <Button
                 variant="default"
-                type="button"
-                disabled={busy}
-                onClick={() => void submit(true)}
+                type="submit"
+                disabled={Object.values(invalid).some(Boolean) || !runtime}
               >
-                {busy ? 'Creating…' : 'Create & review launch'}
+                Next
               </Button>
-            </>
-          )}
-        </div>
-      </form>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void submit(false)}
+                >
+                  Create without loading
+                </Button>
+                <Button
+                  variant="default"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void submit(true)}
+                >
+                  {busy ? 'Creating…' : 'Create & review launch'}
+                </Button>
+              </>
+            )}
+          </div>
+        </form>
+      </DraftFormProvider>
     </Dialog>
   );
 }

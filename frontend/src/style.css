@@ -536,11 +536,11 @@ meter::-moz-meter-bar {
   gap: 12px;
   min-width: 0;
 }
-.range-control > [data-slot='slider'] {
+.range-control > [data-slot='field'] > [data-slot='slider'] {
   flex: 2;
   min-width: 60px;
 }
-.range-control > [data-slot='input'] {
+.range-control > [data-slot='field'] > [data-slot='input'] {
   width: 130px;
   flex: 1;
   min-width: 0;

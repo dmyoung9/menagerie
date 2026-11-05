@@ -69,6 +69,32 @@ def test_known_invalid_combinations_and_manual_unknown_engine():
     )
 
 
+def test_omitted_batch_flags_do_not_use_historical_application_presets():
+    runtime = {
+        "engine": "llama.cpp",
+        "execution_kind": "native",
+        "capabilities": {"flags": ["batch-size", "ubatch-size"]},
+    }
+    artifact = {"format": "unknown"}
+    profile = {"config": {"ubatch-size": 1024}, "raw_args": []}
+    assert not validate_profile(profile, artifact, runtime)
+    runtime["capabilities"]["schema"] = {
+        "batch-size": {"engine_default": 2048},
+        "ubatch-size": {"engine_default": 512},
+    }
+    assert not validate_profile(profile, artifact, runtime)
+    assert any(
+        "batch size" in error
+        for error in validate_profile(
+            profile | {"config": {"batch-size": 256}}, artifact, runtime
+        )
+    )
+    assert not validate_profile(
+        profile | {"config": {"batch-size": 1024}}, artifact, runtime
+    )
+    assert profile["config"] == {"ubatch-size": 1024}
+
+
 def test_offload_is_explicit_and_ram_budget_is_advisory(tmp_path):
     _, manager, draft = fixture(tmp_path)
     artifact = manager.store.get("artifact", "weights")
