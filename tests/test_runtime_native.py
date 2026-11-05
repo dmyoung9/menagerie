@@ -66,6 +66,24 @@ def test_old_registry_is_refused_without_mutation(tmp_path):
     assert path.read_bytes() == before
 
 
+def test_schema_inspection_closes_its_read_only_handle(tmp_path, monkeypatch):
+    Store(tmp_path)
+    connect = sqlite3.connect
+    inspected = []
+
+    def tracked(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        if kwargs.get("uri"):
+            inspected.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", tracked)
+    Store(tmp_path)
+    assert len(inspected) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        inspected[0].execute("SELECT 1")
+
+
 async def test_pool_routes_models_with_one_process_and_stops_as_one_unit(tmp_path):
     app = create_app(tmp_path / "state")
     store, manager = app.state.store, app.state.manager

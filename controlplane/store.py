@@ -6,7 +6,7 @@ import sqlite3
 import time
 import uuid
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 
@@ -28,7 +28,9 @@ class Store:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = self.root / "registry.sqlite3"
         if self.path.exists():
-            with sqlite3.connect(f"{self.path.as_uri()}?mode=ro", uri=True) as existing:
+            with closing(
+                sqlite3.connect(f"{self.path.as_uri()}?mode=ro", uri=True)
+            ) as existing:
                 table = existing.execute(
                     "SELECT 1 FROM sqlite_master WHERE name='schema_version'"
                 ).fetchone()
