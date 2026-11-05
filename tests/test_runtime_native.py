@@ -97,6 +97,7 @@ async def test_pool_routes_models_with_one_process_and_stops_as_one_unit(tmp_pat
         manager.release(second)
         a, b = store.get("deployment", "a"), store.get("deployment", "b")
         assert a["pid"] == b["pid"]
+        assert a["log_path"] == b["log_path"]
         assert len(manager.processes) == 1
         assert manager.runtime_port(b) == a["port"]
         assert runtime_protocol.observation(store, b)["residency"] == "unloaded"

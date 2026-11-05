@@ -745,7 +745,14 @@ class Manager:
             ident,
             "STARTING",
             session_id=session["id"],
-            log_path=str(folder / "runtime.log"),
+            log_path=str(
+                (
+                    self.store.root / "deployments" / pool_owner["id"]
+                    if pool_owner
+                    else folder
+                )
+                / "runtime.log"
+            ),
             runtime_observation=None,
         )
         if pool_owner and ident != pool_owner["id"]:
@@ -836,7 +843,9 @@ class Manager:
             f.write(f"{time.time():.3f} {line}\n")
 
     def engine_failure(self, d, returncode=None):
-        path = self.store.root / "deployments" / d["id"] / "runtime.log"
+        unit = self.unit(d["id"])
+        owner = unit["member_ids"][0] if unit.get("engine_pool") else d["id"]
+        path = self.store.root / "deployments" / owner / "runtime.log"
         tail = ""
         with contextlib.suppress(OSError):
             with path.open("rb") as stream:
