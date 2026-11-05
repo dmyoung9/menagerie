@@ -460,10 +460,14 @@ def test_effective_selection_ignores_stale_override_kind(tmp_path):
 
 def test_supports_template_flag_by_engine():
     llama = {"engine": "llama.cpp", "capabilities": {"flags": ["chat-template-file"]}}
-    prism = {"engine": "prism", "capabilities": {"flags": ["chat-template-file"]}}
+    fork = {
+        "engine": "llama.cpp",
+        "fork_url": "https://example.com/fork",
+        "capabilities": {"flags": ["chat-template-file"]},
+    }
     vllm = {"engine": "vllm", "capabilities": {"flags": ["chat-template"]}}
     assert templates.supports_template_flag(llama)
-    assert templates.supports_template_flag(prism)
+    assert templates.supports_template_flag(fork)
     assert templates.supports_template_flag(vllm)
     assert not templates.supports_template_flag({"engine": "sglang"})
     assert not templates.supports_template_flag(
@@ -473,7 +477,6 @@ def test_supports_template_flag_by_engine():
 
 def test_template_flag_name_by_engine():
     assert templates.template_flag_name({"engine": "llama.cpp"}) == "chat-template-file"
-    assert templates.template_flag_name({"engine": "prism"}) == "chat-template-file"
     assert templates.template_flag_name({"engine": "vllm"}) == "chat-template"
 
 

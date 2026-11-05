@@ -1,5 +1,10 @@
 # Installation and recovery
 
+Version 3 requires fresh application state; there is no automatic 2.x migration.
+Stop the application and back up its state and installed application for rollback
+before upgrading. Preserve model/runtime files and register them again by path.
+See [3.0 breaking changes and runtime behavior](releases/3.0.0.md).
+
 ## Requirements
 
 The installer targets glibc Linux on x86_64 or aarch64. Architecture availability
@@ -35,7 +40,7 @@ the dashboard. For unattended use, `--yes` skips prompts; optional actions requi
 To install a downloaded wheel:
 
 ```sh
-bash install.sh --wheel ./menagerie-2.5.0-py3-none-any.whl --constraints ./menagerie-2.5.0-requirements.txt
+bash install.sh --wheel ./menagerie-3.0.0-py3-none-any.whl --constraints ./menagerie-3.0.0-requirements.txt
 ```
 
 Release downloads must be publicly accessible. A 404 can mean unavailable assets;

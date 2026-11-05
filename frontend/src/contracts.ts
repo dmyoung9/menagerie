@@ -218,6 +218,8 @@ const lifecycle = d.object<T.DeploymentLifecycle>({
 });
 export const deployment: d.Decoder<T.Deployment> = (value, path) =>
   d.object<T.Deployment>({
+    engine_pool: opt(d.boolean),
+    max_loaded: opt(d.number),
     id: d.string,
     name: d.string,
     profile_id: maybeString,
@@ -230,7 +232,7 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     allow_eviction: opt(d.boolean),
     enabled: d.boolean,
     state: d.string,
-    gpu: opt(d.number),
+    gpu: opt(d.nullable(d.number)),
     queue_timeout: opt(d.number),
     revision: d.number,
     member_only: opt(d.boolean),
@@ -239,6 +241,17 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     inflight: opt(d.number),
     historical_requests: opt(d.number),
     template_override: opt(d.nullable(templateSelection)),
+    runtime_observation: opt(
+      d.nullable(
+        d.object({
+          residency: d.string,
+          resolved: opt(d.record(d.number)),
+          memory: opt(jsonValue),
+          source: d.string,
+          observed_at: opt(d.number),
+        }),
+      ),
+    ),
   })(value, path);
 export const servingDeployment: d.Decoder<T.ServingDeployment> = (
   value,
@@ -271,6 +284,8 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
     id: d.string,
     name: d.string,
     enabled: d.boolean,
+    engine_pool: opt(d.boolean),
+    max_loaded: opt(d.number),
     state: d.string,
     residency: opt(d.string),
     priority: opt(d.number),
@@ -296,13 +311,15 @@ export const deploymentDraft = d.object<T.DeploymentDraft>({
   idle_timeout: d.number,
   allow_eviction: d.boolean,
   enabled: d.boolean,
-  gpu: d.number,
+  gpu: d.nullable(d.number),
   queue_timeout: d.number,
   template_override: opt(d.nullable(templateSelection)),
 });
 export const deploymentSetDraft = d.object<T.DeploymentSetDraft>({
   id: opt(d.string),
   name: d.string,
+  engine_pool: opt(d.boolean),
+  max_loaded: opt(d.number),
   residency: d.string,
   priority: d.number,
   idle_timeout: d.number,
@@ -461,7 +478,7 @@ export const resourceEstimate = d.object<T.ResourceEstimate>({
   file_size_bytes: d.nullable(d.number),
   kv_mib: d.nullable(d.number),
   components: opt(d.nullable(d.record(d.number))),
-  basis: d.oneOf('observed', 'derived', 'unavailable'),
+  basis: d.oneOf('observed', 'derived', 'engine', 'unavailable'),
   sample_count: d.number,
   provenance: d.string,
   profile_hash: d.string,
@@ -502,7 +519,7 @@ export const resourcePreview = d.object<T.ResourcePreview>({
     d.object<T.ResourcePreviewMember>({
       key: d.string,
       name: d.string,
-      gpu: d.number,
+      gpu: d.nullable(d.number),
       estimate: resourceEstimate,
       recommendation: opt(recommendation),
     }),
@@ -530,12 +547,12 @@ export const resourcePreview = d.object<T.ResourcePreview>({
 });
 export const resourcePreviewDraft = d.object<T.ResourcePreviewDraft>({
   name: opt(d.string),
-  gpu: opt(d.number),
+  gpu: opt(d.nullable(d.number)),
   configuration: opt(profileDraft),
 });
 export const resourceDraft = d.object<T.ResourceDraft>({
   name: d.string,
-  gpu: d.number,
+  gpu: d.nullable(d.number),
   configuration: profileDraft,
 });
 export const resourcePreviewRequest = d.object<T.ResourcePreviewRequest>({

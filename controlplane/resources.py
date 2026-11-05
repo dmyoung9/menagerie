@@ -86,7 +86,7 @@ def estimate(artifact, config, measured=()):
     )
     size = artifact.get("size_bytes")
     weights = size / 1048576 if isinstance(size, (int, float)) and size >= 0 else None
-    offload = config.get("gpu-layers", "all")
+    offload = config.get("gpu-layers", "auto")
     fraction = (
         min(1, max(0, int(offload)) / layers)
         if str(offload).isdigit() and layers
@@ -160,7 +160,8 @@ def preview(manager, drafts):
         for key in ("ctx-size", "max-model-len", "parallel"):
             value = profile["config"].get(key)
             if value is not None and (
-                type(value) is not int or not 1 <= value <= 10**9
+                type(value) is not int
+                or not (0 if key != "parallel" else -1) <= value <= 10**9
             ):
                 raise ValueError(
                     f"{key} must be a positive integer within the preview range"
@@ -181,8 +182,12 @@ def preview(manager, drafts):
             gpu.get("used_mib"),
             gpu.get("free_mib"),
         )
-        selected = [m for m in members if m["gpu"] == gpu["index"]]
-        known = all(m["estimate"]["peak_mib"] is not None for m in selected)
+        selected = [m for m in members if m["gpu"] in (None, gpu["index"])]
+        known = all(
+            m["estimate"]["peak_mib"] is not None
+            and (m["gpu"] is not None or len(host.get("gpus", [])) == 1)
+            for m in selected
+        )
         needed = (
             sum(m["estimate"]["peak_mib"] or 0 for m in selected) if known else None
         )

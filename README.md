@@ -44,7 +44,8 @@ prompt there without installing a separate client. Existing local models work to
    **+ Add from File** also accepts existing local GGUF files or safetensors folders.
 2. Create a deployment and add the model. Install an engine from its configuration
    or **Settings → Engines**: llama.cpp for GGUF, vLLM for supported safetensors,
-   or the Prism build for applicable ternary artifacts. Unknown models allow manual selection.
+   or another compatible build registered with the same adapter. Model names do not
+   prove kernel support; choose an appropriate build for specialized artifacts.
 3. Choose context, concurrency, and residency; save and load. Settings use model
    metadata and memory estimates. CPU/RAM offload is an explicit, slower option.
    External memory use can still cause a launch to fail.

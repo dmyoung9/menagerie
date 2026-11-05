@@ -159,13 +159,15 @@ export type DeploymentDraft = {
   idle_timeout: number;
   allow_eviction: boolean;
   enabled: boolean;
-  gpu: number;
+  gpu: number | null;
   queue_timeout: number;
   template_override?: TemplateSelection | null;
 };
 export type DeploymentSetDraft = {
   id?: string;
   name: string;
+  engine_pool?: boolean;
+  max_loaded?: number;
   residency: string;
   priority: number;
   idle_timeout: number;
@@ -184,6 +186,15 @@ export type DeploymentLifecycle = {
 export type Deployment = {
   id: string;
   name: string;
+  engine_pool?: boolean;
+  max_loaded?: number;
+  runtime_observation?: {
+    residency: string;
+    resolved?: Record<string, number>;
+    memory?: JsonValue;
+    source: string;
+    observed_at?: number;
+  } | null;
   profile_id?: string | null;
   profile_snapshot?: Profile;
   alias: string;
@@ -194,7 +205,7 @@ export type Deployment = {
   allow_eviction?: boolean;
   enabled: boolean;
   state: string;
-  gpu?: number;
+  gpu?: number | null;
   queue_timeout?: number;
   revision: number;
   member_only?: boolean;
@@ -340,7 +351,7 @@ export type OperationEventPayload =
   | { kind: 'deployment'; enabled: boolean }
   | { kind: 'other'; value: UnknownRecord };
 export type SourceBuildDraft = {
-  engine: 'llama.cpp' | 'prism';
+  engine: 'llama.cpp';
   url: string;
   commit: string;
 };
@@ -394,7 +405,7 @@ export type ResourceEstimate = {
   file_size_bytes: number | null;
   kv_mib: number | null;
   components?: Record<string, number> | null;
-  basis: 'observed' | 'derived' | 'unavailable';
+  basis: 'observed' | 'derived' | 'engine' | 'unavailable';
   sample_count: number;
   provenance: string;
   profile_hash: string;
@@ -402,7 +413,7 @@ export type ResourceEstimate = {
 export type ResourcePreviewMember = {
   key: string;
   name: string;
-  gpu: number;
+  gpu: number | null;
   estimate: ResourceEstimate;
   recommendation?: RuntimeRecommendation & {
     context_default?: number | null;
@@ -435,7 +446,7 @@ export type ResourcePreview = {
 };
 export type ResourcePreviewDraft = {
   name?: string;
-  gpu?: number;
+  gpu?: number | null;
   configuration?: ProfileDraft;
 };
 export type ResourceDraft = Required<ResourcePreviewDraft>;

@@ -70,17 +70,14 @@ import { Switch } from '@/components/ui/switch';
 import { SettingsSection } from '@/components/settings-section';
 import { readApi } from './ui';
 import * as contracts from './contracts';
-import { artifactLimits } from './artifact-metadata';
 import type {
   Deployment,
   DeploymentActions,
   DeploymentDraft,
   DeploymentSet,
   DeploymentSetDraft,
-  GpuSnapshot,
   HostSnapshot,
   OperationEvent,
-  RuntimeField,
   ServingDeployment,
 } from './types';
 
@@ -326,6 +323,8 @@ export function DeploymentSetEditor({
   } = useDraftForm<DeploymentSetDraft>(
     {
       name: 'New deployment',
+      engine_pool: false,
+      max_loaded: 4,
       residency: 'on-demand',
       priority: 50,
       idle_timeout: 300,
@@ -336,6 +335,8 @@ export function DeploymentSetEditor({
         ? {
             id: initial.id,
             name: initial.name,
+            engine_pool: initial.engine_pool ?? false,
+            max_loaded: initial.max_loaded ?? 4,
             residency: initial.residency || 'on-demand',
             priority: initial.priority ?? 50,
             idle_timeout: initial.idle_timeout ?? 300,
@@ -420,41 +421,13 @@ export function DeploymentSetEditor({
       setBusy(false);
       return;
     }
-    const schema: Record<string, RuntimeField> =
-      runtime?.capabilities?.schema || {};
     const config: Record<string, import('./types').JsonValue> = {};
-    for (const [key, field] of Object.entries(schema)) {
-      if (field.default === undefined) continue;
-      config[key] =
-        ['threads', 'threads-batch'].includes(key) &&
-        typeof field.default === 'number' &&
-        data.host[0]?.cpu_count
-          ? Math.min(field.default, data.host[0].cpu_count)
-          : field.default;
-    }
-    if (runtime?.managed?.backend === 'cpu') config['gpu-layers'] = '0';
-    const { context: modelContext } = artifactLimits(model);
-    if (modelContext)
-      for (const key of ['ctx-size', 'max-model-len'])
-        if (typeof config[key] === 'number')
-          config[key] = Math.min(config[key], modelContext);
-    const gpus = data.host?.[0]?.gpus || [];
-    const gpu =
-      [...gpus].sort(
-        (a: GpuSnapshot, b: GpuSnapshot) =>
-          (b.free_mib ?? 0) -
-          (preview.data?.gpus?.find((g) => g.index === b.index)?.draft_mib ||
-            0) -
-          ((a.free_mib ?? 0) -
-            (preview.data?.gpus?.find((g) => g.index === a.index)?.draft_mib ||
-              0)),
-      )[0]?.index ?? 0;
     const member: DeploymentDraft = {
       ...defaults.deployments,
       name: model.name,
       alias,
       port,
-      gpu,
+      gpu: null,
       configuration: {
         name: model.name,
         artifact_id: model.id,
@@ -467,51 +440,15 @@ export function DeploymentSetEditor({
     set('members', [...value.members, member]);
     setSelected(value.members.length);
     setError('');
-    setBusy(true);
-    try {
-      if (!runtime) return;
-      const budget = await readApi(
-        '/api/resources/preview',
-        contracts.resourcePreview,
-        {
-          members: [...value.members, member],
-        },
-      );
-      const rec = budget.members.at(-1)?.recommendation;
-      const contextKey = rec?.context_key;
-      const contextDefault = rec?.context_default;
-      if (typeof contextDefault === 'number' && contextKey)
-        setValue((v) => ({
-          ...v,
-          members: v.members.map((m) =>
-            m.port === port &&
-            m.configuration &&
-            JSON.stringify(m.configuration?.config) === JSON.stringify(config)
-              ? {
-                  ...m,
-                  configuration: {
-                    ...m.configuration,
-                    config: {
-                      ...config,
-                      [contextKey]: contextDefault,
-                    },
-                  },
-                }
-              : m,
-          ),
-        }));
-    } catch {
-      /* Keep engine defaults when telemetry/preview is unavailable; the preview explains the gap. */
-    } finally {
-      setBusy(false);
-    }
+    setBusy(false);
   }
   const submit = async (value: DeploymentSetDraft) => {
     if (busy || Object.values(invalid).some(Boolean)) return;
     setBusy(true);
     setError('');
     try {
-      const single = !initial && value.members.length === 1;
+      const single =
+        !initial && value.members.length === 1 && !value.engine_pool;
       const path =
         (single ? '/api/deployments' : '/api/deployment-sets') +
         (initial ? '?expected=' + initial.revision : '');
@@ -724,9 +661,40 @@ export function DeploymentSetEditor({
               ))}
             </FieldSet>
             <SettingsSection name="lifecycle" title="Lifecycle">
+              <Field
+                label="Lifecycle owner"
+                hint="Runtime pools share one native router and load models independently on request. Pinned and atomic groups use supervised processes. Pools require one compatible native runtime and shared device visibility."
+              >
+                <NativeSelect
+                  value={value.engine_pool ? 'runtime' : 'supervisor'}
+                  onChange={(e) => {
+                    set('engine_pool', e.target.value === 'runtime');
+                    if (e.target.value === 'runtime')
+                      set('residency', 'on-demand');
+                  }}
+                >
+                  <NativeSelectOption value="supervisor">
+                    Menagerie — coordinated processes
+                  </NativeSelectOption>
+                  <NativeSelectOption value="runtime">
+                    Runtime — native model pool
+                  </NativeSelectOption>
+                </NativeSelect>
+              </Field>
+              {value.engine_pool && value.allow_eviction && (
+                <Field label="Maximum resident models">
+                  <NumberControl
+                    label="Maximum resident models"
+                    min={1}
+                    max={128}
+                    value={value.max_loaded ?? 4}
+                    change={(v) => set('max_loaded', v ?? 4)}
+                  />
+                </Field>
+              )}
               <Field label="Mode">
                 <Select
-                  disabled={busy}
+                  disabled={busy || value.engine_pool}
                   items={[
                     { value: 'on-demand', label: 'On demand' },
                     { value: 'pinned', label: 'Pinned' },

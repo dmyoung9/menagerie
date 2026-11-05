@@ -13,6 +13,14 @@ admission and process ownership. `Store` uses SQLite WAL, revision checks, and
 history. Serving deployments own shared loading/eviction policy; model instances
 retain their engine configuration snapshots and stable aliases.
 
+Runtime suppliers/forks are installation provenance, not adapter families.
+`runtime_protocol.py` defines the small CLI/observation boundary and advertised
+mechanisms. `runtime_pool.py` renders explicit native model presets and validates
+pool policy. Capabilities are tied to executable hashes, not repository names.
+Native pools use one process owner, pool-local routing/residency, and aggregate
+process telemetry. Supervised groups retain atomic residency. Version 3 opens only
+schema-3 registries; a 2.x state directory must be preserved for rollback, not migrated.
+
 The hardened user service only grants writes inside its state directory. Keep
 registry migrations independent of writable system temporary directories: stream
 scalar history counters rather than grouping/sorting large session JSON blobs.
@@ -24,6 +32,9 @@ artifact, configuration, raw arguments and placement. Legacy session snapshots a
 read through the same fingerprint calculation without rewriting restoration data.
 `GET /api/history/resources?artifact_id=ID` returns configuration groups, per-pool
 measured counts/mean/max peaks, date ranges and individual runs, including failures.
+Groups identify requested configuration; automatic settings can differ between runs.
+Each run retains its last native observation separately. Pool-aggregate process peaks
+are excluded from per-model history and estimates.
 Missing measurements are null. The monitor prunes expired/quota-excess resource
 fields separately from restorable session configuration. Resource summaries have
 the same per-category `summary_days`/`history_quota_mib` bounds as requests/samples.
@@ -115,7 +126,7 @@ the wheel needs no Node. Create a fresh environment outside the checkout:
 uv build
 check_dir="$(mktemp -d)"
 uv venv "$check_dir/venv"
-uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-2.5.0-py3-none-any.whl
+uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-3.0.0-py3-none-any.whl
 "$check_dir/venv/bin/python" scripts/check_wheel.py
 ```
 

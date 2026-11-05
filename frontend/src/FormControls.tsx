@@ -43,16 +43,23 @@ export function Placement({
         <Field label="GPU">
           {host.gpus?.length ? (
             <NativeSelect
-              value={value.gpu}
+              value={value.gpu ?? ''}
               onChange={(e) =>
-                change({ ...value, gpu: Number(e.target.value) })
+                change({
+                  ...value,
+                  gpu: e.target.value === '' ? null : Number(e.target.value),
+                })
               }
             >
-              {!host.gpus.some((g: GpuSnapshot) => g.index === value.gpu) && (
-                <NativeSelectOption value={value.gpu}>
-                  GPU {value.gpu} (unavailable)
-                </NativeSelectOption>
-              )}
+              <NativeSelectOption value="">
+                Engine-selected devices
+              </NativeSelectOption>
+              {value.gpu !== null &&
+                !host.gpus.some((g: GpuSnapshot) => g.index === value.gpu) && (
+                  <NativeSelectOption value={value.gpu}>
+                    GPU {value.gpu} (unavailable)
+                  </NativeSelectOption>
+                )}
               {host.gpus.map((g: GpuSnapshot) => (
                 <NativeSelectOption key={g.index} value={g.index}>
                   {g.name} · GPU {g.index} ·{' '}
@@ -65,12 +72,15 @@ export function Placement({
           ) : (
             <Input
               type="number"
-              required
               min={0}
               aria-label="GPU index"
-              value={value.gpu}
+              placeholder="Engine-selected devices"
+              value={value.gpu ?? ''}
               onChange={(e) =>
-                change({ ...value, gpu: Number(e.target.value) })
+                change({
+                  ...value,
+                  gpu: e.target.value === '' ? null : Number(e.target.value),
+                })
               }
             />
           )}
@@ -229,6 +239,15 @@ export function RuntimeSettings({
         'max-model-len',
         'parallel',
         'gpu-layers',
+        'fit',
+        'fit-target',
+        'fit-ctx',
+        'device',
+        'split-mode',
+        'tensor-split',
+        'override-tensor',
+        'cpu-moe',
+        'n-cpu-ffn',
         'n-cpu-moe',
         'cache-type-k',
         'cache-type-v',
@@ -422,8 +441,8 @@ export function RuntimeSettings({
               value={
                 current === undefined
                   ? 'default'
-                  : current === 'all'
-                    ? 'all'
+                  : current === 'all' || current === 'auto'
+                    ? current
                     : 'custom'
               }
               onChange={(e) =>
@@ -431,8 +450,8 @@ export function RuntimeSettings({
                   key,
                   e.target.value === 'default'
                     ? undefined
-                    : e.target.value === 'all'
-                      ? 'all'
+                    : e.target.value === 'all' || e.target.value === 'auto'
+                      ? e.target.value
                       : '0',
                 )
               }
@@ -441,21 +460,26 @@ export function RuntimeSettings({
                 Engine default
               </NativeSelectOption>
               <NativeSelectOption value="all">GPU-resident</NativeSelectOption>
+              <NativeSelectOption value="auto">
+                Automatic fit
+              </NativeSelectOption>
               <NativeSelectOption value="custom">
                 CPU/RAM offload (slower)
               </NativeSelectOption>
             </NativeSelect>
-            {current !== undefined && current !== 'all' && (
-              <NumberControl
-                label="GPU layer count"
-                required
-                min={0}
-                max={recommendation.gpu_layers_max ?? undefined}
-                step={1}
-                value={Number(current)}
-                change={(v) => update(key, String(v ?? 0))}
-              />
-            )}
+            {current !== undefined &&
+              current !== 'all' &&
+              current !== 'auto' && (
+                <NumberControl
+                  label="GPU layer count"
+                  required
+                  min={0}
+                  max={recommendation.gpu_layers_max ?? undefined}
+                  step={1}
+                  value={Number(current)}
+                  change={(v) => update(key, String(v ?? 0))}
+                />
+              )}
           </div>
         </Field>
       );
@@ -497,6 +521,24 @@ export function RuntimeSettings({
         </Field>
       );
     }
+    if (f.type === 'boolean')
+      return (
+        <Field key={key} label={label}>
+          <NativeSelect
+            value={current === undefined ? '' : String(current)}
+            onChange={(e) =>
+              update(
+                key,
+                e.target.value === '' ? undefined : e.target.value === 'true',
+              )
+            }
+          >
+            <NativeSelectOption value="">Engine default</NativeSelectOption>
+            <NativeSelectOption value="true">Enabled</NativeSelectOption>
+            <NativeSelectOption value="false">Disabled</NativeSelectOption>
+          </NativeSelect>
+        </Field>
+      );
     if (f.choices)
       return (
         <Field key={key} label={label}>

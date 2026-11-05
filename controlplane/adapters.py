@@ -12,64 +12,90 @@ from pathlib import Path
 
 import psutil
 
-from . import templates
+from . import runtime_protocol, templates
 
 FIELDS = {
     "mmproj": {"type": "string", "label": "Multimodal projector path"},
     "ctx-size": {
         "type": "integer",
-        "default": 8192,
-        "min": 32,
+        "default": 0,
+        "min": 0,
         "max": 1048576,
         "units": "tokens",
         "label": "Context pool",
     },
     "parallel": {
         "type": "integer",
-        "default": 1,
-        "min": 1,
+        "default": -1,
+        "min": -1,
         "max": 128,
         "label": "Parallel slots",
     },
-    "gpu-layers": {"type": "string", "default": "all", "label": "GPU layers"},
+    "gpu-layers": {"type": "string", "default": "auto", "label": "GPU layers"},
+    "fit": {"type": "enum", "choices": ["on", "off"], "label": "Automatic fit"},
+    "fit-target": {"type": "string", "label": "Free device memory target (MiB)"},
+    "fit-ctx": {
+        "type": "integer",
+        "min": 0,
+        "max": 1048576,
+        "label": "Minimum automatic context",
+    },
+    "device": {
+        "type": "string",
+        "label": "Engine devices (comma-separated, none for CPU)",
+    },
+    "split-mode": {
+        "type": "enum",
+        "choices": ["none", "layer", "row", "tensor"],
+        "label": "Device split mode",
+    },
+    "tensor-split": {"type": "string", "label": "Device split proportions"},
+    "override-tensor": {"type": "string", "label": "Tensor placement overrides"},
+    "cpu-moe": {"type": "boolean", "label": "Keep MoE experts on CPU"},
+    "n-cpu-ffn": {
+        "type": "integer",
+        "min": 0,
+        "max": 4096,
+        "label": "Dense FFN layers on CPU",
+    },
     "cache-type-k": {
         "type": "enum",
         "choices": ["f16", "q8_0", "q4_0"],
-        "default": "q8_0",
+        "default": "f16",
         "label": "K cache",
     },
     "cache-type-v": {
         "type": "enum",
         "choices": ["f16", "q8_0", "q4_0"],
-        "default": "q8_0",
+        "default": "f16",
         "label": "V cache",
     },
     "batch-size": {
         "type": "integer",
         "min": 1,
         "max": 8192,
-        "default": 512,
+        "default": 2048,
         "label": "Batch size",
     },
     "ubatch-size": {
         "type": "integer",
         "min": 1,
         "max": 8192,
-        "default": 256,
+        "default": 512,
         "label": "Physical batch",
     },
     "threads": {
         "type": "integer",
         "min": -1,
         "max": 256,
-        "default": 6,
+        "default": -1,
         "label": "CPU threads",
     },
     "threads-batch": {
         "type": "integer",
         "min": -1,
         "max": 256,
-        "default": 6,
+        "default": -1,
         "label": "Batch threads",
     },
     "flash-attn": {
@@ -82,7 +108,7 @@ FIELDS = {
         "type": "number",
         "min": 0,
         "max": 5,
-        "default": 1,
+        "default": 0.8,
         "label": "Temperature",
     },
     "top-p": {"type": "number", "min": 0, "max": 1, "label": "Top-p"},
@@ -131,7 +157,7 @@ FIELDS = {
         "type": "integer",
         "min": -1,
         "max": 1048576,
-        "default": 4096,
+        "default": -1,
         "label": "Default reasoning budget",
     },
     "n-cpu-moe": {
@@ -268,7 +294,7 @@ async def probe(runtime):
         )
         formats = (
             ["gguf"]
-            if runtime["engine"] in ("llama.cpp", "prism")
+            if runtime["engine"] == "llama.cpp"
             else runtime.get("formats", ["gguf"])
             if runtime["engine"] == "custom"
             else ["safetensors"]
@@ -283,21 +309,33 @@ async def probe(runtime):
     if not path.is_file() or not os.access(path, os.X_OK):
         raise ValueError("Runtime executable does not exist or is not executable")
     env = environment(runtime)
-    help_args = ["serve", "--help=all"] if runtime["engine"] == "vllm" else ["--help"]
+    protocol = runtime_protocol.PROTOCOLS[runtime["engine"]]
+    help_args = list(protocol.help_args)
     text = await command(
         [str(path), *help_args], env, 120 if runtime["engine"] == "vllm" else 45
     )
     flags = sorted(set(re.findall(r"--([a-zA-Z0-9][a-zA-Z0-9-]*)", text)))
     version = (
-        await command([str(path), "--version"], env, 20)
-        if runtime["engine"] in ("llama.cpp", "prism")
+        await command([str(path), *protocol.version_args], env, 20)
+        if protocol.version_args
         else runtime.get("version") or "unverified"
     )
+    devices = []
+    if "list-devices" in flags:
+        device_text = await command([str(path), "--list-devices"], env, 30)
+        devices = [
+            {"id": match[1], "description": match[2][:512]}
+            for match in re.finditer(
+                r"(?m)^\s*([A-Za-z][A-Za-z0-9_-]*\d+):\s+(.+)$", device_text
+            )
+        ][:64]
     return {
         "version": version.strip()[-1500:],
         "flags": flags,
+        "mechanisms": runtime_protocol.mechanisms(runtime, flags),
+        "devices": devices,
         "formats": ["gguf"]
-        if runtime["engine"] in ("llama.cpp", "prism")
+        if runtime["engine"] == "llama.cpp"
         else runtime.get("formats", ["gguf"])
         if runtime["engine"] == "custom"
         else ["safetensors"],
@@ -321,9 +359,17 @@ def help_defaults(text, schema, runtime):
             continue
         for key in names:
             field = schema.get(key)
-            if not field or field.get("type") not in {"integer", "number"}:
+            if not field:
                 continue
             raw = match[1]
+            field["default_note"] = raw
+            if field.get("type") not in {"integer", "number"}:
+                candidate = raw.split(",", 1)[0].strip().strip("'\"")
+                if field.get("type") in {"enum", "string"} and (
+                    not field.get("choices") or candidate in field["choices"]
+                ):
+                    field["default"] = candidate
+                continue
             source = re.fullmatch(r"same as --([a-z-]+)", raw)
             if source and source[1] in schema:
                 field["default_from"] = source[1]
@@ -356,7 +402,7 @@ async def configuration_schema(runtime):
     if (
         runtime.get("execution_kind") != "native"
         or not runtime.get("trust")
-        or runtime["engine"] not in {"llama.cpp", "prism", "vllm"}
+        or runtime["engine"] not in {"llama.cpp", "vllm"}
     ):
         return schema
     args = ["serve", "--help=all"] if runtime["engine"] == "vllm" else ["--help"]
@@ -372,7 +418,7 @@ def option_schema(runtime, flags=None, help_text=None):
     flags = (
         flags if flags is not None else runtime.get("capabilities", {}).get("flags", [])
     )
-    if runtime["engine"] in ("llama.cpp", "prism"):
+    if runtime["engine"] == "llama.cpp":
         retired = {
             legacy
             for legacy, modern in (
@@ -393,6 +439,12 @@ def option_schema(runtime, flags=None, help_text=None):
             for name in ("engine_default", "default_note", "default_from"):
                 if name in saved:
                     field[name] = saved[name]
+            if (
+                field.get("type") in {"string", "enum"}
+                and saved.get("default_note")
+                and "default" in saved
+            ):
+                field["default"] = saved["default"]
         return help_defaults(help_text, schema, runtime) if help_text else schema
     return (
         {
@@ -400,14 +452,12 @@ def option_schema(runtime, flags=None, help_text=None):
                 "type": "integer",
                 "min": 512,
                 "max": 1048576,
-                "default": 8192,
                 "restart_required": True,
             },
             "gpu-memory-utilization": {
                 "type": "number",
                 "min": 0.05,
                 "max": 0.95,
-                "default": 0.5,
                 "restart_required": True,
             },
         }
@@ -422,6 +472,26 @@ def file_hash(path):
         for block in iter(lambda: f.read(8 * 1024 * 1024), b""):
             h.update(block)
     return h.hexdigest()
+
+
+def runtime_observation(properties):
+    """Retain only non-content runtime facts, never prompts or template bodies."""
+    settings = properties.get("default_generation_settings", {})
+    params = settings.get("params", {}) if isinstance(settings, dict) else {}
+    resolved = {}
+    for source in (properties, settings, params):
+        if isinstance(source, dict):
+            for key in ("n_ctx", "n_ctx_train", "n_parallel", "n_batch", "n_ubatch"):
+                value = source.get(key)
+                if type(value) is int and value >= 0:
+                    resolved[key] = value
+    return {
+        "residency": "sleeping"
+        if properties.get("is_sleeping") is True
+        else "resident",
+        "resolved": resolved,
+        "source": "runtime /props",
+    }
 
 
 def inspect_artifact(path, checksum=False):
@@ -548,12 +618,6 @@ def validate_profile(profile, artifact, runtime, selection=None):
         "capabilities", {}
     ).get("formats", []):
         errors.append("Artifact format is not supported by the probed adapter")
-    from .engine_catalog import recommend
-
-    if recommend(artifact)["engine"] == "prism" and runtime["engine"] == "llama.cpp":
-        errors.append(
-            "These ternary weights need specialized kernels; select Prism rather than stock llama.cpp"
-        )
     schema = option_schema(runtime)
     flags = runtime.get("capabilities", {}).get("flags", [])
     for k, v in profile["config"].items():
@@ -583,10 +647,12 @@ def validate_profile(profile, artifact, runtime, selection=None):
         if (
             "\x00" in arg
             or arg.startswith("-")
-            and arg.lstrip("-").split("=")[0] in OWNED
+            and arg.lstrip("-").split("=")[0] in OWNED | IGNORED
         ):
             errors.append("Advanced flags may not override supervisor-owned options")
     config = profile["config"]
+    if config.get("parallel") == 0:
+        errors.append("Parallel slots must be positive or -1 for automatic selection")
     meta, arch = artifact.get("metadata", {}), artifact.get("architecture", "")
     hf = meta.get("config", {}).get("text_config") or meta.get("config", {})
     context = meta.get(f"{arch}.context_length") or hf.get("max_position_embeddings")
@@ -598,15 +664,15 @@ def validate_profile(profile, artifact, runtime, selection=None):
 
     parallel = max(1, number("parallel", 1))
     if type(context) is int and context > 0:
-        key = (
-            "ctx-size"
-            if runtime["engine"] in ("llama.cpp", "prism")
-            else "max-model-len"
-        )
+        key = "ctx-size" if runtime["engine"] == "llama.cpp" else "max-model-len"
         maximum = context * parallel if key == "ctx-size" else context
         if number(key, 0) > maximum:
             errors.append(f"{key} exceeds the model context limit ({maximum})")
-    if "ctx-size" in config and number("ctx-size", 8192) < parallel * 32:
+    if (
+        "ctx-size" in config
+        and number("ctx-size", 0) > 0
+        and number("ctx-size", 0) < parallel * 32
+    ):
         errors.append("Context pool must provide at least 32 tokens per parallel slot")
     # An omitted flag uses the engine's default, not a historical UI preset.
     # Without probed evidence, leave the combination to the engine to validate.
@@ -628,20 +694,18 @@ def validate_profile(profile, artifact, runtime, selection=None):
             errors.append(f"{minimum} must not exceed {maximum}")
     if type(layers) is int and number("n-cpu-moe", 0) > layers:
         errors.append("CPU expert layers must not exceed the model layer count")
-    gpu_layers = config.get("gpu-layers", "all")
-    if gpu_layers != "all":
+    gpu_layers = config.get("gpu-layers", "auto")
+    if gpu_layers == "auto" and "gpu-layers" in config and flags and "fit" not in flags:
+        errors.append(
+            "Installed runtime does not advertise automatic fit; omit GPU layers or set an explicit count"
+        )
+    if gpu_layers not in ("all", "auto"):
         if not re.fullmatch(r"\d+", str(gpu_layers)) or (
             type(layers) is int and int(gpu_layers) > layers
         ):
             errors.append(
                 "GPU layer count must be between zero and the model layer count"
             )
-    if (
-        runtime.get("managed", {}).get("backend") == "cpu"
-        and gpu_layers != "0"
-        and gpu_layers != 0
-    ):
-        errors.append("This CPU engine requires GPU layers set to zero")
     if config.get("flash-attn") == "off" and config.get("cache-type-v", "f16") != "f16":
         errors.append("Quantized V cache requires flash attention")
     constrained = {
@@ -700,9 +764,12 @@ def launch_spec(deployment, profile, artifact, runtime, workdir, store):
         else model_path
     )
     env = environment(runtime)
-    env["CUDA_VISIBLE_DEVICES"] = str(deployment["gpu"])
+    # Native --device selection needs visibility of all eligible engine devices.
+    # A deployment GPU is only a restriction when explicitly selected.
+    if deployment.get("gpu") is not None:
+        env["CUDA_VISIBLE_DEVICES"] = str(deployment["gpu"])
     engine = runtime["engine"]
-    if engine in ("llama.cpp", "prism"):
+    if engine == "llama.cpp":
         args = [
             "--model",
             model,
@@ -715,6 +782,11 @@ def launch_spec(deployment, profile, artifact, runtime, workdir, store):
             "--no-ui",
             "--metrics",
         ]
+        if runtime_protocol.native_idle_sleep(deployment, runtime) and not any(
+            deployment["id"] in unit["member_ids"]
+            for unit in store.list("deployment_set")
+        ):
+            args.extend(["--sleep-idle-seconds", str(deployment["idle_timeout"])])
     elif engine == "vllm":
         args = (["--model", model] if container else ["serve", model]) + [
             "--host",
@@ -791,7 +863,10 @@ def launch_spec(deployment, profile, artifact, runtime, workdir, store):
             extra_mounts.append((str(path), target))
             value = target
         if isinstance(value, bool):
-            args.append("--" + (key if value else "no-" + key))
+            if key in {"fit", "flash-attn"}:
+                args.extend(["--" + key, "on" if value else "off"])
+            else:
+                args.append("--" + (key if value else "no-" + key))
         else:
             args.extend(
                 [
@@ -819,11 +894,25 @@ def launch_spec(deployment, profile, artifact, runtime, workdir, store):
             "-v",
             f"{mount}:/models:ro",
         ]
-        prefix += (
-            ["--gpus", f"device={deployment['gpu']}"]
+        gpu_args = (
+            [
+                "--gpus",
+                "all"
+                if deployment.get("gpu") is None
+                else f"device={deployment['gpu']}",
+            ]
             if runtime["execution_kind"] == "docker"
-            else ["--device", f"nvidia.com/gpu={deployment['gpu']}"]
+            else [
+                "--device",
+                f"nvidia.com/gpu={deployment['gpu'] if deployment.get('gpu') is not None else 'all'}",
+            ]
         )
+        if (
+            profile["config"].get("device") != "none"
+            and str(profile["config"].get("gpu-layers")) != "0"
+            and runtime.get("managed", {}).get("backend") != "cpu"
+        ):
+            prefix += gpu_args
         for source, target in extra_mounts:
             prefix += ["-v", f"{source}:{target}:ro"]
         for key, value in runtime.get("env", {}).items():

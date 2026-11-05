@@ -12,7 +12,7 @@ Models supports **Discover** (Hugging Face) and
 complete choice; split GGUF shards are registered together. Existing
 files are referenced in place, not copied or uploaded by the browser.
 
-Settings → Engines installs versioned llama.cpp/Prism release binaries or an
+Settings → Engines installs versioned llama.cpp release binaries or an
 isolated vLLM environment. Downloads, verification, and probing appear in Activity.
 Updates install alongside existing engines; deployments retain their chosen version.
 Referenced engines cannot be removed. Existing executables, source builds, and
@@ -33,7 +33,7 @@ The resource preview sits alongside the form on wide screens; on narrow screens
 its summary stays visible and **Show resource charts** expands the graphics.
 
 Sampling controls include top-p, top-k, min-p, presence and repetition penalties
-when advertised by the selected llama.cpp/Prism engine. MTP/speculative controls
+when advertised by the selected llama.cpp-compatible installation. MTP/speculative controls
 also depend on advertised engine flags: select its supported speculative type
 (such as `draft-mtp`), optionally supply a compatible local draft/head file, and
 set draft-token limits. Blank new controls retain engine defaults. Engine flag

@@ -252,7 +252,7 @@ def effective_selection(deployment, artifact, store):
 
 def supports_template_flag(runtime) -> bool:
     flags = (runtime.get("capabilities") or {}).get("flags") or []
-    if runtime.get("engine") in ("llama.cpp", "prism"):
+    if runtime.get("engine") == "llama.cpp":
         return "chat-template-file" in flags
     if runtime.get("engine") == "vllm":
         return "chat-template" in flags or "chat-template-file" in flags
@@ -260,7 +260,7 @@ def supports_template_flag(runtime) -> bool:
 
 
 def template_flag_name(runtime) -> str:
-    if runtime.get("engine") in ("llama.cpp", "prism"):
+    if runtime.get("engine") == "llama.cpp":
         return "chat-template-file"
     if runtime.get("engine") == "vllm":
         return "chat-template"

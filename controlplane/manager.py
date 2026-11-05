@@ -89,6 +89,14 @@ class Manager:
             raise KeyError(f"Unknown deployment: {ident}")
         return unit
 
+    def runtime_port(self, deployment):
+        unit = self.unit(deployment["id"])
+        return (
+            unit["members"][0]["port"]
+            if unit.get("engine_pool")
+            else deployment["port"]
+        )
+
     def unit_busy(self, unit):
         return any(self.inflight.get(i, 0) for i in unit["member_ids"])
 
@@ -315,10 +323,39 @@ class Manager:
             s
             for s in resource_history.retained(self.store, self.settings())
             if resources.run_profile_hash(s) == fingerprint
+            and not s.get("pool_aggregate")
         ]
-        return resources.estimate(a, p["config"], measured) | {
-            "profile_hash": fingerprint
-        }
+        result = resources.estimate(a, p["config"], measured)
+        observation = adapters.runtime_protocol.observation(self.store, d) or {}
+        memory = observation.get("memory") or {}
+        stage = "effective" if memory.get("effective") else "min"
+        native = memory.get(stage)
+        if result["basis"] != "observed" and native and native.get("devices"):
+            devices = native["devices"]
+            if all(
+                all(type(device.get(k)) is int for k in ("model", "context", "compute"))
+                for device in devices
+            ):
+                result.update(
+                    peak_mib=sum(
+                        sum(device[k] for k in ("model", "context", "compute"))
+                        for device in devices
+                        if device["kind"] == "device"
+                    )
+                    / 1048576,
+                    ram_mib=sum(
+                        sum(device[k] for k in ("model", "context", "compute"))
+                        for device in devices
+                        if device["kind"] == "host"
+                    )
+                    / 1048576
+                    if any(device["kind"] == "host" for device in devices)
+                    else None,
+                    basis="engine",
+                    components=None,
+                    provenance=f"Runtime {stage} allocation report in bytes; not a process peak or fit guarantee. Projectors may be omitted.",
+                )
+        return result | {"profile_hash": fingerprint}
 
     def validate(self, ids, authorized_stops=None):
         duplicates = len(set(ids)) != len(ids)
@@ -327,6 +364,11 @@ class Manager:
         errors, warnings, estimates = [], [], {}
         all_d = self.store.list("deployment")
         selected = [self.store.get("deployment", i) for i in ids]
+        from . import runtime_pool
+
+        for unit in deployment_sets.units(self.store):
+            if set(unit["member_ids"]) & set(ids):
+                errors.extend(runtime_pool.validate(unit, self.store))
         if duplicates:
             errors.append("Duplicate models in deployment")
         if set(ids) & set(authorized_stops):
@@ -422,6 +464,7 @@ class Manager:
                 errors.append("GPU below desktop headroom gate")
         if any(
             str(d["profile_snapshot"]["config"].get("gpu-layers", "all")) != "0"
+            and d["gpu"] is not None
             and d["gpu"] not in [g["index"] for g in self.host.get("gpus", [])]
             for d in selected
         ):
@@ -642,6 +685,17 @@ class Manager:
         folder = self.store.root / "deployments" / ident
         folder.mkdir(parents=True, exist_ok=True)
         spec = adapters.launch_spec(d, p, a, r, folder, self.store)
+        unit = self.unit(ident)
+        pool_owner = unit["members"][0] if unit.get("engine_pool") else None
+        if pool_owner:
+            from . import runtime_pool
+
+            errors = runtime_pool.validate(unit, self.store)
+            if errors:
+                raise Conflict("; ".join(errors))
+            spec = runtime_pool.launch_spec(
+                unit, self.store, spec, self.settings(), ident
+            )
         artifact_path = Path(a["local_path"])
         if a.get("sha256") and artifact_path.is_file():
             stat = artifact_path.stat()
@@ -684,6 +738,7 @@ class Manager:
                 "started_at": time.time(),
                 "ended_at": None,
                 "outcome": "running",
+                "pool_aggregate": bool(pool_owner),
             },
         )
         self.transition(
@@ -691,7 +746,20 @@ class Manager:
             "STARTING",
             session_id=session["id"],
             log_path=str(folder / "runtime.log"),
+            runtime_observation=None,
         )
+        if pool_owner and ident != pool_owner["id"]:
+            owner = self.store.get("deployment", pool_owner["id"])
+            if not self.owned(owner):
+                raise Conflict("Runtime pool process is not owned")
+            self.transition(
+                ident, "LOADING", pid=owner["pid"], pid_started=owner["pid_started"]
+            )
+            if not await self.ready(self.store.get("deployment", ident)):
+                raise Conflict("Runtime pool did not publish its configured model")
+            self.transition(ident, "READY", resume_on_boot=False)
+            self.last_use[ident] = time.monotonic()
+            return
         proc = await processes.spawn(
             *spec["argv"],
             cwd=folder,
@@ -719,14 +787,14 @@ class Manager:
                     )
                 )
             settings = self.settings()
-            gpu = next(
-                (g for g in self.host.get("gpus", []) if g["index"] == d["gpu"]), None
-            )
+            gpus = [
+                g
+                for g in self.host.get("gpus", [])
+                if d.get("gpu") is None or g["index"] == d["gpu"]
+            ]
             from .activity import condition_text, pressure_conditions
 
-            conditions = pressure_conditions(
-                self.host | {"gpus": [gpu] if gpu else []}, settings
-            )
+            conditions = pressure_conditions(self.host | {"gpus": gpus}, settings)
             if conditions:
                 raise RuntimeError(
                     "Launch aborted: " + "; ".join(map(condition_text, conditions))
@@ -793,18 +861,80 @@ class Manager:
 
     async def ready(self, d):
         try:
+            port = self.runtime_port(d)
             response = await self.client.get(
-                f"http://127.0.0.1:{d['port']}/health", timeout=2
+                f"http://127.0.0.1:{port}/health", timeout=2
             )
             if response.status_code != 200:
                 return False
+            runtime = self.store.get("runtime", d["profile_snapshot"]["runtime_id"])
+            protocol = adapters.runtime_protocol.PROTOCOLS[runtime["engine"]]
+            observation = None
+            if self.unit(d["id"]).get("engine_pool"):
+                from . import runtime_pool
+
+                response = await self.client.get(
+                    f"http://127.0.0.1:{port}/models", timeout=2
+                )
+                response.raise_for_status()
+                model = next(
+                    (
+                        m
+                        for m in response.json().get("data", [])
+                        if m.get("id") == d["alias"]
+                    ),
+                    None,
+                )
+                if model is None:
+                    return False
+                state = model.get("status", {}).get("value")
+                observation = {
+                    "residency": {
+                        "loaded": "resident",
+                        "sleeping": "sleeping",
+                        "unloaded": "unloaded",
+                        "loading": "loading",
+                    }.get(state, "unknown"),
+                    "memory": runtime_pool.memory_facts(model.get("memory")),
+                    "source": "runtime /models",
+                    "observed_at": time.time(),
+                }
+            elif protocol.properties_path:
+                props = await self.client.get(
+                    f"http://127.0.0.1:{port}{protocol.properties_path}", timeout=2
+                )
+                if props.status_code == 200:
+                    observation = adapters.runtime_observation(props.json())
+            if observation is not None:
+                saved = self.store.get("deployment", d["id"])
+                self.store.put(
+                    "runtime_observation",
+                    {
+                        "id": d["id"],
+                        "session_id": saved.get("session_id"),
+                        "facts": observation,
+                    },
+                    historical=False,
+                )
+                if saved.get("session_id"):
+                    session = self.store.get("session", saved["session_id"])
+                    self.store.put(
+                        "session",
+                        session | {"runtime_observation": observation},
+                        historical=False,
+                    )
+                if (
+                    self.unit(d["id"]).get("engine_pool")
+                    or observation.get("residency") == "sleeping"
+                ):
+                    return True
             models = await self.client.get(
-                f"http://127.0.0.1:{d['port']}/v1/models", timeout=2
+                f"http://127.0.0.1:{port}/v1/models", timeout=2
             )
             return models.status_code == 200 and any(
                 x.get("id") == d["alias"] for x in models.json().get("data", [])
             )
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, ValueError, TypeError, KeyError):
             return False
 
     async def container_info(self, d, runtime):
@@ -820,6 +950,15 @@ class Manager:
         return info
 
     async def _terminate(self, d):
+        unit = self.unit(d["id"])
+        process_id = d["id"]
+        if unit.get("engine_pool"):
+            if any(
+                m["id"] != d["id"] and m["state"] in ACTIVE - {"QUEUED", "STARTING"}
+                for m in unit["members"]
+            ):
+                return
+            process_id = unit["members"][0]["id"]
         runtime = self.store.get("runtime", d["profile_snapshot"]["runtime_id"])
         if runtime["execution_kind"] != "native":
             try:
@@ -840,7 +979,7 @@ class Manager:
                 if "No such" not in str(exc) and "no such" not in str(exc):
                     raise
         await processes.terminate(d)
-        proc = self.processes.pop(d["id"], None)
+        proc = self.processes.pop(process_id, None)
         if proc:
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(proc.wait(), 5)
@@ -863,6 +1002,7 @@ class Manager:
             pid=None,
             reservation_active=0,
             resume_on_boot=False,
+            runtime_observation=None,
         )
 
     def finish_session(self, d, outcome, reason=None):
@@ -934,6 +1074,16 @@ class Manager:
         # Caller owns the admission lock. One timer and one busy check per unit.
         now = time.monotonic()
         for unit in deployment_sets.units(self.store):
+            from .runtime_protocol import native_idle_sleep
+
+            member = unit["members"][0]
+            if unit.get("engine_pool"):
+                continue
+            runtime = self.store.get(
+                "runtime", member["profile_snapshot"]["runtime_id"]
+            )
+            if not unit["multi_model"] and native_idle_sleep(member, runtime):
+                continue
             if (
                 unit["residency"] == "on-demand"
                 and unit["idle_timeout"]
@@ -988,7 +1138,10 @@ class Manager:
                 for d in live:
                     if d["state"] not in ACTIVE:
                         continue
-                    if d.get("pid"):
+                    unit = self.unit(d["id"])
+                    if d.get("pid") and (
+                        not unit.get("engine_pool") or d["id"] == unit["member_ids"][0]
+                    ):
                         data = await asyncio.to_thread(
                             telemetry.process_sample, d.get("runtime_pid") or d["pid"]
                         )
@@ -997,6 +1150,10 @@ class Manager:
                             if d.get("runtime_pid")
                             else "native process tree"
                         )
+                        if unit.get("engine_pool"):
+                            data["provenance"] = (
+                                "runtime pool aggregate; not a per-model measurement"
+                            )
                         data["gpu_mib"] = telemetry.gpu_process_usage(
                             self.host, data["pids"]
                         )
@@ -1050,7 +1207,7 @@ class Manager:
                                     "READY" if ready else "DEGRADED",
                                     None if ready else "Readiness check failed",
                                 )
-                    if d["state"] == "READY":
+                    if d["state"] == "READY" and not unit.get("engine_pool"):
                         try:
                             response = await self.client.get(
                                 f"http://127.0.0.1:{d['port']}/metrics", timeout=2

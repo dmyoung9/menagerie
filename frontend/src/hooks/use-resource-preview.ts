@@ -29,7 +29,7 @@ export function useResourcePreview(
       const configuration = member.configuration;
       return {
         name: member.name || 'Draft model',
-        gpu: member.gpu ?? 0,
+        gpu: member.gpu ?? null,
         configuration: configuration
           ? Object.fromEntries(
               configurationKeys

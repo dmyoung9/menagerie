@@ -1,5 +1,21 @@
 # Multi-model deployments
 
+## Native runtime pools
+
+In Lifecycle, choose **Runtime — native model pool** to delegate model routing
+and residency to a compatible native runtime. All members must share one installed
+runtime and device visibility. This mode is on-demand: starting the pool starts a
+router, not every model. Each model loads when requested. The router uses the
+first member's private port; the remaining member ports are retained configuration
+identities, not additional listeners. Stopping stops the entire pool.
+
+Eviction consent enables pool-local LRU limits and supported device-memory margin
+unloading. Without consent, those automatic eviction limits are disabled. Idle
+sleep still follows the pool's configured timeout when the runtime supports it.
+Use coordinated processes for pinned models or atomic model residency. Native
+pools currently support native llama.cpp-compatible builds, not containers or
+other runtime protocols. See [runtime behavior and limitations](releases/3.0.0.md).
+
 A serving deployment owns one or more models. Each member keeps its own API alias,
 runtime, configuration snapshot, port, process log, and session history. Loading mode,
 priority, idle timeout, client availability, and eviction

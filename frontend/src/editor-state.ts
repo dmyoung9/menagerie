@@ -14,14 +14,7 @@ export const defaults: EditorDraftMap = {
     name: 'New profile',
     artifact_id: '',
     runtime_id: '',
-    config: {
-      'ctx-size': 8192,
-      parallel: 1,
-      'gpu-layers': 'all',
-      'cache-type-k': 'q8_0',
-      'cache-type-v': 'q8_0',
-      'flash-attn': 'auto',
-    },
+    config: {},
     raw_args: [],
     catalog: {
       model: { capabilities: { reasoning: false } },
@@ -38,7 +31,7 @@ export const defaults: EditorDraftMap = {
     idle_timeout: 300,
     allow_eviction: false,
     enabled: true,
-    gpu: 0,
+    gpu: null,
     queue_timeout: 300,
   },
   runtimes: {

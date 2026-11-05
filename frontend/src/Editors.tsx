@@ -104,23 +104,23 @@ export function ConfigurationFields({
         max: Math.min(
           schema[key].max ?? modelContext,
           modelContext *
-            (key === 'ctx-size' && typeof value.config.parallel === 'number'
+            (key === 'ctx-size' &&
+            typeof value.config.parallel === 'number' &&
+            value.config.parallel > 0
               ? value.config.parallel
               : 1),
         ),
       };
-  if (schema.parallel)
+  if (
+    schema.parallel &&
+    typeof value.config['ctx-size'] === 'number' &&
+    value.config['ctx-size'] > 0
+  )
     schema.parallel = {
       ...schema.parallel,
       max: Math.min(
         schema.parallel.max ?? Number.MAX_SAFE_INTEGER,
-        Math.floor(
-          (typeof value.config['ctx-size'] === 'number'
-            ? value.config['ctx-size']
-            : typeof schema['ctx-size']?.default === 'number'
-              ? schema['ctx-size'].default
-              : 8192) / 32,
-        ),
+        Math.floor(value.config['ctx-size'] / 32),
       ),
     };
   if (schema['gpu-layers'] && runtime?.managed?.backend === 'cpu')
@@ -234,10 +234,7 @@ export function ConfigurationFields({
                   ))
                 )
                   return;
-                const selected = engines.find((r) => r.id === id);
                 const config: Record<string, JsonValue> = {};
-                if (selected?.managed?.backend === 'cpu')
-                  config['gpu-layers'] = '0';
                 setValidity({});
                 onValid(true);
                 set({ ...value, runtime_id: id, config, raw_args: [] });
@@ -713,11 +710,9 @@ export function Editor(props: EditorProps) {
                     value={runtime.engine}
                     onChange={(e) => set('engine', e.target.value)}
                   >
-                    {['llama.cpp', 'prism', 'vllm', 'sglang', 'custom'].map(
-                      (v) => (
-                        <NativeSelectOption key={v}>{v}</NativeSelectOption>
-                      ),
-                    )}
+                    {['llama.cpp', 'vllm', 'sglang', 'custom'].map((v) => (
+                      <NativeSelectOption key={v}>{v}</NativeSelectOption>
+                    ))}
                   </NativeSelect>
                 </Field>
                 <Field label="Execution">

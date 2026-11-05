@@ -532,9 +532,9 @@ class Jobs:
 
     def install_plan(self, source):
         engine = source.get("engine")
-        if engine not in {"llama.cpp", "prism"}:
+        if engine != "llama.cpp":
             raise ValueError(
-                "Native source builds currently support llama.cpp/Prism; register isolated vLLM/SGLang binaries or pinned OCI images"
+                "Native source builds support llama.cpp-compatible repositories; register other runtime executables or pinned OCI images"
             )
         url, commit = source.get("url", ""), source.get("commit", "")
         if not re.fullmatch(

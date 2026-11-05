@@ -82,6 +82,10 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   const second = dialog.locator('[data-model-index="1"]');
+  await second.getByRole('button', { name: 'Add generation flags' }).click();
+  const picker = page.getByRole('dialog', { name: 'Add generation flags' });
+  await picker.getByRole('checkbox', { name: 'Top-k', exact: true }).check();
+  await picker.getByRole('button', { name: 'Add (1)', exact: true }).click();
   await second.getByLabel('Top-k', { exact: true }).fill('');
   await second.getByLabel('Top-k', { exact: true }).blur();
   await dialog

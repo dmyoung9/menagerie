@@ -95,7 +95,7 @@ def test_executable_defaults_are_scoped_wrapped_and_backend_specific():
         "reasoning-budget",
     ]
     runtime = {
-        "engine": "prism",
+        "engine": "llama.cpp",
         "managed": {"backend": "cuda"},
         "capabilities": {"flags": flags},
     }
@@ -109,9 +109,7 @@ def test_executable_defaults_are_scoped_wrapped_and_backend_specific():
     assert schema["ctx-size"]["engine_default"] == 0
     assert schema["reasoning-budget"]["engine_default"] == -1
     assert "engine_default" not in schema["top-k"]
-    assert (
-        schema["threads"]["default"] == 6
-    )  # historical policy is not silently rewritten
+    assert schema["threads"]["default"] == -1
     assert (
         adapters.option_schema(
             runtime | {"managed": {"backend": "cpu"}}, flags, HELP_DEFAULTS

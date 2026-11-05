@@ -55,7 +55,7 @@ class TemplateAsset(Record):
 
 class Runtime(Record):
     name: str
-    engine: Literal["llama.cpp", "prism", "vllm", "sglang", "custom"]
+    engine: Literal["llama.cpp", "vllm", "sglang", "custom"]
     execution_kind: Literal["native", "docker", "podman"] = "native"
     executable: str
     version: str | None = None
@@ -93,7 +93,7 @@ class Deployment(DeploymentPolicy):
     configuration: Profile | None = None
     alias: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,159}$")
     port: int = Field(ge=1024, le=65535)
-    gpu: int = Field(default=0, ge=0, le=31)
+    gpu: int | None = Field(default=None, ge=0, le=31)
     # Per-deployment template override. None means "use model default";
     # an explicit {source: embedded|published|custom, asset_id} wins over the
     # model default. The source "automatic" is not stored at the deployment level
@@ -104,6 +104,8 @@ class Deployment(DeploymentPolicy):
 
 class DeploymentSet(DeploymentPolicy):
     name: str
+    engine_pool: bool = False
+    max_loaded: int = Field(default=4, ge=1, le=128)
     member_ids: list[str] = Field(default_factory=list)
     members: list[Deployment] | None = None
 
@@ -130,7 +132,7 @@ class Settings(BaseModel):
 
 class ResourceDraft(BaseModel):
     name: str = "Draft model"
-    gpu: int = Field(default=0, ge=0, le=31)
+    gpu: int | None = Field(default=None, ge=0, le=31)
     configuration: Profile
 
 

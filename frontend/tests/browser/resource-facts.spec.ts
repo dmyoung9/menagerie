@@ -10,6 +10,7 @@ test('resource preview pairs stacked capacity and allocation selection without p
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
+  await dialog.getByLabel('GPU', { exact: true }).selectOption('0');
   const preview = dialog.getByRole('complementary', {
     name: 'Deployment resource preview',
   });

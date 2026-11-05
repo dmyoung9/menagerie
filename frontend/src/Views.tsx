@@ -450,6 +450,20 @@ export function DeploymentDetail({
                   <dd>{String(v)}</dd>
                 </div>
               ))}
+              {d.runtime_observation && (
+                <>
+                  <dt>Model residency</dt>
+                  <dd>{d.runtime_observation.residency}</dd>
+                  {Object.entries(d.runtime_observation.resolved || {}).map(
+                    ([key, value]) => (
+                      <div className="property-pair" key={key}>
+                        <dt>{key} (engine-selected)</dt>
+                        <dd>{value.toLocaleString()}</dd>
+                      </div>
+                    ),
+                  )}
+                </>
+              )}
             </dl>
             <details>
               <summary>Advanced</summary>
@@ -457,7 +471,7 @@ export function DeploymentDetail({
                 <dt>Private port</dt>
                 <dd>{d.port}</dd>
                 <dt>GPU</dt>
-                <dd>{d.gpu}</dd>
+                <dd>{d.gpu ?? 'Engine selected'}</dd>
                 <dt>Priority</dt>
                 <dd>{d.priority}</dd>
                 <dt>Queue timeout (s)</dt>
@@ -467,6 +481,7 @@ export function DeploymentDetail({
                 value={{
                   arguments: profile?.raw_args,
                   capabilities: profile?.catalog,
+                  runtime_observation: d.runtime_observation,
                 }}
               />
             </details>

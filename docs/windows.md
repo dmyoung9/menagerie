@@ -32,8 +32,8 @@ installed. Dashboard and inference listeners remain local to the machine.
 
 Use **Overview → Get your first response**, then the engine/model checklist.
 Managed Windows engines currently cover **llama.cpp GGUF on x64**, with CPU and
-compatible CUDA release assets when available. Linux-only vLLM installations and
-specialized Prism builds are not offered as managed Windows engines.
+compatible CUDA release assets when available. vLLM managed installations are
+Linux-only. Register compatible custom builds with their runtime adapter.
 
 CUDA requires a compatible NVIDIA driver; Menagerie does not install or update
 drivers. Engine assets and companion DLLs are downloaded together, verified, and

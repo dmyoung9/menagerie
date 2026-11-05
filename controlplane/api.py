@@ -137,6 +137,15 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             previous["member_ids"] if previous else []
         )
         members = [store.get("deployment", i, c) for i in affected]
+        from . import runtime_pool
+
+        errors = runtime_pool.validate(
+            data
+            | {"members": [store.get("deployment", i, c) for i in data["member_ids"]]},
+            store,
+        )
+        if errors:
+            raise ValueError("; ".join(errors))
         if any(
             d["state"] in ACTIVE or manager.inflight.get(d["id"], 0) for d in members
         ):
@@ -796,6 +805,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 return saved
 
     def save_member(data, expected=None, c=None, owner_id=None):
+        data.setdefault("gpu", None)
         all_d = store.list("deployment", c)
         previous = next((d for d in all_d if d["id"] == data.get("id")), None)
         owner = deployment_sets.unit_for(store, data["id"]) if data.get("id") else None
@@ -1521,7 +1531,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             manager.client.send(
                 manager.client.build_request(
                     "POST",
-                    f"http://127.0.0.1:{d['port']}/v1/chat/completions",
+                    f"http://127.0.0.1:{manager.runtime_port(d)}/v1/chat/completions",
                     json=body,
                     headers={"X-Request-ID": correlation},
                 ),

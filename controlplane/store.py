@@ -27,11 +27,26 @@ class Store:
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = self.root / "registry.sqlite3"
+        if self.path.exists():
+            with sqlite3.connect(f"{self.path.as_uri()}?mode=ro", uri=True) as existing:
+                table = existing.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='schema_version'"
+                ).fetchone()
+                if (
+                    table
+                    and existing.execute(
+                        "SELECT max(version) FROM schema_version"
+                    ).fetchone()[0]
+                    != 3
+                ):
+                    raise ValueError(
+                        "Menagerie 3 requires fresh state. Back up the 2.x state for rollback and choose an empty state directory; automatic migration is not supported."
+                    )
         with self.connect() as c:
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
             CREATE TABLE IF NOT EXISTS schema_version(version INTEGER PRIMARY KEY);
-            INSERT OR IGNORE INTO schema_version VALUES(1);
+            INSERT OR IGNORE INTO schema_version VALUES(3);
             CREATE TABLE IF NOT EXISTS objects(
               kind TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
               data TEXT NOT NULL, PRIMARY KEY(kind,id));
@@ -71,7 +86,6 @@ class Store:
                 "ON CONFLICT(deployment_id) DO UPDATE SET completed=max(completed,excluded.completed)",
                 retained.items(),
             )
-            c.execute("INSERT OR IGNORE INTO schema_version VALUES(2)")
         self.path.chmod(0o600)
 
     @contextmanager

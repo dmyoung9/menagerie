@@ -28,7 +28,7 @@ cross-repository projector resolution are not inferred.
 
 A chat template is the file that tells an engine how to format a conversation
 before inference. Menagerie applies the chosen template with the flag that
-matches the engine: **`--chat-template-file`** for llama.cpp and Prism,
+matches the adapter: **`--chat-template-file`** for llama.cpp-compatible builds,
 **`--chat-template`** for vLLM. Models registered before this feature, or any
 selection that was never set, default to **Automatic (engine default)**, which
 means no template file.
