@@ -415,7 +415,12 @@ for (const width of [1440, 576, 320]) {
             (child) => child.getAttribute('data-slot') || 'controls',
           ),
         ),
-    ).toEqual(['field-label', 'field-group', 'field-description']);
+    ).toEqual([
+      'field-label',
+      'field-label',
+      'field-group',
+      'field-description',
+    ]);
     const item = rows.first().locator('..').locator('..');
     await expect(item).toHaveAttribute('data-slot', 'item');
     await expect(item).toHaveAttribute('data-size', 'sm');
@@ -441,12 +446,19 @@ for (const width of [1440, 576, 320]) {
     expect(descriptionBox!.y).toBeGreaterThanOrEqual(
       inputBox!.y + inputBox!.height,
     );
-    const title = rows.first().locator(':scope > [data-slot="field-label"]');
-    await expect(title).toHaveText('Top-p sampling (--top-p N)');
-    await expect(title.locator('code')).toHaveText('(--top-p N)');
-    await expect(title).toHaveJSProperty('tagName', 'LABEL');
-    const titleBox = await title.locator('span[id]').boundingBox();
-    const syntaxBox = await title.locator('code').boundingBox();
+    const title = rows.first().locator(':scope > div[data-slot="field-label"]');
+    const syntax = rows
+      .first()
+      .locator(':scope > label[data-slot="field-label"]');
+    await expect(title).toHaveText('Top-p sampling');
+    await expect(title.locator('code')).toHaveCount(0);
+    await expect(syntax).toHaveText('(--top-p N)');
+    await expect(syntax.locator(':scope > code')).toHaveText('(--top-p N)');
+    expect(
+      await syntax.evaluate((label: HTMLLabelElement) => label.control?.id),
+    ).toBe(await rows.first().getByRole('spinbutton').getAttribute('id'));
+    const titleBox = await title.boundingBox();
+    const syntaxBox = await syntax.boundingBox();
     expect(syntaxBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height);
     expect(inputBox!.y).toBeGreaterThanOrEqual(
       syntaxBox!.y + syntaxBox!.height,

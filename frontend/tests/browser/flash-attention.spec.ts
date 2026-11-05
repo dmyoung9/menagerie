@@ -55,11 +55,19 @@ for (const width of [1440, 576, 320]) {
     );
     const field = page.locator('[data-runtime-flag="flash-attn"]');
     await expect(
-      field.locator(':scope > [data-slot="field-label"]'),
-    ).toHaveText('Flash attention (--flash-attn [on|off|auto])');
+      field.locator(':scope > div[data-slot="field-label"]'),
+    ).toHaveText('Flash attention');
     await expect(
-      field.locator(':scope > [data-slot="field-label"] code'),
-    ).toHaveText('(--flash-attn [on|off|auto])');
+      field.locator(':scope > div[data-slot="field-label"] code'),
+    ).toHaveCount(0);
+    const syntax = field.locator(':scope > label[data-slot="field-label"]');
+    await expect(syntax).toHaveText('(--flash-attn [on|off|auto])');
+    await expect(syntax.locator(':scope > code')).toHaveText(
+      '(--flash-attn [on|off|auto])',
+    );
+    await expect(radios).toHaveAccessibleDescription(
+      '(--flash-attn [on|off|auto]) default: auto',
+    );
     await expect(
       field.locator(':scope > [data-slot="field-description"]'),
     ).toHaveText('default: auto');
@@ -69,7 +77,12 @@ for (const width of [1440, 576, 320]) {
           (child) => child.getAttribute('data-slot') || 'controls',
         ),
       ),
-    ).toEqual(['field-label', 'radio-group', 'field-description']);
+    ).toEqual([
+      'field-label',
+      'field-label',
+      'radio-group',
+      'field-description',
+    ]);
     const item = field.locator('..').locator('..');
     await expect(item).toHaveAttribute('data-slot', 'item');
     await expect(
@@ -78,11 +91,9 @@ for (const width of [1440, 576, 320]) {
     await expect(field.getByRole('button', { name: /Remove/ })).toHaveCount(0);
     const controlBox = await radios.boundingBox();
     const titleBox = await field
-      .locator(':scope > [data-slot="field-label"] span[id]')
+      .locator(':scope > div[data-slot="field-label"]')
       .boundingBox();
-    const syntaxBox = await field
-      .locator(':scope > [data-slot="field-label"] code')
-      .boundingBox();
+    const syntaxBox = await syntax.boundingBox();
     expect(syntaxBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height);
     expect(controlBox!.y).toBeGreaterThanOrEqual(
       syntaxBox!.y + syntaxBox!.height,

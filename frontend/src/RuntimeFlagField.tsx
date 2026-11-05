@@ -72,7 +72,7 @@ export function RuntimeFlagField({
     (error) => typeof error === 'string',
   );
   const invalid = !!error;
-  const describedBy = `${id}-description${invalid ? ` ${id}-error` : ''}`;
+  const describedBy = `${id}-syntax ${id}-description${invalid ? ` ${id}-error` : ''}`;
   const commit = (number: number | undefined) => {
     if (number === undefined) return;
     form.setFieldValue('draft', (draft: unknown) =>
@@ -81,12 +81,6 @@ export function RuntimeFlagField({
     form.setFieldValue(`inputs.${inputKey(formPath, flag)}`, String(number));
   };
   const maximum = schema[flag].max ?? Number.MAX_SAFE_INTEGER;
-  const title = (
-    <span className="flex min-w-0 flex-col items-start gap-1">
-      <span id={`${id}-label`}>{runtimeFlags[flag].title}</span>{' '}
-      <code>({runtimeFlags[flag].syntax})</code>
-    </span>
-  );
   return (
     <Item size="sm" role="listitem" className="flex-nowrap">
       <ItemContent className="min-w-0">
@@ -95,11 +89,10 @@ export function RuntimeFlagField({
           data-invalid={invalid}
           data-disabled={disabled}
         >
-          {radio ? (
-            <FieldTitle>{title}</FieldTitle>
-          ) : (
-            <FieldLabel htmlFor={id}>{title}</FieldLabel>
-          )}
+          <FieldTitle id={`${id}-label`}>{runtimeFlags[flag].title}</FieldTitle>
+          <FieldLabel id={`${id}-syntax`} htmlFor={radio ? undefined : id}>
+            <code>({runtimeFlags[flag].syntax})</code>
+          </FieldLabel>
           {radio ? (
             <RadioGroup
               aria-label={label}
