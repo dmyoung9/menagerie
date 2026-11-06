@@ -6,12 +6,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
+import { RotateCcw } from 'lucide-react';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Field } from './ui';
 import { type ReactNode } from 'react';
 import { SettingsSection } from '@/components/settings-section';
 import { memory } from '@/lib/formatters';
-import { NumberControl } from './NumberControl';
+import { NumberControl, ExactNumber } from './NumberControl';
 import { DraftTokenRange } from './DraftTokenRange';
 import { RuntimeFlagCard } from './RuntimeFlagCard';
 import type { ConfigPath } from './draft-form';
@@ -180,6 +181,402 @@ export function Duration({
   );
 }
 
+export function RuntimeControl({
+  configKey,
+  schema,
+  value,
+  change,
+  disabled = false,
+  host = {},
+  recommendation = {},
+  compact = false,
+  showReset = true,
+}: {
+  configKey: string;
+  schema: Record<string, RuntimeField>;
+  value: Record<string, JsonValue>;
+  change: (value: Record<string, JsonValue>) => void;
+  disabled?: boolean;
+  host?: HostSnapshot;
+  recommendation?: RuntimeRecommendation;
+  compact?: boolean;
+  showReset?: boolean;
+}) {
+  const key = configKey;
+  const f = schema[key];
+  if (!f) return null;
+  const label = f.label || key;
+  const current = value[key];
+  const thread = ['threads', 'threads-batch'].includes(key);
+  const context = ['ctx-size', 'max-model-len'].includes(key);
+  const inherited = f.default_from
+    ? (value[f.default_from] ?? schema[f.default_from]?.engine_default)
+    : undefined;
+  const engineDefault =
+    typeof inherited === 'number' ? inherited : f.engine_default;
+  const min = Math.min(f.min ?? 0, engineDefault ?? f.min ?? 0);
+  const update = (key: string, next: JsonValue | undefined) => {
+    const config = { ...value };
+    if (next === undefined) delete config[key];
+    else config[key] = next;
+    change(config);
+  };
+  const setNumeric = (next: number | undefined) => update(key, next);
+  const fieldMax = f.max ?? Number.MAX_SAFE_INTEGER;
+  const numeric = ['integer', 'number'].includes(f.type || '');
+  const recommended =
+    context && recommendation.context_key === key
+      ? recommendation.context_recommended_max
+      : undefined;
+  const max =
+    key === 'ubatch-size'
+      ? Math.min(
+          fieldMax,
+          typeof value['batch-size'] === 'number'
+            ? value['batch-size']
+            : typeof schema['batch-size']?.engine_default === 'number'
+              ? schema['batch-size'].engine_default
+              : fieldMax,
+        )
+      : fieldMax;
+  const inputMax = Number.isFinite(max) ? max : undefined;
+  const stops = [
+    ...(numeric
+      ? new Set(
+          [
+            min,
+            2048,
+            4096,
+            8192,
+            16384,
+            32768,
+            65536,
+            131072,
+            262144,
+            524288,
+            max,
+          ].filter((n): n is number => n >= min && n <= max),
+        )
+      : []),
+  ].sort((a, b) => a - b);
+  const effective = Number(current ?? engineDefault ?? min);
+  const placeholder =
+    engineDefault !== undefined
+      ? `${engineDefault.toLocaleString()}${f.units ? ' ' + f.units : ''}`
+      : 'Engine default';
+  const reset =
+    showReset && current !== undefined ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={disabled}
+        aria-label={`Use engine default for ${label}`}
+        onClick={() => update(key, undefined)}
+      >
+        <RotateCcw data-icon="inline-start" />
+        Reset
+      </Button>
+    ) : null;
+  const exact =
+    compact && numeric ? (
+      <ExactNumber
+        label={label}
+        value={typeof current === 'number' ? current : undefined}
+        placeholder={placeholder}
+        min={min}
+        max={inputMax}
+        step={f.type === 'number' ? 'any' : 1}
+        disabled={disabled}
+        change={setNumeric}
+      />
+    ) : (
+      <Input
+        disabled={disabled}
+        aria-label={label}
+        type={numeric ? 'number' : 'text'}
+        required={current !== undefined}
+        min={min}
+        max={inputMax}
+        step={f.type === 'number' ? 'any' : 1}
+        value={
+          typeof current === 'string' || typeof current === 'number'
+            ? current
+            : numeric
+              ? (engineDefault ?? '')
+              : ''
+        }
+        placeholder={numeric ? 'Not reported' : undefined}
+        onChange={(e) =>
+          numeric
+            ? setNumeric(
+                e.target.value === '' ? undefined : Number(e.target.value),
+              )
+            : update(key, e.target.value || undefined)
+        }
+      />
+    );
+  if (key === 'gpu-layers' && f.cpu_only)
+    return (
+      <Field
+        key={key}
+        label={label}
+        hint="This engine runs entirely on CPU and system RAM."
+      >
+        <span>0 · CPU engine</span>
+      </Field>
+    );
+  if (key === 'gpu-layers')
+    return (
+      <Field
+        key={key}
+        label={label}
+        hint={
+          recommendation.gpu_layers_max
+            ? `${recommendation.gpu_layers_max} model layers. Fewer GPU layers use system RAM and are slower.`
+            : 'Fewer GPU layers use system RAM and are slower; model layer count unavailable.'
+        }
+      >
+        <div className="control-pair">
+          <NativeSelect
+            aria-label="GPU layer mode"
+            disabled={disabled}
+            value={
+              current === undefined
+                ? 'default'
+                : current === 'all' || current === 'auto'
+                  ? current
+                  : 'custom'
+            }
+            onChange={(e) =>
+              update(
+                key,
+                e.target.value === 'default'
+                  ? undefined
+                  : e.target.value === 'all' || e.target.value === 'auto'
+                    ? e.target.value
+                    : '0',
+              )
+            }
+          >
+            <NativeSelectOption value="default">
+              Engine default
+            </NativeSelectOption>
+            <NativeSelectOption value="all">GPU-resident</NativeSelectOption>
+            <NativeSelectOption value="auto">Automatic fit</NativeSelectOption>
+            <NativeSelectOption value="custom">
+              CPU/RAM offload (slower)
+            </NativeSelectOption>
+          </NativeSelect>
+          {current !== undefined && current !== 'all' && current !== 'auto' && (
+            <NumberControl
+              label="GPU layer count"
+              required
+              min={0}
+              max={recommendation.gpu_layers_max ?? undefined}
+              step={1}
+              value={Number(current)}
+              change={(v) => update(key, String(v ?? 0))}
+            />
+          )}
+          {reset}
+        </div>
+      </Field>
+    );
+  if (f.type === 'boolean')
+    return (
+      <Field key={key} label={label} hint={f.description}>
+        <div className="exact-control">
+          <NativeSelect
+            aria-label={label}
+            disabled={disabled}
+            value={current === undefined ? '' : String(current)}
+            onChange={(e) =>
+              update(
+                key,
+                e.target.value === '' ? undefined : e.target.value === 'true',
+              )
+            }
+          >
+            <NativeSelectOption value="">Engine default</NativeSelectOption>
+            <NativeSelectOption value="true">Enabled</NativeSelectOption>
+            <NativeSelectOption value="false">Disabled</NativeSelectOption>
+          </NativeSelect>
+          {reset}
+        </div>
+      </Field>
+    );
+  if (f.choices)
+    return (
+      <Field key={key} label={label} hint={f.description}>
+        <div className="exact-control">
+          <NativeSelect
+            aria-label={label}
+            disabled={disabled}
+            value={
+              typeof current === 'string' || typeof current === 'number'
+                ? String(current)
+                : ''
+            }
+            onChange={(e) => update(key, e.target.value || undefined)}
+          >
+            <NativeSelectOption value="">
+              Unspecified · engine default
+            </NativeSelectOption>
+            {current !== undefined && !f.choices.includes(String(current)) && (
+              <NativeSelectOption value={String(current)}>
+                {String(current)} · saved value not advertised
+              </NativeSelectOption>
+            )}
+            {(f.choices || []).map((v: string) => (
+              <NativeSelectOption
+                key={v}
+                disabled={
+                  (key === 'cache-type-v' &&
+                    value['flash-attn'] === 'off' &&
+                    v !== 'f16') ||
+                  (key === 'flash-attn' &&
+                    v === 'off' &&
+                    !['f16', undefined].includes(
+                      (value['cache-type-v'] ??
+                        schema['cache-type-v']?.engine_default ??
+                        schema['cache-type-v']?.default) as string | undefined,
+                    ))
+                }
+              >
+                {v}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          {reset}
+        </div>
+      </Field>
+    );
+  if (context || (numeric && !compact)) {
+    const recommendedStops =
+      typeof recommended === 'number'
+        ? stops.filter((n) => n <= recommended)
+        : stops;
+    const sliderStops = recommendedStops.length > 1 ? recommendedStops : stops;
+    const sliderIndex = sliderStops.reduce(
+      (best, n, i) =>
+        Math.abs(n - effective) < Math.abs(sliderStops[best] - effective)
+          ? i
+          : best,
+      0,
+    );
+    return (
+      <Field
+        key={key}
+        label={label}
+        hint={
+          context && effective === 0
+            ? 'Use model context'
+            : context && schema.parallel
+              ? `${effective.toLocaleString()} tokens shared across ${value.parallel ?? schema.parallel.engine_default ?? schema.parallel.default ?? 1} concurrent requests`
+              : thread && host.cpu_count
+                ? `${host.cpu_count} host threads available`
+                : f.description || f.units
+        }
+      >
+        <div className="range-control">
+          {!compact && context && sliderStops.length > 1 ? (
+            <Slider
+              disabled={disabled}
+              aria-label={`${label} range`}
+              aria-valuetext={
+                effective === 0
+                  ? '0 · model context'
+                  : `${effective.toLocaleString()} tokens`
+              }
+              min={0}
+              max={sliderStops.length - 1}
+              step={1}
+              value={[sliderIndex]}
+              onValueChange={(range) =>
+                setNumeric(
+                  sliderStops[Number(Array.isArray(range) ? range[0] : range)],
+                )
+              }
+            />
+          ) : null}
+          {exact}
+          {reset}
+        </div>
+        {context && recommendation.context_key === key && (
+          <div
+            className={
+              recommended === null ||
+              (typeof recommended === 'number' && effective > recommended)
+                ? 'warning'
+                : 'muted'
+            }
+          >
+            {recommended === null ? (
+              'Even minimum context exceeds the estimated budget. Reduce peers, choose smaller weights, or use CPU/RAM offload.'
+            ) : (
+              <>
+                Context pool limit: {recommended?.toLocaleString()} tokens.{' '}
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => update(key, recommendation.context_default)}
+                >
+                  Use suggested default
+                </Button>
+              </>
+            )}
+            <small>{recommendation.reason}.</small>
+          </div>
+        )}
+      </Field>
+    );
+  }
+  const sliderMax = key.includes('draft')
+    ? 32
+    : key === 'top-k'
+      ? 200
+      : key === 'reasoning-budget'
+        ? 32768
+        : max === Number.MAX_SAFE_INTEGER
+          ? 1024
+          : max;
+  return (
+    <Field
+      key={key}
+      label={label}
+      hint={
+        effective === -1 && thread
+          ? 'Automatic thread selection'
+          : effective === -1 && key === 'parallel'
+            ? 'Automatic slots'
+            : effective === -1 && key === 'reasoning-budget'
+              ? 'Unlimited'
+              : f.description || f.units
+      }
+    >
+      <div className="range-control">
+        {compact ? (
+          exact
+        ) : (
+          <NumberControl
+            label={label}
+            value={typeof current === 'number' ? current : undefined}
+            defaultValue={engineDefault}
+            min={min}
+            max={inputMax}
+            sliderMax={sliderMax}
+            step={f.type === 'number' ? 0.01 : 1}
+            disabled={disabled}
+            change={setNumeric}
+          />
+        )}
+        {reset}
+      </div>
+    </Field>
+  );
+}
+
 export function RuntimeSettings({
   schema,
   value,
@@ -193,7 +590,6 @@ export function RuntimeSettings({
   engineSelected = Object.keys(schema).length > 0,
   formPath = 'configuration.config',
   curated = false,
-  runtimeMode = 'standalone',
 }: {
   schema: Record<string, RuntimeField>;
   value: Record<string, JsonValue>;
@@ -208,14 +604,7 @@ export function RuntimeSettings({
   engineSelected?: boolean;
   formPath?: ConfigPath;
   curated?: boolean;
-  runtimeMode?: 'standalone' | 'native-pool';
 }) {
-  const update = (key: string, v: JsonValue | undefined) => {
-    const next = { ...value };
-    if (v === undefined) delete next[key];
-    else next[key] = v;
-    change(next);
-  };
   const draftKeys: [string, string] | undefined =
     schema['spec-draft-n-min'] && schema['spec-draft-n-max']
       ? ['spec-draft-n-min', 'spec-draft-n-max']
@@ -286,443 +675,18 @@ export function RuntimeSettings({
       (k) => !groups.some(([, , keys]) => keys.includes(k)),
     ),
   ]);
-  function control(key: string) {
-    const field = schema[key];
-    const current = value[key];
-    const automatic = field.presentation?.automatic_value ?? undefined;
-    const mode =
-      current === undefined
-        ? 'inherited'
-        : automatic !== undefined && current === automatic
-          ? 'automatic'
-          : 'explicit';
-    const explicitSeed =
-      [field.engine_default, field.default, field.choices?.[0]].find(
-        (candidate) => candidate !== undefined && candidate !== automatic,
-      ) ??
-      (field.type === 'integer' || field.type === 'number'
-        ? Math.max(field.min ?? 1, 1)
-        : key === 'device'
-          ? 'none'
-          : '');
-    return (
-      <FieldGroup key={key}>
-        <Field
-          label={`${field.label || key} setting`}
-          hint={
-            field.presentation
-              ? `Owner: ${field.presentation.owner_by_mode?.[runtimeMode] || field.presentation.owner}. Schema: ${field.presentation.provenance}.${field.restart_required ? ' Reload required for startup changes.' : ''}`
-              : undefined
-          }
-        >
-          <NativeSelect
-            value={mode}
-            disabled={disabled}
-            onChange={(e) => {
-              const next = e.target.value;
-              update(
-                key,
-                next === 'inherited'
-                  ? undefined
-                  : next === 'automatic'
-                    ? automatic
-                    : explicitSeed,
-              );
-            }}
-          >
-            <NativeSelectOption value="inherited">
-              Unspecified · engine default
-            </NativeSelectOption>
-            {automatic !== undefined && (
-              <NativeSelectOption value="automatic">
-                Automatic · explicit engine mode
-              </NativeSelectOption>
-            )}
-            <NativeSelectOption value="explicit">
-              Explicit override
-            </NativeSelectOption>
-          </NativeSelect>
-        </Field>
-        {engineControl(key)}
-        {current !== undefined && (
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={disabled}
-            onClick={() => update(key, undefined)}
-          >
-            Remove {field.label || key} override
-          </Button>
-        )}
-      </FieldGroup>
-    );
-  }
-  function engineControl(key: string) {
-    const f = schema[key],
-      current = value[key],
-      label = f.label || key;
-    const thread = ['threads', 'threads-batch'].includes(key);
-    const context = ['ctx-size', 'max-model-len'].includes(key);
-    const inherited = f.default_from
-      ? (value[f.default_from] ?? schema[f.default_from]?.engine_default)
-      : undefined;
-    const engineDefault =
-      typeof inherited === 'number' ? inherited : f.engine_default;
-    const min = Math.min(f.min ?? 0, engineDefault ?? f.min ?? 0);
-    const setNumeric = (n: number | undefined) =>
-      update(
-        key,
-        n === engineDefault && n !== undefined && n < (f.min ?? 0)
-          ? undefined
-          : n,
-      );
-    const fieldMax = f.max ?? Number.MAX_SAFE_INTEGER;
-    const numeric = ['integer', 'number'].includes(f.type || '');
-    const recommended =
-      context && recommendation.context_key === key
-        ? recommendation.context_recommended_max
-        : undefined;
-    const capacity = context
-      ? recommended
-      : key === 'parallel'
-        ? recommendation.parallel_recommended_max
-        : undefined;
-    const max =
-      key === 'gpu-memory-utilization' &&
-      recommendation.gpu_memory_utilization_max !== undefined
-        ? Math.min(fieldMax, recommendation.gpu_memory_utilization_max)
-        : context
-          ? fieldMax
-          : typeof capacity === 'number'
-            ? Math.min(fieldMax, capacity)
-            : thread && host.cpu_count
-              ? Math.min(f.max ?? host.cpu_count, host.cpu_count)
-              : key === 'ubatch-size'
-                ? Math.min(
-                    fieldMax,
-                    typeof value['batch-size'] === 'number'
-                      ? value['batch-size']
-                      : typeof schema['batch-size']?.engine_default === 'number'
-                        ? schema['batch-size'].engine_default
-                        : fieldMax,
-                  )
-                : fieldMax;
-    const inputMax = Number.isFinite(max) ? max : undefined;
-    const stops = [
-      ...(numeric
-        ? new Set(
-            [
-              min,
-              2048,
-              4096,
-              8192,
-              16384,
-              32768,
-              65536,
-              131072,
-              262144,
-              524288,
-              max,
-            ].filter((n): n is number => n >= min && n <= max),
-          )
-        : []),
-    ].sort((a, b) => a - b);
-    const effective = Number(current ?? engineDefault ?? min);
-    if (key === 'gpu-layers' && f.cpu_only)
-      return (
-        <Field
-          key={key}
-          label={label}
-          hint="This engine runs entirely on CPU and system RAM."
-        >
-          <span>0 · CPU engine</span>
-        </Field>
-      );
-    const exact = (
-      <Input
-        disabled={disabled}
-        aria-label={label}
-        type={numeric ? 'number' : 'text'}
-        required={current !== undefined}
-        min={
-          key === 'gpu-memory-utilization'
-            ? (recommendation.gpu_memory_utilization_min ?? min)
-            : min
-        }
-        max={inputMax}
-        step={f.type === 'number' ? 'any' : 1}
-        value={
-          typeof current === 'string' || typeof current === 'number'
-            ? current
-            : numeric
-              ? (engineDefault ?? '')
-              : ''
-        }
-        placeholder={numeric ? 'Not reported' : undefined}
-        onChange={(e) =>
-          numeric
-            ? setNumeric(
-                e.target.value === '' ? undefined : Number(e.target.value),
-              )
-            : update(key, e.target.value || undefined)
-        }
-      />
-    );
-    if (
-      key === 'parallel' &&
-      recommendation.parallel_recommended_max !== undefined
-    ) {
-      const parallelMax = recommendation.parallel_recommended_max;
-      return (
-        <Field
-          key={key}
-          label={label}
-          hint={
-            recommendation.parallel_recommended_max === null
-              ? 'Even one request slot exceeds the estimated memory budget at this context.'
-              : `Concurrency limit: ${recommendation.parallel_recommended_max} with the other settings preserved.`
-          }
-        >
-          <div className="range-control">
-            {typeof parallelMax === 'number' && parallelMax > 1 && (
-              <Slider
-                disabled={disabled}
-                aria-label="Concurrency range"
-                min={min}
-                max={parallelMax}
-                value={[Math.min(effective, parallelMax)]}
-                onValueChange={(range) =>
-                  setNumeric(Number(Array.isArray(range) ? range[0] : range))
-                }
-              />
-            )}{' '}
-            {exact}
-          </div>
-        </Field>
-      );
-    }
-    if (key === 'gpu-layers')
-      return (
-        <Field
-          key={key}
-          label={label}
-          hint={
-            recommendation.gpu_layers_max
-              ? `${recommendation.gpu_layers_max} model layers. Fewer GPU layers use system RAM and are slower.`
-              : 'Fewer GPU layers use system RAM and are slower; model layer count unavailable.'
-          }
-        >
-          <div className="control-pair">
-            <NativeSelect
-              aria-label="GPU layer mode"
-              value={
-                current === undefined
-                  ? 'default'
-                  : current === 'all' || current === 'auto'
-                    ? current
-                    : 'custom'
-              }
-              onChange={(e) =>
-                update(
-                  key,
-                  e.target.value === 'default'
-                    ? undefined
-                    : e.target.value === 'all' || e.target.value === 'auto'
-                      ? e.target.value
-                      : '0',
-                )
-              }
-            >
-              <NativeSelectOption value="default">
-                Engine default
-              </NativeSelectOption>
-              <NativeSelectOption value="all">GPU-resident</NativeSelectOption>
-              <NativeSelectOption value="auto">
-                Automatic fit
-              </NativeSelectOption>
-              <NativeSelectOption value="custom">
-                CPU/RAM offload (slower)
-              </NativeSelectOption>
-            </NativeSelect>
-            {current !== undefined &&
-              current !== 'all' &&
-              current !== 'auto' && (
-                <NumberControl
-                  label="GPU layer count"
-                  required
-                  min={0}
-                  max={recommendation.gpu_layers_max ?? undefined}
-                  step={1}
-                  value={Number(current)}
-                  change={(v) => update(key, String(v ?? 0))}
-                />
-              )}
-          </div>
-        </Field>
-      );
-    if (numeric && !context) {
-      const sliderMax = key.includes('draft')
-        ? 32
-        : key === 'top-k'
-          ? 200
-          : key === 'reasoning-budget'
-            ? 32768
-            : max === Number.MAX_SAFE_INTEGER
-              ? 1024
-              : max;
-      return (
-        <Field
-          key={key}
-          label={label}
-          hint={
-            effective === -1 && thread
-              ? 'Automatic thread selection'
-              : effective === -1 && key === 'parallel'
-                ? 'Automatic slots'
-                : effective === -1 && key === 'reasoning-budget'
-                  ? 'Unlimited'
-                  : f.description || f.units
-          }
-        >
-          <NumberControl
-            label={label}
-            value={typeof current === 'number' ? current : undefined}
-            defaultValue={engineDefault}
-            min={min}
-            max={inputMax}
-            sliderMax={sliderMax}
-            step={f.type === 'number' ? 0.01 : 1}
-            disabled={disabled}
-            change={setNumeric}
-          />
-        </Field>
-      );
-    }
-    if (f.type === 'boolean')
-      return (
-        <Field key={key} label={label} hint={f.description}>
-          <NativeSelect
-            value={current === undefined ? '' : String(current)}
-            onChange={(e) =>
-              update(
-                key,
-                e.target.value === '' ? undefined : e.target.value === 'true',
-              )
-            }
-          >
-            <NativeSelectOption value="">Engine default</NativeSelectOption>
-            <NativeSelectOption value="true">Enabled</NativeSelectOption>
-            <NativeSelectOption value="false">Disabled</NativeSelectOption>
-          </NativeSelect>
-        </Field>
-      );
-    if (f.choices)
-      return (
-        <Field key={key} label={label} hint={f.description}>
-          <NativeSelect
-            value={
-              typeof current === 'string' || typeof current === 'number'
-                ? String(current)
-                : ''
-            }
-            onChange={(e) => update(key, e.target.value || undefined)}
-          >
-            <NativeSelectOption value="">
-              Unspecified · engine default
-            </NativeSelectOption>
-            {(f.choices || []).map((v: string) => (
-              <NativeSelectOption
-                key={v}
-                disabled={
-                  key === 'cache-type-v' &&
-                  value['flash-attn'] === 'off' &&
-                  v !== 'f16'
-                }
-              >
-                {v}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
-      );
-    const recommendedStops =
-      typeof recommended === 'number'
-        ? stops.filter((n) => n <= recommended)
-        : stops;
-    const sliderStops = recommendedStops.length > 1 ? recommendedStops : stops;
-    const sliderIndex = sliderStops.reduce(
-      (best, n, i) =>
-        Math.abs(n - effective) < Math.abs(sliderStops[best] - effective)
-          ? i
-          : best,
-      0,
-    );
-    return (
-      <Field
-        key={key}
-        label={label}
-        hint={
-          context && effective === 0
-            ? 'Use model context'
-            : context && schema.parallel
-              ? `${effective.toLocaleString()} tokens shared across ${value.parallel ?? schema.parallel.engine_default ?? schema.parallel.default ?? 1} concurrent requests`
-              : thread && host.cpu_count
-                ? `${host.cpu_count} host threads available`
-                : f.description || f.units
-        }
-      >
-        <div className="range-control">
-          {context && sliderStops.length > 1 ? (
-            <Slider
-              disabled={disabled}
-              aria-label={`${label} range`}
-              aria-valuetext={
-                effective === 0
-                  ? '0 · model context'
-                  : `${effective.toLocaleString()} tokens`
-              }
-              min={0}
-              max={sliderStops.length - 1}
-              step={1}
-              value={[sliderIndex]}
-              onValueChange={(range) =>
-                setNumeric(
-                  sliderStops[Number(Array.isArray(range) ? range[0] : range)],
-                )
-              }
-            />
-          ) : null}
-          {exact}
-        </div>
-        {context && recommendation.context_key === key && (
-          <div
-            className={
-              recommended === null ||
-              (typeof recommended === 'number' && effective > recommended)
-                ? 'warning'
-                : 'muted'
-            }
-          >
-            {recommended === null ? (
-              'Even minimum context exceeds the estimated budget. Reduce peers, choose smaller weights, or use CPU/RAM offload.'
-            ) : (
-              <>
-                Context pool limit: {recommended?.toLocaleString()} tokens.{' '}
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() => update(key, recommendation.context_default)}
-                >
-                  Use suggested default
-                </Button>
-              </>
-            )}
-            <small>{recommendation.reason}.</small>
-          </div>
-        )}
-      </Field>
-    );
-  }
+  const control = (key: string) => (
+    <RuntimeControl
+      key={key}
+      configKey={key}
+      schema={schema}
+      value={value}
+      change={change}
+      disabled={disabled}
+      host={host}
+      recommendation={recommendation}
+    />
+  );
   return (
     <div className="runtime-settings">
       {groups

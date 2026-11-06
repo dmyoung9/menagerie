@@ -28,7 +28,7 @@ test('configuration is inline, guards navigation and saves with the expected rev
   await expect(
     page.getByRole('heading', { name: 'Changed name', exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Advanced', exact: true }).click();
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
   await expect(confirm).toBeHidden();
 });
 

@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, openAdvanced, openIdentity } from './fixtures';
+import { test, expect, openAdvanced, openIdentity, openCard } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 
 test('standalone NumberControl also preserves clearing and commits before Enter submission', async ({
@@ -48,6 +48,7 @@ test('installed capability refresh preserves focused text and validates the new 
     await route.fulfill({ json: capabilities });
   });
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'memory');
   const input = page.getByLabel('CPU threads', { exact: true });
   await input.fill('12');
   release();
@@ -82,6 +83,7 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   const second = dialog.locator('[data-model-index="1"]');
+  await second.locator('[data-settings-section="generation"] summary').click();
   await second.getByRole('button', { name: 'Add generation flags' }).click();
   const picker = page.getByRole('dialog', { name: 'Add generation flags' });
   await picker.getByRole('checkbox', { name: 'Top-k', exact: true }).check();
@@ -122,6 +124,7 @@ test('clearing is an editing buffer; blur validates without substituting zero an
     (d) => d.id === 'idle',
   )!.profile_snapshot!.config['top-k'] = 0;
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'generation');
   const input = page.getByRole('spinbutton', { name: 'Top-k', exact: true });
   const row = page.locator('[data-runtime-flag="top-k"]');
   await input.fill('');
@@ -178,6 +181,7 @@ test('automatic thread input stays blank through validation and Discard restores
     (d) => d.id === 'idle',
   )!.profile_snapshot!.config.threads = -1;
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'memory');
   const input = page.getByRole('spinbutton', {
     name: 'CPU threads',
     exact: true,
@@ -190,6 +194,7 @@ test('automatic thread input stays blank through validation and Discard restores
     fixture.writes.filter((w) => w.path.startsWith('/api/deployments?')),
   ).toHaveLength(0);
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
+  await openCard(page, 'memory');
   await expect(input).toHaveValue('-1');
   await expect(input).toHaveAttribute('aria-invalid', 'false');
   await expect(
@@ -216,6 +221,7 @@ test('removing an invalid flag clears its errors and unrelated omitted batch def
     { 'top-k': 0, 'ubatch-size': 4096 },
   );
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'generation');
   const input = page.getByLabel('Top-k', { exact: true });
   await input.fill('1.5');
   await openIdentity(page);
@@ -254,11 +260,11 @@ test('advanced JSON replaces numeric buffers and a failed Save preserves the cor
     (d) => d.id === 'idle',
   )!.profile_snapshot!.config['top-k'] = 0;
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'generation');
   const input = page.getByLabel('Top-k', { exact: true });
   await input.fill('');
   await input.blur();
-  await page.getByText('Advanced model settings', { exact: true }).click();
-  await page.getByText('Runtime options (JSON)', { exact: true }).click();
+  await openCard(page, 'diagnostics');
   const json = page.getByRole('textbox', {
     name: 'Runtime options (JSON)',
     exact: true,
@@ -310,6 +316,7 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
     (d) => d.id === 'idle',
   )!.profile_snapshot!.config['top-k'] = 0;
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'generation');
   await page.getByLabel('Top-k', { exact: true }).fill('');
   await expect(
     page.getByRole('button', { name: 'Discard', exact: true }),
@@ -319,6 +326,7 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
     fixture.writes.filter((w) => w.path.startsWith('/api/deployments?')),
   ).toHaveLength(0);
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
+  await openCard(page, 'generation');
   await expect(page.getByLabel('Top-k', { exact: true })).toHaveValue('0');
   await openIdentity(page);
   await page
@@ -348,6 +356,7 @@ test('saved thread counts above host concurrency remain editable and save unchan
     (d) => d.id === 'idle',
   )!.profile_snapshot!.config.threads = 16;
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'memory');
   await expect(page.getByLabel('CPU threads', { exact: true })).toHaveValue(
     '16',
   );
@@ -400,15 +409,16 @@ for (const width of [1440, 576, 320]) {
       extension: false,
     });
     await page.goto('/#/deployments/idle/configuration');
+    await openCard(page, 'generation');
     const card = page.getByRole('region', { name: 'Generation', exact: true });
     const rows = card.locator('[data-runtime-flag]');
     const group = card.getByRole('group', {
-      name: 'Generation flags',
+      name: 'Advanced sampling flags',
       exact: true,
     });
     await expect(group).toHaveJSProperty('tagName', 'FIELDSET');
     await expect(group.locator(':scope > legend')).toHaveText(
-      'Generation flags',
+      'Advanced sampling flags',
     );
     await expect(
       group.locator(':scope > [data-slot="field-group"]'),
@@ -632,17 +642,21 @@ for (const width of [1440, 576, 320]) {
       extension: false,
     });
     expect(saved).not.toHaveProperty('top-k');
+    await openCard(page, 'generation');
     await page
       .getByRole('button', { name: 'Remove Top-p override', exact: true })
       .click();
     await page.getByRole('button', { name: 'Discard', exact: true }).click();
+    await openCard(page, 'generation');
     await expect(page.getByLabel('Top-p', { exact: true })).toHaveValue('0.95');
     await page.reload();
+    await openCard(page, 'generation');
     await expect(
       page.getByLabel('Repetition penalty', { exact: true }),
     ).toHaveValue('1.13');
     await page.goto('/#/deployments/ready/configuration');
     await openAdvanced(page);
+    await openCard(page, 'generation');
     await expect(
       page.getByRole('button', { name: 'Add performance flags', exact: true }),
     ).toBeDisabled();

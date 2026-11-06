@@ -68,6 +68,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { SettingsSection } from '@/components/settings-section';
+import { CardAdvanced } from '@/components/card-advanced';
 import { readApi } from './ui';
 import * as contracts from './contracts';
 import type {
@@ -376,6 +377,26 @@ export function DeploymentSetEditor({
       ...v,
       members: v.members.map((m, i) => (i === index ? { ...m, ...change } : m)),
     }));
+  const idleMinutes =
+    value.idle_timeout && value.idle_timeout % 60 === 0
+      ? value.idle_timeout / 60
+      : undefined;
+  const sharedPolicy = [
+    value.residency === 'pinned'
+      ? 'Pinned'
+      : value.residency === 'evictable'
+        ? 'Evictable'
+        : 'On demand',
+    `priority ${value.priority}`,
+    value.residency === 'on-demand'
+      ? value.idle_timeout
+        ? `unload after ${idleMinutes ? `${idleMinutes} min` : `${value.idle_timeout}s`} idle`
+        : 'never unload'
+      : 'always resident',
+    value.allow_eviction ? 'may unload for others' : 'no eviction',
+    `queue ${value.queue_timeout}s`,
+    value.enabled ? 'enabled for clients' : 'disabled for clients',
+  ].join(' · ');
   async function addModel() {
     const model = data.models?.find((m) => m.id === artifactId);
     if (!model) {
@@ -573,6 +594,11 @@ export function DeploymentSetEditor({
                   key={m.id || m.port}
                 >
                   <h3>{m.name}</h3>
+                  <p className="text-muted-foreground text-sm">
+                    Shared policy: {sharedPolicy}. Loading policy, priority,
+                    idle unload, eviction and the queue timeout belong to this
+                    deployment set; edit them once in Availability.
+                  </p>
                   <Field label="Model display name">
                     <Input
                       required
@@ -599,72 +625,67 @@ export function DeploymentSetEditor({
                       </small>
                     )}
                   </Field>
-                  <ConfigurationFields
-                    formPath={`members[${index}].configuration.config`}
-                    value={m.configuration!}
-                    deploymentId={m.id}
-                    templateOverride={m.template_override}
-                    runtimeLocked={Boolean(value.engine_pool)}
-                    observed={
-                      data.deployments?.find((entry) => entry.id === m.id)
-                        ?.runtime_observation?.resolved
-                    }
-                    data={data}
-                    set={(configuration) =>
-                      updateMember(index, { configuration })
-                    }
-                    onValid={(valid) =>
-                      setInvalid((v) => ({ ...v, [m.id || m.port]: !valid }))
-                    }
-                    recommendation={
-                      preview.data?.members?.[index]?.recommendation
-                    }
-                    modelFields={
-                      m.configuration && (
-                        <ChatTemplateSettings
-                          label="Chat template"
-                          model={data.models.find(
-                            (x) => x.id === m.configuration?.artifact_id,
-                          )}
-                          override={m.template_override || null}
-                          onChange={(selection) =>
-                            updateMember(index, {
-                              template_override: selection,
-                            })
-                          }
-                        />
-                      )
-                    }
-                    placementFields={
-                      value.engine_pool ? (
-                        <p className="text-muted-foreground text-sm">
-                          Process visibility is shared by all{' '}
-                          {value.members.length} pool members. Edit shared
-                          devices in Availability. Model-server options below
-                          belong to this child preset; native routing and
-                          residency remain pool-controlled.
-                        </p>
-                      ) : (
-                        <Placement
-                          part="gpu"
-                          value={m}
-                          change={(v) => updateMember(index, v)}
-                          host={data.host?.[0]}
-                        />
-                      )
-                    }
-                  />
-                  <details>
-                    <summary>Private networking</summary>
-                    <SettingsSection name="network" title="Networking">
-                      <Placement
-                        part="network"
-                        value={m}
-                        change={(v) => updateMember(index, v)}
-                        host={data.host?.[0]}
-                      />
-                    </SettingsSection>
-                  </details>
+                  <div className="configuration-grid">
+                    <ConfigurationFields
+                      formPath={`members[${index}].configuration.config`}
+                      value={m.configuration!}
+                      deploymentId={m.id}
+                      templateOverride={m.template_override}
+                      runtimeLocked={Boolean(value.engine_pool)}
+                      observed={
+                        data.deployments?.find((entry) => entry.id === m.id)
+                          ?.runtime_observation?.resolved
+                      }
+                      observedAt={
+                        data.deployments?.find((entry) => entry.id === m.id)
+                          ?.runtime_observation?.observed_at
+                      }
+                      data={data}
+                      set={(configuration) =>
+                        updateMember(index, { configuration })
+                      }
+                      onValid={(valid) =>
+                        setInvalid((v) => ({ ...v, [m.id || m.port]: !valid }))
+                      }
+                      recommendation={
+                        preview.data?.members?.[index]?.recommendation
+                      }
+                      modelFields={
+                        m.configuration && (
+                          <ChatTemplateSettings
+                            label="Chat template"
+                            model={data.models.find(
+                              (x) => x.id === m.configuration?.artifact_id,
+                            )}
+                            override={m.template_override || null}
+                            onChange={(selection) =>
+                              updateMember(index, {
+                                template_override: selection,
+                              })
+                            }
+                          />
+                        )
+                      }
+                      placementFields={
+                        value.engine_pool ? (
+                          <p className="text-muted-foreground text-sm">
+                            Process visibility is shared by all{' '}
+                            {value.members.length} pool members. Edit shared
+                            devices in Availability. Model-server options below
+                            belong to this child preset; native routing and
+                            residency remain pool-controlled.
+                          </p>
+                        ) : (
+                          <Placement
+                            part="gpu"
+                            value={m}
+                            change={(v) => updateMember(index, v)}
+                            host={data.host?.[0]}
+                          />
+                        )
+                      }
+                    />
+                  </div>
                   <Button
                     variant="destructive"
                     type="button"
@@ -849,9 +870,11 @@ export function DeploymentSetEditor({
                     change={(v) => set('priority', v ?? 0)}
                   />
                 </Field>
-                <Field label="Switch timeout (seconds)">
+              </FieldGroup>
+              <CardAdvanced title="Advanced availability">
+                <Field label="Queue timeout (seconds)">
                   <NumberControl
-                    label="Switch timeout (seconds)"
+                    label="Queue timeout (seconds)"
                     required
                     min={1}
                     max={1800}
@@ -859,7 +882,19 @@ export function DeploymentSetEditor({
                     change={(v) => set('queue_timeout', v ?? 0)}
                   />
                 </Field>
-              </FieldGroup>
+                {!value.engine_pool &&
+                  value.members.map((member, index) => (
+                    <FieldSet key={member.id || member.port}>
+                      <FieldLegend>{member.name} endpoint</FieldLegend>
+                      <Placement
+                        part="network"
+                        value={member}
+                        change={(placement) => updateMember(index, placement)}
+                        host={data.host?.[0]}
+                      />
+                    </FieldSet>
+                  ))}
+              </CardAdvanced>
               <label className="check">
                 <Switch
                   disabled={busy}
@@ -873,6 +908,14 @@ export function DeploymentSetEditor({
           {value.members.length > 0 && (
             <DraftResources preview={preview.data} error={preview.error} />
           )}
+          <details className="card-advanced">
+            <summary className="card-advanced-summary">
+              Raw deployment set
+            </summary>
+            <div className="card-advanced-content">
+              <Json value={value} />
+            </div>
+          </details>
           <div className="dialog-actions configuration-save-bar">
             <span className="muted" role="status">
               {changed ? 'Unsaved changes' : 'All changes saved'}
@@ -1043,14 +1086,7 @@ export function MultiDeploymentDetail({
         </Alert>
       )}
       <Tabs
-        items={[
-          'Models',
-          'Configuration',
-          'Advanced',
-          'Activity',
-          'Requests',
-          'Logs',
-        ]}
+        items={['Models', 'Configuration', 'Activity', 'Requests', 'Logs']}
         value={tab}
         onChange={(t) => go(`deployments/${d.id}/${t.toLowerCase()}`)}
       />
@@ -1069,13 +1105,6 @@ export function MultiDeploymentDetail({
             />
           )}
         </>
-      )}
-      {tab === 'Advanced' && (
-        <Card>
-          <CardContent>
-            <Json value={d} />
-          </CardContent>
-        </Card>
       )}
       {tab === 'Requests' && (
         <RequestHistory deploymentId={d.id} deployments={data.deployments} />

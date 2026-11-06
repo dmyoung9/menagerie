@@ -4,13 +4,13 @@ import {
   NativeSelectOption,
 } from '@/components/ui/native-select';
 import { Field } from './ui';
-import { RuntimeSettings } from './FormControls';
+import { DraftTokenRange } from './DraftTokenRange';
 import {
   companionOptions,
   hasEmbeddedMtp,
   selectMtp,
 } from './companion-options';
-import type { Artifact, ProfileDraft, RuntimeField } from './types';
+import type { Artifact, JsonValue, ProfileDraft, RuntimeField } from './types';
 
 export function ModelCompanions({
   model,
@@ -112,18 +112,38 @@ export function ModelCompanions({
                 ))}
             </NativeSelect>
           </Field>
-          <details>
-            <summary>Advanced MTP tuning</summary>
-            <RuntimeSettings
-              section="mtp"
-              schema={schema}
-              value={config}
-              disabled={!head}
-              change={(config) => change({ ...value, config })}
-            />
-          </details>
         </FieldSet>
       )}
     </>
+  );
+}
+
+/** Draft-token bounds. Rendered inside the card's single advanced disclosure. */
+export function MtpTuning({
+  schema,
+  value,
+  change,
+  disabled = false,
+}: {
+  schema: Record<string, RuntimeField>;
+  value: Record<string, JsonValue>;
+  change: (value: Record<string, JsonValue>) => void;
+  disabled?: boolean;
+}) {
+  const keys: [string, string] | undefined =
+    schema['spec-draft-n-min'] && schema['spec-draft-n-max']
+      ? ['spec-draft-n-min', 'spec-draft-n-max']
+      : schema['draft-min'] && schema['draft-max']
+        ? ['draft-min', 'draft-max']
+        : undefined;
+  if (!keys) return null;
+  return (
+    <DraftTokenRange
+      schema={schema}
+      value={value}
+      keys={keys}
+      disabled={disabled}
+      change={change}
+    />
   );
 }

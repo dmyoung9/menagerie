@@ -1,9 +1,9 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, openAdvanced, openIdentity } from './fixtures';
+import { test, expect, openCard, openIdentity } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 
 for (const width of [1440, 576, 320]) {
-  test(`Flash Attention uses Auto/On/Off radios with Auto default at ${width}px`, async ({
+  test(`attention and cache share one disclosure without seeding defaults at ${width}px`, async ({
     page,
     fixture,
   }, testInfo) => {
@@ -23,114 +23,23 @@ for (const width of [1440, 576, 320]) {
       },
     });
     await page.goto('/#/deployments/idle/configuration');
-    await openAdvanced(page);
-    await expect(
-      page.getByRole('radiogroup', { name: 'Flash attention', exact: true }),
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole('button', { name: 'Discard', exact: true }),
-    ).toBeDisabled();
-    await page
-      .getByRole('button', { name: 'Add performance flags', exact: true })
-      .click();
-    const drawer = page.getByRole('dialog', {
-      name: 'Add performance flags',
-      exact: true,
-    });
-    await drawer
-      .getByRole('checkbox', { name: 'Flash attention', exact: true })
-      .check();
-    await drawer.getByRole('button', { name: 'Add (1)', exact: true }).click();
-    const radios = page.getByRole('radiogroup', {
+    const attention = page.getByRole('combobox', {
       name: 'Flash attention',
       exact: true,
     });
-    await expect(radios.getByRole('radio')).toHaveCount(3);
-    const group = page.getByRole('group', {
-      name: 'Performance flags',
-      exact: true,
-    });
-    await expect(group).toHaveJSProperty('tagName', 'FIELDSET');
-    await expect(group.locator(':scope > legend')).toHaveText(
-      'Performance flags',
-    );
-    const field = page.locator('[data-runtime-flag="flash-attn"]');
+    await expect(attention).toBeHidden();
+    await openCard(page, 'memory');
+    await expect(attention).toHaveValue('');
     await expect(
-      field.locator(':scope > div[data-slot="field-label"]'),
-    ).toHaveText('Flash attention');
-    await expect(
-      field.locator(':scope > div[data-slot="field-label"] code'),
-    ).toHaveCount(0);
-    const syntax = field.locator(':scope > label[data-slot="field-label"]');
-    await expect(syntax).toHaveText('(--flash-attn [on|off|auto])');
-    await expect(syntax.locator(':scope > code')).toHaveText(
-      '(--flash-attn [on|off|auto])',
-    );
-    await expect(radios).toHaveAccessibleDescription(
-      '(--flash-attn [on|off|auto]) default: auto',
-    );
-    await expect(
-      field.locator(':scope > [data-slot="field-description"]'),
-    ).toHaveText('default: auto');
-    expect(
-      await field.evaluate((element) =>
-        Array.from(element.children).map(
-          (child) => child.getAttribute('data-slot') || 'controls',
-        ),
-      ),
-    ).toEqual([
-      'field-label',
-      'field-label',
-      'radio-group',
-      'field-description',
-    ]);
-    const item = field.locator('..').locator('..');
-    await expect(item).toHaveAttribute('data-slot', 'item');
-    await expect(
-      item.locator(':scope > [data-slot="item-actions"] > button'),
-    ).toHaveAccessibleName('Remove Flash attention override');
-    await expect(field.getByRole('button', { name: /Remove/ })).toHaveCount(0);
-    // Resource-preview text above this card can reflow between protocol calls.
-    const [titleBox, syntaxBox, controlBox, descriptionBox] =
-      await field.evaluate((element) =>
-        [
-          ':scope > div[data-slot="field-label"]',
-          ':scope > label[data-slot="field-label"]',
-          ':scope > [data-slot="radio-group"]',
-          ':scope > [data-slot="field-description"]',
-        ].map((selector) => {
-          const { y, height } = element
-            .querySelector(selector)!
-            .getBoundingClientRect();
-          return { y, height };
-        }),
-      );
-    expect(syntaxBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
-    expect(controlBox.y).toBeGreaterThanOrEqual(syntaxBox.y + syntaxBox.height);
-    expect(descriptionBox.y).toBeGreaterThanOrEqual(
-      controlBox.y + controlBox.height,
-    );
-    await expect(radios.locator('label')).toHaveText(['Auto', 'On', 'Off']);
-    for (const name of ['Auto', 'On', 'Off'])
-      await expect(
-        radios.getByRole('radio', { name, exact: true }),
-      ).toBeVisible();
-    const auto = radios.getByRole('radio', { name: 'Auto', exact: true });
-    await expect(auto).toBeChecked();
-    await auto.focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(
-      radios.getByRole('radio', { name: 'On', exact: true }),
-    ).toBeChecked();
-    await page.keyboard.press('ArrowRight');
-    await expect(
-      radios.getByRole('radio', { name: 'Off', exact: true }),
-    ).toBeChecked();
-    await radios.getByText('Auto', { exact: true }).click();
-    await expect(auto).toBeChecked();
-    await radios.scrollIntoViewIfNeeded();
+      page.getByRole('button', { name: 'Discard', exact: true }),
+    ).toBeDisabled();
+    for (const value of ['on', 'off', 'auto']) {
+      await attention.selectOption(value);
+      await expect(attention).toHaveValue(value);
+    }
+    await attention.scrollIntoViewIfNeeded();
     await page.screenshot({
-      path: testInfo.outputPath(`flash-attention-${width}.png`),
+      path: testInfo.outputPath(`attention-${width}.png`),
     });
     expect(
       await page.evaluate(
@@ -156,46 +65,34 @@ for (const width of [1440, 576, 320]) {
         .body,
     );
     expect(saved.configuration!.config['flash-attn']).toBe('auto');
+    expect(saved.configuration!.config).not.toHaveProperty('cache-type-v');
   });
 }
 
 for (const selected of ['auto', 'on', 'off']) {
-  test(`saved Flash Attention ${selected} survives editing and discard`, async ({
+  test(`saved attention ${selected} is counted while closed and survives discard`, async ({
     page,
     fixture,
   }) => {
     fixture.registry.runtimes[0].capabilities!.schema!['flash-attn'] = {
       type: 'enum',
       choices: ['auto', 'on', 'off'],
-      default: 'auto',
       label: 'Flash attention',
     };
     fixture.registry.deployments.find(
       (d) => d.id === 'idle',
     )!.profile_snapshot!.config['flash-attn'] = selected;
     await page.goto('/#/deployments/idle/configuration');
-    const radios = page.getByRole('radiogroup', {
-      name: 'Flash attention',
-      exact: true,
-    });
-    const name = (value: string) =>
-      value === 'auto' ? 'Auto' : value === 'on' ? 'On' : 'Off';
     await expect(
-      radios.getByRole('radio', { name: name(selected), exact: true }),
-    ).toBeChecked();
-    await expect(
-      page.getByRole('button', { name: 'Discard', exact: true }),
-    ).toBeDisabled();
-    await radios
-      .getByRole('radio', {
-        name: selected === 'on' ? 'Auto' : 'On',
-        exact: true,
-      })
-      .click();
+      page.locator('[data-settings-section="memory"] [data-card-advanced]'),
+    ).toHaveAttribute('data-overrides', '1');
+    await openCard(page, 'memory');
+    const attention = page.getByLabel('Flash attention', { exact: true });
+    await expect(attention).toHaveValue(selected);
+    await attention.selectOption(selected === 'on' ? 'auto' : 'on');
     await page.getByRole('button', { name: 'Discard', exact: true }).click();
-    await expect(
-      radios.getByRole('radio', { name: name(selected), exact: true }),
-    ).toBeChecked();
+    await openCard(page, 'memory');
+    await expect(attention).toHaveValue(selected);
     await openIdentity(page);
     await page.getByLabel('Display name', { exact: true }).fill('Renamed');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -206,15 +103,13 @@ for (const selected of ['auto', 'on', 'off']) {
       )
       .toBe(2);
     expect(
-      deploymentDraft(
-        fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
-          .body,
-      ).configuration!.config['flash-attn'],
+      fixture.registry.deployments.find((d) => d.id === 'idle')
+        ?.profile_snapshot!.config['flash-attn'],
     ).toBe(selected);
   });
 }
 
-test('Flash Attention Off remains unavailable for quantized V cache and radios respect loaded read-only state', async ({
+test('quantized V cache and attention Off stay mutually exclusive; loaded controls are read-only', async ({
   page,
   fixture,
 }) => {
@@ -222,7 +117,6 @@ test('Flash Attention Off remains unavailable for quantized V cache and radios r
     'flash-attn': {
       type: 'enum',
       choices: ['auto', 'on', 'off'],
-      default: 'auto',
       label: 'Flash attention',
     },
     'cache-type-v': {
@@ -232,34 +126,22 @@ test('Flash Attention Off remains unavailable for quantized V cache and radios r
       label: 'V cache',
     },
   });
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.config['flash-attn'] = 'auto';
   await page.goto('/#/deployments/idle/configuration');
-  const radios = page.getByRole('radiogroup', {
-    name: 'Flash attention',
-    exact: true,
-  });
-  const off = radios.getByRole('radio', { name: 'Off', exact: true });
-  await expect(off).toBeDisabled();
-  await page
-    .getByText('Advanced memory and placement', { exact: true })
-    .click();
-  await page
-    .getByRole('combobox', { name: 'V cache', exact: true })
-    .selectOption('f16');
-  await expect(off).toBeEnabled();
-  await off.click();
-  await expect(off).toBeChecked();
+  await openCard(page, 'memory');
+  const attention = page.getByLabel('Flash attention', { exact: true });
+  await expect(
+    attention.getByRole('option', { name: 'off', exact: true }),
+  ).toBeDisabled();
+  await page.getByLabel('V cache', { exact: true }).selectOption('f16');
+  await attention.selectOption('off');
   await expect(
     page
-      .getByRole('combobox', { name: 'V cache', exact: true })
+      .getByLabel('V cache', { exact: true })
       .getByRole('option', { name: 'q8_0', exact: true }),
   ).toBeDisabled();
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
   await page.goto('/#/deployments/ready/configuration');
-  for (const name of ['Auto', 'On', 'Off'])
-    await expect(
-      radios.getByRole('radio', { name, exact: true }),
-    ).toBeDisabled();
+  await openCard(page, 'memory');
+  await expect(attention).toBeDisabled();
+  await expect(page.getByLabel('V cache', { exact: true })).toBeDisabled();
 });

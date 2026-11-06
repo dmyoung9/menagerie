@@ -51,8 +51,8 @@ export function CapabilityIntelligence({
           <AlertDescription>{warning}</AlertDescription>
         </Alert>
       ))}
-      <details>
-        <summary>Capability evidence</summary>
+      <div className="capability-evidence">
+        <h4>Capability evidence</h4>
         {!preview && (
           <p>
             Capability preview unavailable. Manual configuration remains
@@ -79,7 +79,7 @@ export function CapabilityIntelligence({
             </ul>
           </div>
         ))}
-      </details>
+      </div>
     </section>
   );
 }
@@ -96,8 +96,8 @@ export function SamplingRecommendations({
     (entry) => entry.compatible === true,
   );
   return (
-    <details>
-      <summary>Published sampling recommendations</summary>
+    <section className="sampling-recommendations">
+      <h4>Published sampling recommendations</h4>
       {!recommendations.length && (
         <p>
           No published recommendations detected. Engine defaults remain
@@ -136,6 +136,6 @@ export function SamplingRecommendations({
         Optional advice, not runtime defaults. Review before applying; Save is
         still required.
       </p>
-    </details>
+    </section>
   );
 }

@@ -100,24 +100,38 @@ without improving its existing time-series behavior.
 
 ## Verification
 
-The curated deployment editor uses Model & runtime, Resources & context,
-Generation and Availability. Resources keeps context/concurrency and advertised
-fit/device controls visible, with uncommon native controls behind a
-keyboard-accessible **Advanced memory and placement** disclosure.
-Descriptions explain the tradeoffs without activating omitted flags. Performance
-is disclosed in Advanced model settings; Generation keeps output metadata before
-sampling, temperature explicit overrides visible and other sampling in Advanced
-sampling. Both flag cards have explicit engine-default, no-engine and unsupported-option
-empty states; Add remains unavailable until supported options exist.
+Configuration has six domain cards: Model & runtime, Resources & context,
+Generation, Variants, Availability, and Diagnostics & raw, plus a collapsed
+Identity strip. Identity and Diagnostics span the full card grid. The ordered
+grid is one column below 1200px and two columns above, with `align-items: start`;
+do not use masonry packing or hard viewport-height caps for the cards. Keep the
+resource forecast separate from requested and observed settings.
 
-Native schema controls identify unspecified, explicit automatic and concrete
-override states without materializing displayed defaults. Identity is compact;
-private networking, queue timeout and MTP tuning are disclosed. The standalone
-Advanced tab reuses the schema editor rather than replacing it with JSON-only
-inspection. Capability statuses/evidence and optional sampling recommendations
-never seed draft values; unavailable previews preserve manual variants and Advanced
-client declarations. Native pool engine/device visibility controls update all
-members, while model-server flags retain child-preset ownership.
+Budget at most 16 visible primary controls (up to 18 when both optional component
+selectors are present), at most five per card, and one
+disclosure level per card. Use native `details`/`summary` in `SettingsSection`
+and `CardAdvanced`, keeping content mounted for native validation and find-in-page.
+Never nest tuning disclosures. Closed advanced sections count explicit overrides;
+do not auto-open merely because values exist. Native validation opens containing
+disclosures, and filtering must not unmount drafts. Each card has a one-line purpose.
+The Advanced route redirects to Configuration; there is no separate Advanced tab.
+
+Resources owns placement, flash attention/cache and CPU/batching tuning. Model
+owns components, MTP tuning, capability evidence/declarations and model facts.
+Generation owns output metadata, temperature and the only default-reasoning
+selector, with remaining sampling/recommendations in its disclosure. Variants
+is collapsed and edits reasoning levels only. Availability owns queue timeout
+and private ports in its disclosure. Diagnostics owns raw escape hatches,
+unsupported saved values and read-only observations; do not duplicate curated
+controls across cards.
+
+Compact numeric controls stay empty when omitted, with engine defaults only in
+placeholders. Automatic sentinels and preset buttons write values only when
+chosen; Reset removes a key. Never seed defaults, capability hints, recommendations
+or observations into a draft merely by rendering. No per-field mode selectors or
+separate sampling-preset selector. Unavailable previews preserve manual controls.
+Pool engine/device visibility and set policy are edited once; members show a
+read-only shared-policy line, while supported child-model settings stay local.
 
 Performance and Generation group their card contents in `FieldSet`, with a
 screen-reader legend (the visible title remains in CardHeader) and a `FieldGroup`.
@@ -156,8 +170,8 @@ original member. Backend validation and wire decoders remain authoritative at
 their boundaries.
 
 The Variants editor composes shadcn Item rows in an ItemGroup. Its Add variant
-button is in the CardHeader's CardAction, with the default selector in
-CardContent and no introductory, default-selector or footer advisory text.
+button is inside the expanded card, outside the summary trigger. The default
+selector belongs to Generation, not this editor.
 Rows have their name in ItemContent and the enablement Switch and overflow menu
 in ItemActions.
 Custom entries have a secondary Custom badge anchored to the right edge of the

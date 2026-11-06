@@ -27,7 +27,7 @@ export type Fixture = {
 
 export async function openAdvanced(page: Page) {
   const summary = page
-    .getByText('Advanced model settings', { exact: true })
+    .locator('[data-settings-section="memory"] summary')
     .filter({ visible: true });
   await expect(summary).toBeVisible();
   if (
@@ -39,7 +39,22 @@ export async function openAdvanced(page: Page) {
 }
 
 export async function openIdentity(page: Page) {
-  const summary = page.locator('summary').filter({ hasText: /^Identity ·/ });
+  const summary = page.locator('[data-settings-section="identity"] summary');
+  await expect(summary).toBeVisible();
+  if (
+    !(await summary
+      .locator('..')
+      .evaluate((element) => (element as HTMLDetailsElement).open))
+  )
+    await summary.click();
+}
+
+export async function openCard(page: Page, name: string) {
+  const summary = page
+    .locator(
+      `[data-settings-section="${name}"] > [data-slot="card"] > details > summary, [data-settings-section="${name}"] [data-card-advanced] > summary`,
+    )
+    .filter({ visible: true });
   await expect(summary).toBeVisible();
   if (
     !(await summary

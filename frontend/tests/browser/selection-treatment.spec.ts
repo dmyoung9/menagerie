@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
-import { test, expect, openAdvanced } from './fixtures';
+import { test, expect, openCard } from './fixtures';
 
 async function primaryColors(page: Page) {
   return page.evaluate(() => {
@@ -170,7 +170,8 @@ for (const width of [1440, 576, 320]) {
       },
     };
     await page.goto('/#/deployments/idle/configuration');
-    await openAdvanced(page);
+    await openCard(page, 'model');
+    await openCard(page, 'variants');
     const panel = page.getByRole('region', {
       name: 'Modalities and capabilities',
       exact: true,
@@ -211,7 +212,8 @@ for (const width of [1440, 576, 320]) {
     await instant.uncheck();
     await expect(instant).not.toBeChecked();
     await page.getByRole('button', { name: 'Discard', exact: true }).click();
-    await openAdvanced(page);
+    await openCard(page, 'model');
+    await openCard(page, 'variants');
     await expectPrimary(text, colors);
     await expect(instant).toBeChecked();
     await panel.scrollIntoViewIfNeeded();

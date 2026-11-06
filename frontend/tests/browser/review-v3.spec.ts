@@ -24,9 +24,7 @@ test('advanced memory controls are quiet by default, explain themselves and pres
   await expect(
     page.getByRole('combobox', { name: 'Device split mode', exact: true }),
   ).toBeHidden();
-  await page
-    .getByText('Advanced memory and placement', { exact: true })
-    .click();
+  await page.getByText('Advanced placement & memory', { exact: true }).click();
   await openIdentity(page);
   await expect(
     page.getByText('MiB to leave free for other workloads.'),
@@ -34,9 +32,7 @@ test('advanced memory controls are quiet by default, explain themselves and pres
   await expect(
     page.getByText('How to distribute work across multiple GPUs.'),
   ).toBeVisible();
-  await page
-    .getByText('Advanced memory and placement', { exact: true })
-    .click();
+  await page.getByText('Advanced placement & memory', { exact: true }).click();
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Unchanged defaults');
@@ -54,11 +50,9 @@ test('performance explains engine defaults and its Add action', async ({
   page,
 }) => {
   await page.goto('/#/deployments/idle/configuration');
-  const card = page.locator('[data-settings-section="performance"]');
+  const card = page.locator('[data-settings-section="memory"]');
   await openAdvanced(page);
-  await expect(
-    card.getByRole('heading', { name: 'Using engine defaults' }),
-  ).toBeVisible();
+  await expect(card.getByText('CPU & batching', { exact: true })).toBeVisible();
   await expect(
     card.getByRole('button', { name: 'Add performance flags' }),
   ).toBeEnabled();
@@ -79,16 +73,15 @@ test('performance explains why Add is unavailable without an engine', async ({
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  const card = dialog.locator('[data-settings-section="performance"]');
-  await openAdvanced(page);
+  const card = dialog.locator('[data-settings-section="memory"]');
   await expect(
     card.getByText(
-      'Choose an engine to see its supported performance options.',
+      'Choose an engine to see supported context and memory options.',
     ),
   ).toBeVisible();
   await expect(
     card.getByRole('button', { name: 'Add performance flags' }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
 });
 
 test('interrupting requests requires an explicit unload action', async ({

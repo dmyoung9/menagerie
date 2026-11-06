@@ -1,6 +1,6 @@
 import { FieldSet, FieldLegend } from '@/components/ui/field';
 import { AudioLines, Brain, Image, Type, Video, Wrench } from 'lucide-react';
-import { NumberControl } from './NumberControl';
+import { NumberControl, ExactNumber } from './NumberControl';
 import { Field } from './ui';
 import type { ModelCapabilities, ModelCatalog } from './types';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -10,9 +10,11 @@ import './capabilities.css';
 export function OutputLimit({
   catalog,
   change,
+  compact = false,
 }: {
   catalog: ModelCatalog;
   change: (catalog: ModelCatalog) => void;
+  compact?: boolean;
 }) {
   const model = catalog.model || {};
   return (
@@ -20,20 +22,36 @@ export function OutputLimit({
       label="Max output tokens"
       hint="Client catalog output limit, not an enforced engine ceiling. Clients may override request defaults; engine enforcement varies."
     >
-      <NumberControl
-        label="Max output tokens"
-        min={1}
-        max={1048576}
-        sliderMax={32768}
-        value={model.limit?.output}
-        defaultValue={1024}
-        change={(value) => {
-          const limit = { ...model.limit };
-          if (value !== undefined) limit.output = value;
-          else delete limit.output;
-          change({ ...catalog, model: { ...model, limit } });
-        }}
-      />
+      {compact ? (
+        <ExactNumber
+          label="Max output tokens"
+          min={1}
+          max={1048576}
+          value={model.limit?.output}
+          placeholder="Unspecified"
+          change={(output) =>
+            change({
+              ...catalog,
+              model: { ...model, limit: { ...model.limit, output } },
+            })
+          }
+        />
+      ) : (
+        <NumberControl
+          label="Max output tokens"
+          min={1}
+          max={1048576}
+          sliderMax={32768}
+          value={model.limit?.output}
+          defaultValue={1024}
+          change={(value) => {
+            const limit = { ...model.limit };
+            if (value !== undefined) limit.output = value;
+            else delete limit.output;
+            change({ ...catalog, model: { ...model, limit } });
+          }}
+        />
+      )}
     </Field>
   );
 }

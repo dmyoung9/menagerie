@@ -1,4 +1,4 @@
-import { test, expect, openAdvanced, openIdentity } from './fixtures';
+import { test, expect, openAdvanced, openIdentity, openCard } from './fixtures';
 import AxeBuilder from '@axe-core/playwright';
 import { deploymentDraft } from '../../src/contracts';
 
@@ -88,25 +88,24 @@ for (const width of [1440, 576, 320]) {
     const config = page.locator('form.configuration-editor');
     await openAdvanced(page);
     await openIdentity(page);
-    await page.getByText('Private networking', { exact: true }).click();
-    await page.getByText('Advanced MTP tuning', { exact: true }).click();
+    await openCard(page, 'lifecycle');
+    await openCard(page, 'model');
+    await openCard(page, 'generation');
+    await openCard(page, 'diagnostics');
     for (const title of [
       'Identity',
       'Model & runtime',
       'Resources & context',
-      'Performance',
       'Generation',
-      'Client capability declarations',
       'Availability',
-      'Networking',
     ]) {
       await expect(
         config.getByRole('heading', { name: title, exact: true }),
       ).toBeVisible();
     }
     for (const title of [
-      'Advanced memory and placement',
-      'Advanced model settings',
+      'Advanced placement & memory',
+      'Capabilities, tuning & model details',
       'Runtime options (JSON)',
       'Engine arguments',
       'Client capabilities (JSON)',
@@ -163,16 +162,16 @@ for (const width of [1440, 576, 320]) {
       mtp.getByRole('combobox', { name: 'MTP head', exact: true }),
     ).toHaveValue('');
     await expect(
-      mtp.getByLabel('Maximum draft tokens', { exact: true }),
+      model.getByLabel('Maximum draft tokens', { exact: true }),
     ).toHaveValue('3');
     await expect(
-      mtp.getByLabel('Minimum draft tokens', { exact: true }),
+      model.getByLabel('Minimum draft tokens', { exact: true }),
     ).toHaveValue('0');
     await expect(
-      mtp.getByLabel('Maximum draft tokens', { exact: true }),
+      model.getByLabel('Maximum draft tokens', { exact: true }),
     ).toBeDisabled();
     await expect(
-      mtp.getByRole('slider', {
+      model.getByRole('slider', {
         name: 'Maximum draft tokens range',
         exact: true,
       }),
@@ -242,7 +241,6 @@ for (const width of [1440, 576, 320]) {
       exact: true,
     });
     for (const key of [
-      'temp',
       'top-p',
       'top-k',
       'min-p',
@@ -252,9 +250,9 @@ for (const width of [1440, 576, 320]) {
     ])
       await picker.getByRole('checkbox', { name: key, exact: true }).check();
     await expect(
-      picker.getByRole('button', { name: 'Add (7)', exact: true }),
+      picker.getByRole('button', { name: 'Add (6)', exact: true }),
     ).toBeInViewport();
-    await picker.getByRole('button', { name: 'Add (7)', exact: true }).click();
+    await picker.getByRole('button', { name: 'Add (6)', exact: true }).click();
     await expect(
       config.getByLabel('Default reasoning budget', { exact: true }),
     ).toBeVisible();
@@ -290,9 +288,6 @@ for (const width of [1440, 576, 320]) {
     ).toHaveCount(0);
     await config.getByLabel('Maximum draft tokens', { exact: true }).fill('4');
     await config
-      .getByText('Advanced memory and placement', { exact: true })
-      .click();
-    await config
       .getByLabel('MoE expert layers on CPU', { exact: true })
       .fill('4');
     await config
@@ -308,20 +303,20 @@ for (const width of [1440, 576, 320]) {
     }));
     expect(padding.left).toBeGreaterThanOrEqual(16);
     expect(padding.right).toBeGreaterThanOrEqual(16);
-    if (width < 1100) {
-      const networkBox = (await config
-        .locator('[data-settings-section="network"]')
+    if (width < 1200) {
+      const memoryBox = (await config
+        .locator('[data-settings-section="memory"]')
         .boundingBox())!;
       const resourceBox = (await config
-        .locator('.configuration-resources')
+        .getByRole('complementary', { name: 'Deployment resource preview' })
         .boundingBox())!;
       expect(
-        resourceBox.y - networkBox.y - networkBox.height,
+        resourceBox.y - memoryBox.y - memoryBox.height,
       ).toBeGreaterThanOrEqual(16);
     }
-    await page
-      .getByRole('button', { name: 'Model & runtime', exact: true })
-      .click();
+    await config
+      .locator('[data-settings-section="model"]')
+      .scrollIntoViewIfNeeded();
     await page.screenshot({
       path: testInfo.outputPath(`configuration-${width}.png`),
       fullPage: true,
@@ -399,8 +394,7 @@ test('discard resets typed controls, invalid raw edits and the navigation guard'
   await page.goto('/#/deployments/idle/configuration');
   await openIdentity(page);
   await page.getByLabel('Display name', { exact: true }).fill('Changed');
-  await page.getByText('Advanced model settings', { exact: true }).click();
-  await page.getByText('Runtime options (JSON)', { exact: true }).click();
+  await openCard(page, 'diagnostics');
   await page
     .getByLabel('Runtime options (JSON)', { exact: true })
     .fill('{broken');

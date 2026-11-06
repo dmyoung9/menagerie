@@ -8,12 +8,10 @@ export function DeploymentConfiguration({
   deployment,
   data,
   saved,
-  advancedOnly = false,
 }: {
   deployment: Deployment;
   data: Registry;
   saved: () => void;
-  advancedOnly?: boolean;
 }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
@@ -39,7 +37,6 @@ export function DeploymentConfiguration({
         busy={busy}
         disabled={active(deployment)}
         embedded
-        advancedOnly={advancedOnly}
         save={async (editor) => {
           setBusy(true);
           setError('');

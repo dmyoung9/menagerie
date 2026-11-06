@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, navigate, openIdentity, openAdvanced } from './fixtures';
+import { test, expect, navigate, openIdentity } from './fixtures';
 import * as contracts from '../../src/contracts';
 import { recordValue } from '../../src/decode';
 
@@ -175,11 +175,12 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   const context = dialog.getByLabel('ctx-size', { exact: true });
   await context.fill('16384');
-  const slider = dialog.getByRole('slider', { name: 'ctx-size range' });
-  await slider.focus();
-  await page.keyboard.press('ArrowRight');
+  await dialog.getByRole('button', { name: '32K', exact: true }).click();
   await expect(context).toHaveValue('32768');
-  await openAdvanced(page);
+  await dialog
+    .locator('[data-settings-section="model"] summary')
+    .filter({ visible: true })
+    .click();
   await dialog.getByRole('button', { name: 'Tools', exact: true }).click();
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   const secondMember = dialog.locator('[data-model-index="1"]');
@@ -199,10 +200,8 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
     .first()
     .click();
   await expect(context.filter({ visible: true })).toHaveValue('32768');
-  await openAdvanced(page);
   await dialog
-    .locator('summary')
-    .filter({ hasText: 'Runtime options (JSON)' })
+    .locator('[data-settings-section="diagnostics"] summary')
     .filter({ visible: true })
     .click();
   const json = dialog

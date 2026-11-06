@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, openCard } from './fixtures';
 import { deploymentDraft, deploymentSetDraft } from '../../src/contracts';
 
 test('new deployments leave tuning and device placement to the engine', async ({
@@ -36,6 +36,10 @@ test('a native pool remains a pool even with one model and round-trips its polic
   await dialog.getByLabel('Name', { exact: true }).fill('Native pool');
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   await dialog.getByLabel('Lifecycle owner').selectOption('runtime');
+  await openCard(page, 'diagnostics');
+  await expect(
+    dialog.getByLabel('Engine arguments', { exact: true }),
+  ).toHaveAttribute('readonly', '');
   await expect(
     dialog.getByRole('combobox', { name: 'Mode', exact: true }),
   ).toBeDisabled();

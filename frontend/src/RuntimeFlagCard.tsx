@@ -40,6 +40,10 @@ export function RuntimeFlagCard({
   formPath,
   engineSelected = true,
   curated = false,
+  bare = false,
+  exclude = [],
+  showAdvanced = true,
+  showEmpty = true,
 }: {
   name: string;
   title: string;
@@ -54,12 +58,40 @@ export function RuntimeFlagCard({
   formPath: ConfigPath;
   engineSelected?: boolean;
   curated?: boolean;
+  /** Render inside a parent card's advanced section instead of as its own card. */
+  bare?: boolean;
+  exclude?: string[];
+  showAdvanced?: boolean;
+  showEmpty?: boolean;
 }) {
   const [selected, setSelected] = useState<string[] | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const mobile = useIsMobile();
-  const supported = keys.filter((key) => schema[key]);
+  const supported = keys.filter((key) => schema[key] && !exclude.includes(key));
   const available = supported.filter((key) => value[key] === undefined);
+  const main = supported.filter(
+    (key) =>
+      value[key] !== undefined && (!curated || !showAdvanced || key === 'temp'),
+  );
+  const collapsed =
+    curated && showAdvanced
+      ? supported.filter((key) => key !== 'temp' && value[key] !== undefined)
+      : [];
+  const nothing = !supported.some((key) => value[key] !== undefined);
+  const add = (
+    <Button
+      ref={trigger}
+      type="button"
+      variant="outline"
+      size="sm"
+      aria-label={`Add ${name} flags`}
+      disabled={disabled || !available.length}
+      onClick={() => setSelected([])}
+    >
+      <Plus data-icon="inline-start" />
+      Add
+    </Button>
+  );
   const content = (key: string) => (
     <ItemContent className="min-w-0">
       <ItemTitle className="line-clamp-none">
@@ -73,29 +105,13 @@ export function RuntimeFlagCard({
       </ItemDescription>
     </ItemContent>
   );
-  return (
-    <SettingsSection
-      name={name}
-      title={title}
-      action={
-        <Button
-          ref={trigger}
-          type="button"
-          variant="outline"
-          size="sm"
-          aria-label={`Add ${name} flags`}
-          disabled={disabled || !available.length}
-          onClick={() => setSelected([])}
-        >
-          <Plus data-icon="inline-start" />
-          Add
-        </Button>
-      }
-    >
+  const body = (
+    <>
       <FieldSet disabled={disabled}>
         <FieldLegend className="sr-only">{title} flags</FieldLegend>
         <FieldGroup>
           {before}
+          {bare && <div className="flag-actions">{add}</div>}
           {curated && schema.temp && value.temp === undefined && (
             <p className="text-muted-foreground text-sm">
               Temperature: unspecified · engine default.{' '}
@@ -112,41 +128,29 @@ export function RuntimeFlagCard({
             </p>
           )}
           <ItemGroup aria-label={`${title} flag items`}>
-            {supported
-              .filter(
-                (key) =>
-                  value[key] !== undefined && (!curated || key === 'temp'),
-              )
-              .map((key) => (
-                <RuntimeFlagField
-                  key={key}
-                  flag={key}
-                  schema={schema}
-                  value={value}
-                  change={change}
-                  host={host}
-                  disabled={disabled}
-                  formPath={formPath}
-                />
-              ))}
+            {main.map((key) => (
+              <RuntimeFlagField
+                key={key}
+                flag={key}
+                schema={schema}
+                value={value}
+                change={change}
+                host={host}
+                disabled={disabled}
+                formPath={formPath}
+              />
+            ))}
           </ItemGroup>
-          {curated && (
-            <details
-              open={
-                supported.some(
-                  (key) => key !== 'temp' && value[key] !== undefined,
-                ) || undefined
-              }
-            >
-              <summary>Advanced sampling</summary>
-              <p className="text-muted-foreground text-sm">
-                Client requests may override sampling defaults. Changes to
-                engine startup defaults require reload.
-              </p>
-              <ItemGroup aria-label="Advanced sampling flag items">
-                {supported
-                  .filter((key) => key !== 'temp' && value[key] !== undefined)
-                  .map((key) => (
+          {collapsed.length > 0 &&
+            (showAdvanced ? (
+              <details>
+                <summary>Advanced sampling ({collapsed.length})</summary>
+                <p className="text-muted-foreground text-sm">
+                  Client requests may override sampling defaults. Changes to
+                  engine startup defaults require reload.
+                </p>
+                <ItemGroup aria-label="Advanced sampling flag items">
+                  {collapsed.map((key) => (
                     <RuntimeFlagField
                       key={key}
                       flag={key}
@@ -158,10 +162,25 @@ export function RuntimeFlagCard({
                       formPath={formPath}
                     />
                   ))}
+                </ItemGroup>
+              </details>
+            ) : (
+              <ItemGroup aria-label={`${title} flag items`}>
+                {collapsed.map((key) => (
+                  <RuntimeFlagField
+                    key={key}
+                    flag={key}
+                    schema={schema}
+                    value={value}
+                    change={change}
+                    host={host}
+                    disabled={disabled}
+                    formPath={formPath}
+                  />
+                ))}
               </ItemGroup>
-            </details>
-          )}
-          {!supported.some((key) => value[key] !== undefined) && (
+            ))}
+          {showEmpty && nothing && (
             <Empty
               title={
                 !engineSelected
@@ -249,6 +268,12 @@ export function RuntimeFlagCard({
           </DrawerContent>
         </Drawer>
       )}
+    </>
+  );
+  if (bare) return body;
+  return (
+    <SettingsSection name={name} title={title} action={add}>
+      {body}
     </SettingsSection>
   );
 }
