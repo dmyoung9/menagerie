@@ -350,6 +350,7 @@ async def probe(runtime):
         "version": version.strip()[-1500:],
         "flags": flags,
         "mechanisms": runtime_protocol.mechanisms(runtime, flags),
+        "features": runtime_protocol.features(runtime, flags),
         "devices": devices,
         "formats": ["gguf"]
         if runtime["engine"] == "llama.cpp"
@@ -422,6 +423,14 @@ async def configuration_schema(runtime):
         or runtime["engine"] not in {"llama.cpp", "vllm"}
     ):
         return schema
+    digest = runtime.get("capabilities", {}).get("sha256")
+    if (
+        digest
+        and await asyncio.to_thread(file_hash, Path(runtime["executable"])) != digest
+    ):
+        raise ValueError(
+            "Runtime executable changed; register the updated installation before probing options"
+        )
     args = ["serve", "--help=all"] if runtime["engine"] == "vllm" else ["--help"]
     text = await command(
         [runtime["executable"], *args],
@@ -429,6 +438,22 @@ async def configuration_schema(runtime):
         120 if runtime["engine"] == "vllm" else 45,
     )
     return help_defaults(text, schema, runtime)
+
+
+def executable_fingerprint(runtime):
+    """Cheap cache invalidation; configuration_schema verifies the trusted hash."""
+    if runtime.get("execution_kind") != "native":
+        return ()
+    path = Path(runtime["executable"]).expanduser().resolve()
+    stat = path.stat()
+    return (
+        str(path),
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_size,
+        stat.st_mtime_ns,
+        stat.st_ctime_ns,
+    )
 
 
 def parameter_presentation(key, engine):

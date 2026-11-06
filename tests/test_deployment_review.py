@@ -144,6 +144,8 @@ async def test_engine_help_defaults_are_cached_without_mutating_runtime(
 ):
     app = create_app(tmp_path / "state")
     store = app.state.store
+    executable = tmp_path / "synthetic-engine"
+    executable.write_text("synthetic executable; never run")
     runtime = store.put(
         "runtime",
         {
@@ -151,7 +153,7 @@ async def test_engine_help_defaults_are_cached_without_mutating_runtime(
             "engine": "llama.cpp",
             "execution_kind": "native",
             "trust": True,
-            "executable": "/engines/fake",
+            "executable": str(executable),
             "capabilities": {"flags": ["temp", "spec-draft-n-max"]},
         },
     )
@@ -170,7 +172,7 @@ async def test_engine_help_defaults_are_cached_without_mutating_runtime(
                 response = await client.get("/api/runtimes/engine/capabilities")
                 assert response.status_code == 200
                 assert response.json()["schema"]["temp"]["engine_default"] == 0.8
-        assert calls == [["/engines/fake", "--help"]]
+        assert calls == [[str(executable), "--help"]]
         assert store.get("runtime", "engine") == runtime
     finally:
         await app.state.manager.close()

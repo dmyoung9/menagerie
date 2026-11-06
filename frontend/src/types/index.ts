@@ -163,6 +163,10 @@ export type Artifact = {
 export type RuntimeCapabilities = {
   formats?: string[];
   schema?: Record<string, RuntimeField>;
+  features?: Record<string, Capability>;
+  sha256?: string;
+  version?: string;
+  flags?: string[];
 };
 export type Runtime = {
   id: string;

@@ -76,6 +76,15 @@ standalone mode and child-model preset settings in native-pool mode. Router
 policy (`max_loaded`, eviction consent and membership) remains owned by the pool,
 not by these child presets. Other engines do not inherit that pool mapping.
 
+Executable capability responses include structured feature advertisements beside
+the legacy mechanism map and discovered flags. A supported advertisement means
+the installed help exposes the mechanism, not that any model or device has passed
+inference acceptance. Missing CLI evidence remains unknown. Schema-help caches
+include the executable filesystem fingerprint as well as installation revision;
+on refresh, the saved executable hash is checked before executing help. Replacing
+the binary invalidates cached help and requires registering the updated
+installation. This does not fingerprint dynamically loaded libraries or drivers.
+
 Keep the following values separate:
 
 - **Unspecified/inherited:** the key is absent from `Profile.config`; do not

@@ -219,6 +219,10 @@ export const artifact = d.object<T.Artifact>({
   templates: opt(d.array(templateAssetPublic)),
 });
 export const runtimeCapabilities = d.object<T.RuntimeCapabilities>({
+  features: opt(d.record(capability)),
+  sha256: opt(d.string),
+  version: opt(d.string),
+  flags: opt(stringArray),
   formats: opt(stringArray),
   schema: opt(d.record(runtimeField)),
 });

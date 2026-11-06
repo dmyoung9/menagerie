@@ -18,7 +18,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-from . import adapters, deployment_sets, host, lifecycle, templates
+from . import adapters, deployment_sets, host, lifecycle, runtime_protocol, templates
 from .catalog import apply_reasoning, export_config, normalize
 from .jobs import Jobs
 from .manager import ACTIVE, Conflict, Manager, redact
@@ -777,7 +777,12 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.get("/api/runtimes/{ident}/capabilities")
     async def capabilities(ident: str):
         runtime = store.get("runtime", ident)
-        key = (ident, runtime["revision"])
+        fingerprint = adapters.executable_fingerprint(runtime)
+        key = (ident, runtime["revision"], fingerprint)
+        for previous in list(runtime_schema_tasks):
+            if previous[0] == ident and previous != key:
+                task = runtime_schema_tasks.pop(previous)
+                task.cancel()
         if key not in runtime_schema_tasks:
             runtime_schema_tasks[key] = asyncio.create_task(
                 adapters.configuration_schema(runtime)
@@ -787,7 +792,12 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         except Exception:
             runtime_schema_tasks.pop(key, None)
             raise
-        return runtime["capabilities"] | {"schema": schema}
+        return runtime["capabilities"] | {
+            "schema": schema,
+            "features": runtime_protocol.features(
+                runtime, runtime["capabilities"].get("flags", [])
+            ),
+        }
 
     @app.post("/api/profiles")
     async def profile(body: Profile, expected: int | None = None):
