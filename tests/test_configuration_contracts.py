@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from controlplane import adapters
+from controlplane.catalog import normalize
 from controlplane.schema import Capability, Profile
 
 
@@ -45,6 +46,18 @@ def test_vllm_does_not_inherit_llama_automatic_or_pool_semantics():
     assert field["owner_by_mode"] == {}
     assert "automatic_value" not in field
     assert field["inheritable"]
+
+
+@pytest.mark.parametrize(
+    "config", [{}, {"ctx-size": 0}, {"ctx-size": 32768, "parallel": -1}]
+)
+def test_automatic_sizing_never_becomes_zero_or_negative_client_capacity(config):
+    profile = {"name": "Synthetic", "config": config, "catalog": {}}
+    before = deepcopy(profile)
+    result = normalize(profile)
+    assert result["model"]["limit"]["context"] > 0
+    assert result["model"]["limit"]["output"] > 0
+    assert profile == before
 
 
 def test_capabilities_preserve_unknown_and_conflicting_evidence():

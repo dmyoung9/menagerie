@@ -809,15 +809,6 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         errors = adapters.validate_profile(data, artifact, runtime)
         if errors:
             raise ValueError("; ".join(errors))
-        catalog = data.get("catalog", {})
-        if catalog.get("model"):
-            limits = catalog["model"].setdefault("limit", {})
-            context = data["config"].get(
-                "ctx-size", data["config"].get("max-model-len")
-            )
-            if context:
-                limits["context"] = context // data["config"].get("parallel", 1)
-                limits["output"] = min(limits.get("output", 8192), limits["context"])
         data["catalog"] = normalize(data)
         return store.put("profile", data, expected=expected)
 
