@@ -39,13 +39,16 @@ def template_text(metadata):
 
 def structured(metadata):
     """Conservative model findings. No model-name heuristics or absence-as-denial."""
-    template = template_text(metadata)
-    toggle = bool(re.search(r"\benable_thinking\b", template))
+    template = re.sub(r"{#.*?#}", "", template_text(metadata), flags=re.DOTALL)
+    expressions = "\n".join(
+        re.findall(r"{[{%]-?(.*?)-?[%}]}", template, flags=re.DOTALL)
+    )
+    toggle = bool(re.search(r"\benable_thinking\b", expressions))
     levels = sorted(
         set(
             re.findall(
                 r"""reasoning_effort\s*==\s*['"]([\w.-]{1,64})['"]|['"]([\w.-]{1,64})['"]\s*==\s*reasoning_effort""",
-                template,
+                expressions,
             )
         )
     )
@@ -183,6 +186,16 @@ def effective(artifact, runtime, profile, *, template=None, observation=None):
     deployed = deepcopy(model)
     warnings = []
     flags = set(runtime.get("capabilities", {}).get("flags", []))
+    for key, entry in deployed.items():
+        if entry["status"] == "supported":
+            entry["status"] = "unknown"
+            entry["evidence"].append(
+                {
+                    "source": "runtime",
+                    "confidence": "low",
+                    "detail": "Model evidence detected; effective support on the selected executable is not yet observed",
+                }
+            )
     # llama.cpp GGUF image input needs a projector. Other engines have their own
     # artifact/lifecycle semantics; do not impose llama's requirement on them.
     image = deployed["input_image"]
@@ -191,7 +204,7 @@ def effective(artifact, runtime, profile, *, template=None, observation=None):
         and model["input_image"]["status"] == "supported"
     ):
         projector = profile.get("config", {}).get("mmproj")
-        if not projector or "mmproj" not in flags:
+        if not projector:
             image["status"] = "unsupported"
             image.pop("value", None)
             image["evidence"].append(
@@ -210,7 +223,13 @@ def effective(artifact, runtime, profile, *, template=None, observation=None):
                 {
                     "source": "runtime",
                     "confidence": "low",
-                    "detail": "Projector configured and --mmproj advertised; artifact compatibility and inference unverified",
+                    "detail": "Projector configured; "
+                    + (
+                        "--mmproj advertised"
+                        if "mmproj" in flags
+                        else "--mmproj support unknown"
+                    )
+                    + "; artifact compatibility and inference unverified",
                 }
             )
     if observation:

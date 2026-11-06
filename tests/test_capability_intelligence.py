@@ -90,7 +90,7 @@ def test_projector_configuration_does_not_prove_compatibility_or_change_model():
         effective(artifact, {"engine": "vllm"}, original)["effective"]["input_image"][
             "status"
         ]
-        == "supported"
+        == "unknown"
     )
 
 
