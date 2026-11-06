@@ -431,6 +431,14 @@ export function DeploymentDetail({
         <RequestHistory deploymentId={d.id} deployments={data.deployments} />
       )}
       {tab === 'Advanced' && (
+        <DeploymentConfiguration
+          deployment={d}
+          data={data}
+          saved={saved}
+          advancedOnly
+        />
+      )}
+      {tab === 'Advanced' && (
         <Card className="mb-5 min-w-0 gap-0 p-5">
           <CardContent className="p-0">
             <dl className="properties">

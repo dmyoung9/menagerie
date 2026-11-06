@@ -100,11 +100,24 @@ without improving its existing time-series behavior.
 
 ## Verification
 
-Memory & placement keeps context/concurrency visible and places uncommon native
-controls behind a keyboard-accessible **Advanced memory and placement** disclosure.
+The curated deployment editor uses Model & runtime, Resources & context,
+Generation and Availability. Resources keeps context/concurrency and advertised
+fit/device controls visible, with uncommon native controls behind a
+keyboard-accessible **Advanced memory and placement** disclosure.
 Descriptions explain the tradeoffs without activating omitted flags. Performance
-and Generation have explicit engine-default, no-engine and unsupported-option
+is disclosed in Advanced model settings; Generation keeps output metadata before
+sampling, temperature explicit overrides visible and other sampling in Advanced
+sampling. Both flag cards have explicit engine-default, no-engine and unsupported-option
 empty states; Add remains unavailable until supported options exist.
+
+Native schema controls identify unspecified, explicit automatic and concrete
+override states without materializing displayed defaults. Identity is compact;
+private networking, queue timeout and MTP tuning are disclosed. The standalone
+Advanced tab reuses the schema editor rather than replacing it with JSON-only
+inspection. Capability statuses/evidence and optional sampling recommendations
+never seed draft values; unavailable previews preserve manual variants and Advanced
+client declarations. Native pool engine/device visibility controls update all
+members, while model-server flags retain child-preset ownership.
 
 Performance and Generation group their card contents in `FieldSet`, with a
 screen-reader legend (the visible title remains in CardHeader) and a `FieldGroup`.

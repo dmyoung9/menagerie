@@ -39,6 +39,7 @@ export function RuntimeFlagCard({
   after,
   formPath,
   engineSelected = true,
+  curated = false,
 }: {
   name: string;
   title: string;
@@ -52,6 +53,7 @@ export function RuntimeFlagCard({
   after?: ReactNode;
   formPath: ConfigPath;
   engineSelected?: boolean;
+  curated?: boolean;
 }) {
   const [selected, setSelected] = useState<string[] | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -94,9 +96,27 @@ export function RuntimeFlagCard({
         <FieldLegend className="sr-only">{title} flags</FieldLegend>
         <FieldGroup>
           {before}
+          {curated && schema.temp && value.temp === undefined && (
+            <p className="text-muted-foreground text-sm">
+              Temperature: unspecified · engine default.{' '}
+              <Button
+                type="button"
+                variant="outline"
+                disabled={disabled}
+                onClick={() =>
+                  change({ ...value, temp: flagDefault('temp', schema, value) })
+                }
+              >
+                Override temperature
+              </Button>
+            </p>
+          )}
           <ItemGroup aria-label={`${title} flag items`}>
             {supported
-              .filter((key) => value[key] !== undefined)
+              .filter(
+                (key) =>
+                  value[key] !== undefined && (!curated || key === 'temp'),
+              )
               .map((key) => (
                 <RuntimeFlagField
                   key={key}
@@ -110,6 +130,37 @@ export function RuntimeFlagCard({
                 />
               ))}
           </ItemGroup>
+          {curated && (
+            <details
+              open={
+                supported.some(
+                  (key) => key !== 'temp' && value[key] !== undefined,
+                ) || undefined
+              }
+            >
+              <summary>Advanced sampling</summary>
+              <p className="text-muted-foreground text-sm">
+                Client requests may override sampling defaults. Changes to
+                engine startup defaults require reload.
+              </p>
+              <ItemGroup aria-label="Advanced sampling flag items">
+                {supported
+                  .filter((key) => key !== 'temp' && value[key] !== undefined)
+                  .map((key) => (
+                    <RuntimeFlagField
+                      key={key}
+                      flag={key}
+                      schema={schema}
+                      value={value}
+                      change={change}
+                      host={host}
+                      disabled={disabled}
+                      formPath={formPath}
+                    />
+                  ))}
+              </ItemGroup>
+            </details>
+          )}
           {!supported.some((key) => value[key] !== undefined) && (
             <Empty
               title={

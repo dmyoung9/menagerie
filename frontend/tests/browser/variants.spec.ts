@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect } from './fixtures';
+import { test, expect, openAdvanced, openIdentity } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 import { defaultReasoningOptions } from '../../src/capabilityOptions';
 import type { ModelCatalog } from '../../src/types';
@@ -235,6 +235,7 @@ test('new deployment members get common defaults and a nested Drawer without sub
     .getByRole('dialog')
     .getByRole('button', { name: 'Add model', exact: true })
     .click();
+  await openAdvanced(page);
   await expect(
     page
       .getByRole('group', { name: 'Capabilities', exact: true })
@@ -640,6 +641,7 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
       fixture.writes.some((write) => write.path === '/api/resources/preview'),
     )
     .toBe(true);
+  await openIdentity(page);
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Preserved variants');

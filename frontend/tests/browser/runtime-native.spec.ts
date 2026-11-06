@@ -51,3 +51,40 @@ test('a native pool remains a pool even with one model and round-trips its polic
   expect(saved.allow_eviction).toBe(false);
   expect(saved.members[0].configuration!.config).toEqual({});
 });
+
+test('native pool device visibility is edited once and saved for all members', async ({
+  page,
+  fixture,
+}) => {
+  await page.goto('/#/deployments');
+  await page
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Name', { exact: true }).fill('Shared pool');
+  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
+  await dialog.getByLabel('Lifecycle owner').selectOption('runtime');
+  const gpu = dialog.getByLabel('GPU', { exact: true });
+  await expect(gpu).toHaveCount(1);
+  await gpu.selectOption('0');
+  await expect(
+    dialog
+      .locator('[data-model-index="1"]')
+      .getByRole('combobox', { name: 'Engine', exact: true }),
+  ).toBeDisabled();
+  await dialog
+    .getByRole('button', { name: 'Save deployment', exact: true })
+    .click();
+  await expect(dialog).toBeHidden();
+  const saved = deploymentSetDraft(
+    fixture.writes.find((entry) => entry.path === '/api/deployment-sets')!.body,
+  );
+  expect(saved.members.map((member) => member.gpu)).toEqual([0, 0]);
+  expect(new Set(saved.members.map((member) => member.port)).size).toBe(2);
+  expect(new Set(saved.members.map((member) => member.alias)).size).toBe(2);
+  expect(
+    new Set(saved.members.map((member) => member.configuration!.runtime_id))
+      .size,
+  ).toBe(1);
+});

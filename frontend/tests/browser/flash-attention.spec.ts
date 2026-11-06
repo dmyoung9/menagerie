@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect } from './fixtures';
+import { test, expect, openAdvanced, openIdentity } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 
 for (const width of [1440, 576, 320]) {
@@ -23,6 +23,7 @@ for (const width of [1440, 576, 320]) {
       },
     });
     await page.goto('/#/deployments/idle/configuration');
+    await openAdvanced(page);
     await expect(
       page.getByRole('radiogroup', { name: 'Flash attention', exact: true }),
     ).toHaveCount(0);
@@ -195,6 +196,7 @@ for (const selected of ['auto', 'on', 'off']) {
     await expect(
       radios.getByRole('radio', { name: name(selected), exact: true }),
     ).toBeChecked();
+    await openIdentity(page);
     await page.getByLabel('Display name', { exact: true }).fill('Renamed');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect

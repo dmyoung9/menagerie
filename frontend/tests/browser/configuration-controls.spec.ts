@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, openAdvanced } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 import AxeBuilder from '@axe-core/playwright';
 
@@ -196,6 +196,7 @@ test('numeric flags are absent until added and seed engine rather than policy de
     ],
     ['generation', ['Temperature', 'Top-p']],
   ] as const) {
+    if (category === 'performance') await openAdvanced(page);
     await page
       .getByRole('button', { name: `Add ${category} flags`, exact: true })
       .click();
@@ -332,6 +333,7 @@ for (const width of [1440, 576, 320]) {
       name: 'Maximum draft tokens',
       exact: true,
     });
+    await page.getByText('Advanced MTP tuning', { exact: true }).click();
     await expect(range.locator('[data-slot="slider"]')).toHaveCount(1);
     await expect(minimum).toBeDisabled();
     await expect(maximum).toBeDisabled();
@@ -409,12 +411,14 @@ for (const width of [1440, 576, 320]) {
         .body,
     ).configuration!.config;
     expect(saved).toMatchObject({ [keys[0]]: 1, [keys[1]]: 8 });
+    await page.getByText('Advanced MTP tuning', { exact: true }).click();
     await page
       .getByRole('combobox', { name: 'MTP head', exact: true })
       .selectOption('');
     await expect(minimum).toBeDisabled();
     await expect(maximum).toBeDisabled();
     await page.getByRole('button', { name: 'Discard', exact: true }).click();
+    await page.getByText('Advanced MTP tuning', { exact: true }).click();
     await expect(minInput).toHaveValue('1');
     await expect(maxInput).toHaveValue('8');
     await expect(minimum).toBeEnabled();

@@ -16,7 +16,10 @@ export function OutputLimit({
 }) {
   const model = catalog.model || {};
   return (
-    <Field label="Max output tokens">
+    <Field
+      label="Max output tokens"
+      hint="Client catalog output limit, not an enforced engine ceiling. Clients may override request defaults; engine enforcement varies."
+    >
       <NumberControl
         label="Max output tokens"
         min={1}

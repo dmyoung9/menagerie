@@ -25,6 +25,30 @@ export type Fixture = {
   releaseSave: () => void;
 };
 
+export async function openAdvanced(page: Page) {
+  const summary = page
+    .getByText('Advanced model settings', { exact: true })
+    .filter({ visible: true });
+  await expect(summary).toBeVisible();
+  if (
+    !(await summary
+      .locator('..')
+      .evaluate((element) => (element as HTMLDetailsElement).open))
+  )
+    await summary.click();
+}
+
+export async function openIdentity(page: Page) {
+  const summary = page.locator('summary').filter({ hasText: /^Identity ·/ });
+  await expect(summary).toBeVisible();
+  if (
+    !(await summary
+      .locator('..')
+      .evaluate((element) => (element as HTMLDetailsElement).open))
+  )
+    await summary.click();
+}
+
 export const test = base.extend<{ fixture: Fixture }>({
   fixture: [
     async ({ page }, use) => {
@@ -251,6 +275,13 @@ export const test = base.extend<{ fixture: Fixture }>({
           );
         if (path.endsWith('/logs'))
           return send({ text: 'Runtime ready\nNo requests in flight' });
+        if (path === '/api/capabilities/preview')
+          return send({
+            model: { reasoning: { status: 'unknown', evidence: [] } },
+            effective: { reasoning: { status: 'unknown', evidence: [] } },
+            warnings: [],
+            recommendations: [],
+          });
         if (path === '/api/resources/preview') {
           const input = contracts.resourcePreviewRequest(body);
           const members = input.members.map((m, i: number) => {

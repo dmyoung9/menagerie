@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, openAdvanced, openIdentity } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 
 test('advanced memory controls are quiet by default, explain themselves and preserve omitted options', async ({
@@ -27,6 +27,7 @@ test('advanced memory controls are quiet by default, explain themselves and pres
   await page
     .getByText('Advanced memory and placement', { exact: true })
     .click();
+  await openIdentity(page);
   await expect(
     page.getByText('MiB to leave free for other workloads.'),
   ).toBeVisible();
@@ -54,6 +55,7 @@ test('performance explains engine defaults and its Add action', async ({
 }) => {
   await page.goto('/#/deployments/idle/configuration');
   const card = page.locator('[data-settings-section="performance"]');
+  await openAdvanced(page);
   await expect(
     card.getByRole('heading', { name: 'Using engine defaults' }),
   ).toBeVisible();
@@ -78,6 +80,7 @@ test('performance explains why Add is unavailable without an engine', async ({
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   const card = dialog.locator('[data-settings-section="performance"]');
+  await openAdvanced(page);
   await expect(
     card.getByText(
       'Choose an engine to see its supported performance options.',

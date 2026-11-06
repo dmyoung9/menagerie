@@ -192,6 +192,8 @@ export function RuntimeSettings({
   disabled = false,
   engineSelected = Object.keys(schema).length > 0,
   formPath = 'configuration.config',
+  curated = false,
+  runtimeMode = 'standalone',
 }: {
   schema: Record<string, RuntimeField>;
   value: Record<string, JsonValue>;
@@ -205,6 +207,8 @@ export function RuntimeSettings({
   disabled?: boolean;
   engineSelected?: boolean;
   formPath?: ConfigPath;
+  curated?: boolean;
+  runtimeMode?: 'standalone' | 'native-pool';
 }) {
   const update = (key: string, v: JsonValue | undefined) => {
     const next = { ...value };
@@ -235,7 +239,7 @@ export function RuntimeSettings({
     ],
     [
       'memory',
-      'Memory & placement',
+      curated ? 'Resources & context' : 'Memory & placement',
       [
         'ctx-size',
         'max-model-len',
@@ -283,6 +287,77 @@ export function RuntimeSettings({
     ),
   ]);
   function control(key: string) {
+    const field = schema[key];
+    const current = value[key];
+    const automatic = field.presentation?.automatic_value ?? undefined;
+    const mode =
+      current === undefined
+        ? 'inherited'
+        : automatic !== undefined && current === automatic
+          ? 'automatic'
+          : 'explicit';
+    const explicitSeed =
+      [field.engine_default, field.default, field.choices?.[0]].find(
+        (candidate) => candidate !== undefined && candidate !== automatic,
+      ) ??
+      (field.type === 'integer' || field.type === 'number'
+        ? Math.max(field.min ?? 1, 1)
+        : key === 'device'
+          ? 'none'
+          : '');
+    return (
+      <FieldGroup key={key}>
+        <Field
+          label={`${field.label || key} setting`}
+          hint={
+            field.presentation
+              ? `Owner: ${field.presentation.owner_by_mode?.[runtimeMode] || field.presentation.owner}. Schema: ${field.presentation.provenance}.${field.restart_required ? ' Reload required for startup changes.' : ''}`
+              : undefined
+          }
+        >
+          <NativeSelect
+            value={mode}
+            disabled={disabled}
+            onChange={(e) => {
+              const next = e.target.value;
+              update(
+                key,
+                next === 'inherited'
+                  ? undefined
+                  : next === 'automatic'
+                    ? automatic
+                    : explicitSeed,
+              );
+            }}
+          >
+            <NativeSelectOption value="inherited">
+              Unspecified · engine default
+            </NativeSelectOption>
+            {automatic !== undefined && (
+              <NativeSelectOption value="automatic">
+                Automatic · explicit engine mode
+              </NativeSelectOption>
+            )}
+            <NativeSelectOption value="explicit">
+              Explicit override
+            </NativeSelectOption>
+          </NativeSelect>
+        </Field>
+        {engineControl(key)}
+        {current !== undefined && (
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={disabled}
+            onClick={() => update(key, undefined)}
+          >
+            Remove {field.label || key} override
+          </Button>
+        )}
+      </FieldGroup>
+    );
+  }
+  function engineControl(key: string) {
     const f = schema[key],
       current = value[key],
       label = f.label || key;
@@ -553,7 +628,7 @@ export function RuntimeSettings({
             onChange={(e) => update(key, e.target.value || undefined)}
           >
             <NativeSelectOption value="">
-              Engine default ({String(f.default ?? 'engine')})
+              Unspecified · engine default
             </NativeSelectOption>
             {(f.choices || []).map((v: string) => (
               <NativeSelectOption
@@ -677,6 +752,7 @@ export function RuntimeSettings({
                 after={after}
                 formPath={formPath}
                 engineSelected={engineSelected}
+                curated={curated && name === 'generation'}
               />
             );
           const fields = (
@@ -697,9 +773,17 @@ export function RuntimeSettings({
                     (k) =>
                       schema[k] &&
                       (name !== 'memory' ||
-                        ['ctx-size', 'max-model-len', 'parallel'].includes(
-                          k,
-                        )) &&
+                        (curated
+                          ? [
+                              'ctx-size',
+                              'max-model-len',
+                              'parallel',
+                              'fit',
+                              'device',
+                              'gpu-memory-utilization',
+                            ]
+                          : ['ctx-size', 'max-model-len', 'parallel']
+                        ).includes(k)) &&
                       !(name === 'mtp' && draftKeys?.includes(k)) &&
                       !(
                         name === 'mtp' &&
@@ -722,7 +806,18 @@ export function RuntimeSettings({
                   {keys.some(
                     (key) =>
                       schema[key] &&
-                      !['ctx-size', 'max-model-len', 'parallel'].includes(key),
+                      !(
+                        curated
+                          ? [
+                              'ctx-size',
+                              'max-model-len',
+                              'parallel',
+                              'fit',
+                              'device',
+                              'gpu-memory-utilization',
+                            ]
+                          : ['ctx-size', 'max-model-len', 'parallel']
+                      ).includes(key),
                   ) && (
                     <details>
                       <summary>Advanced memory and placement</summary>
@@ -736,11 +831,18 @@ export function RuntimeSettings({
                           .filter(
                             (key) =>
                               schema[key] &&
-                              ![
-                                'ctx-size',
-                                'max-model-len',
-                                'parallel',
-                              ].includes(key),
+                              !(
+                                curated
+                                  ? [
+                                      'ctx-size',
+                                      'max-model-len',
+                                      'parallel',
+                                      'fit',
+                                      'device',
+                                      'gpu-memory-utilization',
+                                    ]
+                                  : ['ctx-size', 'max-model-len', 'parallel']
+                              ).includes(key),
                           )
                           .map(control)}
                       </FieldGroup>

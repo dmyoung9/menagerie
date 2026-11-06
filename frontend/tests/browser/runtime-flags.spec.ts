@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect } from './fixtures';
+import { test, expect, openAdvanced, openIdentity } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 
 test('standalone NumberControl also preserves clearing and commits before Enter submission', async ({
@@ -131,6 +131,7 @@ test('clearing is an editing buffer; blur validates without substituting zero an
   await expect(
     page.getByRole('button', { name: 'Discard', exact: true }),
   ).toBeEnabled();
+  await openIdentity(page);
   await page.getByLabel('Display name', { exact: true }).focus();
   await expect(input).toHaveValue('');
   await expect(input).toHaveAttribute('aria-invalid', 'true');
@@ -217,6 +218,7 @@ test('removing an invalid flag clears its errors and unrelated omitted batch def
   await page.goto('/#/deployments/idle/configuration');
   const input = page.getByLabel('Top-k', { exact: true });
   await input.fill('1.5');
+  await openIdentity(page);
   await page.getByLabel('Display name', { exact: true }).focus();
   await expect(
     page.locator('[data-runtime-flag="top-k"]').getByRole('alert'),
@@ -318,6 +320,7 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
   ).toHaveLength(0);
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
   await expect(page.getByLabel('Top-k', { exact: true })).toHaveValue('0');
+  await openIdentity(page);
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Renamed fixture');
@@ -348,6 +351,7 @@ test('saved thread counts above host concurrency remain editable and save unchan
   await expect(page.getByLabel('CPU threads', { exact: true })).toHaveValue(
     '16',
   );
+  await openIdentity(page);
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Oversubscribed fixture');
@@ -439,7 +443,10 @@ for (const width of [1440, 576, 320]) {
     ).toHaveCount(0);
     await expect(
       group
-        .getByRole('list', { name: 'Generation flag items', exact: true })
+        .getByRole('list', {
+          name: 'Advanced sampling flag items',
+          exact: true,
+        })
         .getByRole('listitem'),
     ).toHaveCount(2);
     const title = rows.first().locator(':scope > div[data-slot="field-label"]');
@@ -635,6 +642,7 @@ for (const width of [1440, 576, 320]) {
       page.getByLabel('Repetition penalty', { exact: true }),
     ).toHaveValue('1.13');
     await page.goto('/#/deployments/ready/configuration');
+    await openAdvanced(page);
     await expect(
       page.getByRole('button', { name: 'Add performance flags', exact: true }),
     ).toBeDisabled();

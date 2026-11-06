@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect } from './fixtures';
+import { test, expect, openAdvanced, openIdentity } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 
 for (const width of [1440, 576, 320]) {
@@ -34,6 +34,8 @@ for (const width of [1440, 576, 320]) {
     });
     const original = structuredClone(catalog.reasoning);
     await page.goto('/#/deployments/idle/configuration');
+    await openAdvanced(page);
+    await openIdentity(page);
     const panel = page.getByRole('region', {
       name: 'Modalities and capabilities',
       exact: true,

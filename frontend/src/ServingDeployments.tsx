@@ -401,7 +401,16 @@ export function DeploymentSetEditor({
         r.capabilities?.formats?.includes(model.format),
     );
     const runtime =
-      compatible.find((r) => r.engine === recommended) || compatible[0];
+      value.engine_pool && value.members.length
+        ? compatible.find(
+            (r) => r.id === value.members[0].configuration?.runtime_id,
+          )
+        : compatible.find((r) => r.engine === recommended) || compatible[0];
+    if (value.engine_pool && value.members.length && !runtime) {
+      setError('This model is incompatible with the shared pool engine.');
+      setBusy(false);
+      return;
+    }
     const used = [...(data.deployments || []), ...value.members];
     const slug = (text: string) =>
       text
@@ -593,6 +602,13 @@ export function DeploymentSetEditor({
                   <ConfigurationFields
                     formPath={`members[${index}].configuration.config`}
                     value={m.configuration!}
+                    deploymentId={m.id}
+                    templateOverride={m.template_override}
+                    runtimeLocked={Boolean(value.engine_pool)}
+                    observed={
+                      data.deployments?.find((entry) => entry.id === m.id)
+                        ?.runtime_observation?.resolved
+                    }
                     data={data}
                     set={(configuration) =>
                       updateMember(index, { configuration })
@@ -620,22 +636,35 @@ export function DeploymentSetEditor({
                       )
                     }
                     placementFields={
+                      value.engine_pool ? (
+                        <p className="text-muted-foreground text-sm">
+                          Process visibility is shared by all{' '}
+                          {value.members.length} pool members. Edit shared
+                          devices in Availability. Model-server options below
+                          belong to this child preset; native routing and
+                          residency remain pool-controlled.
+                        </p>
+                      ) : (
+                        <Placement
+                          part="gpu"
+                          value={m}
+                          change={(v) => updateMember(index, v)}
+                          host={data.host?.[0]}
+                        />
+                      )
+                    }
+                  />
+                  <details>
+                    <summary>Private networking</summary>
+                    <SettingsSection name="network" title="Networking">
                       <Placement
-                        part="gpu"
+                        part="network"
                         value={m}
                         change={(v) => updateMember(index, v)}
                         host={data.host?.[0]}
                       />
-                    }
-                  />
-                  <SettingsSection name="network" title="Networking">
-                    <Placement
-                      part="network"
-                      value={m}
-                      change={(v) => updateMember(index, v)}
-                      host={data.host?.[0]}
-                    />
-                  </SettingsSection>
+                    </SettingsSection>
+                  </details>
                   <Button
                     variant="destructive"
                     type="button"
@@ -660,7 +689,82 @@ export function DeploymentSetEditor({
                 </section>
               ))}
             </FieldSet>
-            <SettingsSection name="lifecycle" title="Lifecycle">
+            <SettingsSection name="lifecycle" title="Availability">
+              {value.engine_pool && (
+                <>
+                  <p className="text-muted-foreground text-sm">
+                    Shared engine, device visibility, loading policy and
+                    resident-model limit affect every pool member. Resource
+                    estimates are per-model advice, not individual shares of the
+                    pool process allocation. Unload the entire pool before
+                    editing.
+                  </p>
+                  <Field label="Shared installed engine">
+                    <NativeSelect
+                      value={value.members[0]?.configuration?.runtime_id || ''}
+                      onChange={async (e) => {
+                        const runtimeId = e.target.value;
+                        if (
+                          !(await confirm(
+                            'Change the shared engine? Engine-specific options for every pool member will be reset.',
+                          ))
+                        )
+                          return;
+                        setValue((previous) => ({
+                          ...previous,
+                          members: previous.members.map((member) => ({
+                            ...member,
+                            configuration: member.configuration
+                              ? {
+                                  ...member.configuration,
+                                  runtime_id: runtimeId,
+                                  config: {},
+                                  raw_args: [],
+                                }
+                              : undefined,
+                          })),
+                        }));
+                      }}
+                    >
+                      {data.runtimes
+                        .filter(
+                          (runtime) =>
+                            runtime.id ===
+                              value.members[0]?.configuration?.runtime_id ||
+                            (runtime.execution_kind === 'native' &&
+                              runtime.engine === 'llama.cpp' &&
+                              runtime.capabilities?.flags?.includes(
+                                'models-preset',
+                              )),
+                        )
+                        .map((runtime) => (
+                          <NativeSelectOption
+                            key={runtime.id}
+                            value={runtime.id}
+                          >
+                            {runtime.name}
+                          </NativeSelectOption>
+                        ))}
+                    </NativeSelect>
+                  </Field>
+                  {value.members[0] && (
+                    <Placement
+                      part="gpu"
+                      value={value.members[0]}
+                      host={data.host?.[0]}
+                      change={(placement) =>
+                        setValue((previous) => ({
+                          ...previous,
+                          members: previous.members.map((member) => ({
+                            ...member,
+                            gpu: placement.gpu,
+                          })),
+                        }))
+                      }
+                    />
+                  )}
+                </>
+              )}
               <Field
                 label="Lifecycle owner"
                 hint="Runtime pools share one native router and load models independently on request. Pinned and atomic groups use supervised processes. Pools require one compatible native runtime and shared device visibility."

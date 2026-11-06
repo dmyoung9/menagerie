@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, navigate } from './fixtures';
+import { test, expect, navigate, openIdentity, openAdvanced } from './fixtures';
 import * as contracts from '../../src/contracts';
 import { recordValue } from '../../src/decode';
 
@@ -80,6 +80,7 @@ test('dialogs trap and restore focus; menus use keyboard navigation and fit the 
   await trigger.click();
   await menu.getByRole('menuitem', { name: 'Edit', exact: true }).click();
   await expect(page).toHaveURL(/\/idle\/configuration$/);
+  await openIdentity(page);
   await expect(page.getByLabel('Display name', { exact: true })).toBeVisible();
   await expect
     .poll(() => fixture.writes.some((w) => w.path === '/api/resources/preview'))
@@ -97,7 +98,12 @@ test('dialogs trap and restore focus; menus use keyboard navigation and fit the 
   // A slower runner can finish the editor's debounced read-only POST preview
   // before Escape. Navigation must not cause any persistent mutation.
   expect(
-    fixture.writes.filter((w) => w.path !== '/api/resources/preview'),
+    fixture.writes.filter(
+      (w) =>
+        !['/api/resources/preview', '/api/capabilities/preview'].includes(
+          w.path,
+        ),
+    ),
   ).toEqual([]);
 });
 
@@ -173,6 +179,7 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
   await slider.focus();
   await page.keyboard.press('ArrowRight');
   await expect(context).toHaveValue('32768');
+  await openAdvanced(page);
   await dialog.getByRole('button', { name: 'Tools', exact: true }).click();
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   const secondMember = dialog.locator('[data-model-index="1"]');
@@ -192,11 +199,7 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
     .first()
     .click();
   await expect(context.filter({ visible: true })).toHaveValue('32768');
-  await dialog
-    .locator('summary')
-    .filter({ hasText: 'Advanced model settings' })
-    .filter({ visible: true })
-    .click();
+  await openAdvanced(page);
   await dialog
     .locator('summary')
     .filter({ hasText: 'Runtime options (JSON)' })
@@ -475,7 +478,12 @@ test('Base UI Select, Switch, outside dismissal and discard actions preserve pol
     .click();
   await expect(dialog).toBeHidden();
   expect(
-    fixture.writes.filter((w) => w.path !== '/api/resources/preview'),
+    fixture.writes.filter(
+      (w) =>
+        !['/api/resources/preview', '/api/capabilities/preview'].includes(
+          w.path,
+        ),
+    ),
   ).toEqual([]);
 });
 

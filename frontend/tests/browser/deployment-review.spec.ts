@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, openAdvanced, openIdentity } from './fixtures';
 import AxeBuilder from '@axe-core/playwright';
 import { deploymentDraft } from '../../src/contracts';
 
@@ -86,27 +86,32 @@ for (const width of [1440, 576, 320]) {
     );
     await page.goto('/#/deployments/idle/configuration');
     const config = page.locator('form.configuration-editor');
+    await openAdvanced(page);
+    await openIdentity(page);
+    await page.getByText('Private networking', { exact: true }).click();
+    await page.getByText('Advanced MTP tuning', { exact: true }).click();
     for (const title of [
       'Identity',
-      'Model & engine',
-      'Memory & placement',
+      'Model & runtime',
+      'Resources & context',
       'Performance',
       'Generation',
-      'Modalities & capabilities',
-      'Lifecycle',
+      'Client capability declarations',
+      'Availability',
       'Networking',
     ]) {
       await expect(
         config.getByRole('heading', { name: title, exact: true }),
       ).toBeVisible();
     }
-    await expect(config.locator('summary')).toHaveText([
+    for (const title of [
       'Advanced memory and placement',
       'Advanced model settings',
       'Runtime options (JSON)',
       'Engine arguments',
       'Client capabilities (JSON)',
-    ]);
+    ])
+      await expect(config.getByText(title, { exact: true })).toBeVisible();
     await expect(page.getByText('Model metadata', { exact: true })).toHaveCount(
       0,
     );
@@ -314,7 +319,9 @@ for (const width of [1440, 576, 320]) {
         resourceBox.y - networkBox.y - networkBox.height,
       ).toBeGreaterThanOrEqual(16);
     }
-    await page.getByRole('button', { name: 'Identity', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Model & runtime', exact: true })
+      .click();
     await page.screenshot({
       path: testInfo.outputPath(`configuration-${width}.png`),
       fullPage: true,
@@ -390,6 +397,7 @@ test('discard resets typed controls, invalid raw edits and the navigation guard'
   page,
 }) => {
   await page.goto('/#/deployments/idle/configuration');
+  await openIdentity(page);
   await page.getByLabel('Display name', { exact: true }).fill('Changed');
   await page.getByText('Advanced model settings', { exact: true }).click();
   await page.getByText('Runtime options (JSON)', { exact: true }).click();

@@ -112,13 +112,16 @@ export function ModelCompanions({
                 ))}
             </NativeSelect>
           </Field>
-          <RuntimeSettings
-            section="mtp"
-            schema={schema}
-            value={config}
-            disabled={!head}
-            change={(config) => change({ ...value, config })}
-          />
+          <details>
+            <summary>Advanced MTP tuning</summary>
+            <RuntimeSettings
+              section="mtp"
+              schema={schema}
+              value={config}
+              disabled={!head}
+              change={(config) => change({ ...value, config })}
+            />
+          </details>
         </FieldSet>
       )}
     </>
