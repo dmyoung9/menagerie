@@ -37,6 +37,19 @@ def validate(unit, store):
             errors.append(
                 "Runtime pools require named configuration options rather than raw arguments"
             )
+        shared = {
+            "models-preset",
+            "models-dir",
+            "models-max",
+            "models-autoload",
+            "models-memory-margin",
+            "host",
+            "port",
+        }
+        if shared.intersection(profile.get("config", {})):
+            errors.append(
+                "Shared router settings belong to the pool, not individual model presets"
+            )
     return sorted(set(errors))
 
 

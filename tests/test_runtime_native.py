@@ -21,6 +21,33 @@ def test_forks_share_protocol_and_capabilities_are_per_executable():
     assert not runtime_protocol.mechanisms({"engine": "vllm"}, ["fit"])["fit"]
 
 
+@pytest.mark.parametrize(
+    "key", ["models-autoload", "models-memory-margin", "models-max"]
+)
+def test_shared_router_options_cannot_be_written_to_child_presets(key):
+    runtime = {
+        "execution_kind": "native",
+        "capabilities": {"mechanisms": {"router": True}},
+    }
+
+    class SyntheticStore:
+        def get(self, kind, ident):
+            assert (kind, ident) == ("runtime", "engine")
+            return runtime
+
+    unit = {
+        "engine_pool": True,
+        "residency": "on-demand",
+        "members": [{"profile_snapshot": {"runtime_id": "engine", "config": {key: 1}}}],
+    }
+    assert any(
+        "Shared router settings" in error
+        for error in runtime_pool.validate(unit, SyntheticStore())
+    )
+    with pytest.raises(ValueError, match="Shared router settings"):
+        runtime_pool.preset(unit, SyntheticStore())
+
+
 def test_automatic_values_and_observations_are_not_guessed():
     runtime = {
         "engine": "llama.cpp",

@@ -200,6 +200,8 @@ OWNED = {
     "models-preset",
     "models-dir",
     "models-max",
+    "models-autoload",
+    "models-memory-margin",
     "path",
     "log-file",
     "logdir",
@@ -445,7 +447,12 @@ def executable_fingerprint(runtime):
     if runtime.get("execution_kind") != "native":
         return ()
     path = Path(runtime["executable"]).expanduser().resolve()
-    stat = path.stat()
+    try:
+        stat = path.stat()
+    except OSError as exc:
+        raise ValueError(
+            "Runtime executable unavailable; inspect the installation before probing options"
+        ) from exc
     return (
         str(path),
         stat.st_dev,
