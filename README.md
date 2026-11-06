@@ -87,6 +87,7 @@ for safety boundaries and release requirements.
 ## Documentation
 
 - [Model capabilities and reasoning](docs/model-capabilities.md)
+- [Deployment configuration](docs/deployment-configuration.md)
 - [Multi-model deployments](docs/multi-model-deployments.md)
 - [Editing deployments](docs/forms.md)
 - [Contributor guide](docs/development.md), [testing policy](docs/testing.md),

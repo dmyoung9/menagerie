@@ -35,12 +35,20 @@ def test_template_comments_do_not_advertise_controls():
 def test_selected_custom_template_does_not_rewrite_model_findings():
     result = effective(
         {"metadata": {"chat_template": "{% if enable_thinking %}<think>{% endif %}"}},
-        {"engine": "llama.cpp"}, {"config": {}}, template="{{ content }}", template_source="user",
+        {"engine": "llama.cpp"},
+        {"config": {}},
+        template="{{ content }}",
+        template_source="user",
     )
     assert result["model"]["reasoning_control"]["status"] == "supported"
     assert result["effective"]["reasoning_control"]["status"] == "unknown"
-    result = effective({"metadata": {}}, {"engine": "llama.cpp"}, {"config": {}},
-        template="{% if enable_thinking %}<think>{% endif %}", template_source="user")
+    result = effective(
+        {"metadata": {}},
+        {"engine": "llama.cpp"},
+        {"config": {}},
+        template="{% if enable_thinking %}<think>{% endif %}",
+        template_source="user",
+    )
     assert result["model"]["reasoning"]["status"] == "unknown"
     assert result["effective"]["reasoning"]["evidence"][0]["source"] == "user"
 

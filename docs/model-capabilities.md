@@ -7,6 +7,11 @@ or **Refresh capability metadata** to inspect an older registration without movi
 or redownloading its weights. Refresh is a visible Activity job and does not change
 deployment declarations.
 
+In deployment Configuration, detected statuses and **Capability evidence** separate
+model findings from effective deployment findings. Advanced client declarations
+change discovery/exposure metadata, not the engine's abilities. Variants and manual
+template configuration remain available regardless of detection status.
+
 ## Discovery is evidence, not serving certification
 
 Hugging Face inspection reads bounded configuration and chat-template files from
@@ -39,6 +44,12 @@ image input; a configured projector remains unverified until runtime evidence or
 inference acceptance establishes compatibility. Client declarations are retained
 as user evidence, not used to certify serving support. Other runtime families do
 not inherit llama.cpp's projector requirements.
+
+An optional `deployment_id` permits current-session operational observations only
+when artifact, runtime, requested options, raw arguments and template override still
+match the saved deployment. A changed draft or a previous-session observation cannot
+certify the new configuration. Observed modality booleans are whitelisted from
+runtime properties; they do not advance configuration revisions.
 
 GGUF `mmproj` files are shown as companion **candidates**, never automatically
 paired. Select a compatible projector explicitly during download. It is pinned to
