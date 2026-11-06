@@ -32,6 +32,20 @@ export const capability = d.object<T.Capability>({
   status: d.oneOf('supported', 'unsupported', 'unknown'),
   value: opt(jsonValue),
   evidence: d.array(capabilityEvidence),
+  conflicting: opt(d.boolean),
+});
+export const parameterRecommendation = d.object<T.ParameterRecommendation>({
+  parameter: d.string,
+  value: d.number,
+  compatible: d.nullable(d.boolean),
+  source: d.string,
+  detail: d.string,
+});
+export const capabilityPreview = d.object<T.CapabilityPreview>({
+  model: d.record(capability),
+  effective: d.record(capability),
+  warnings: stringArray,
+  recommendations: d.array(parameterRecommendation),
 });
 const parameterOwner = d.oneOf(
   'installation',
@@ -135,6 +149,8 @@ const dependency = d.object<{ name: string; size?: number | null }>({
   size: maybeNumber,
 });
 export const discoveredCapabilities = d.object<T.DiscoveredCapabilities>({
+  findings: opt(d.record(capability)),
+  recommendations: opt(d.array(parameterRecommendation)),
   input: opt(stringArray),
   tools: opt(d.boolean),
   reasoning: opt(reasoning),

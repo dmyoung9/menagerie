@@ -22,6 +22,7 @@ class Capability(BaseModel, Generic[CapabilityValue]):
     status: SupportStatus = "unknown"
     value: CapabilityValue | None = None
     evidence: list[CapabilityEvidence] = Field(default_factory=list)
+    conflicting: bool = False
 
 
 class ParameterPresentation(BaseModel):
@@ -111,6 +112,11 @@ class Profile(Record):
     config: dict = Field(default_factory=dict)
     raw_args: list[str] = Field(default_factory=list)
     catalog: dict = Field(default_factory=dict)
+
+
+class CapabilityPreview(BaseModel):
+    configuration: Profile
+    template_override: dict | None = None
 
 
 class DeploymentPolicy(Record):

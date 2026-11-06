@@ -20,6 +20,20 @@ export type Capability<T = JsonValue> = {
   status: SupportStatus;
   value?: T | null;
   evidence: CapabilityEvidence[];
+  conflicting?: boolean;
+};
+export type ParameterRecommendation = {
+  parameter: string;
+  value: number;
+  compatible: boolean | null;
+  source: string;
+  detail: string;
+};
+export type CapabilityPreview = {
+  model: Record<string, Capability>;
+  effective: Record<string, Capability>;
+  warnings: string[];
+  recommendations: ParameterRecommendation[];
 };
 export type ParameterOwner =
   'installation' | 'runtime-process' | 'model-deployment' | 'request-variant';
@@ -86,6 +100,8 @@ export type ConfiguredModelCatalog = Omit<
 };
 
 export type DiscoveredCapabilities = {
+  findings?: Record<string, Capability>;
+  recommendations?: ParameterRecommendation[];
   input?: string[];
   tools?: boolean;
   reasoning?: boolean | { supported: boolean };

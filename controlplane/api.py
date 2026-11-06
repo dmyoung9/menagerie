@@ -23,6 +23,7 @@ from .catalog import apply_reasoning, export_config, normalize
 from .jobs import Jobs
 from .manager import ACTIVE, Conflict, Manager, redact
 from .schema import (
+    CapabilityPreview,
     Deployment,
     DeploymentSet,
     Profile,
@@ -381,6 +382,21 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.get("/api/models")
     async def models():
         return _model_rows()
+
+    @app.post("/api/capabilities/preview")
+    async def capability_preview(body: CapabilityPreview):
+        from .capabilities import effective
+
+        profile = body.configuration.model_dump(exclude_none=True)
+        artifact = store.get("artifact", profile["artifact_id"])
+        runtime = store.get("runtime", profile["runtime_id"])
+        selection = templates.effective_selection(
+            {"template_override": body.template_override}, artifact, store
+        )
+        asset = selection.get("asset")
+        return effective(
+            artifact, runtime, profile, template=asset["content"] if asset else None
+        )
 
     @app.get("/api/models/{ident}/templates")
     async def model_templates(ident: str):

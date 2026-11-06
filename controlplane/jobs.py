@@ -184,6 +184,7 @@ class Jobs:
             for filename, key in (
                 ("config.json", "config"),
                 ("tokenizer_config.json", "tokenizer_config"),
+                ("generation_config.json", "generation_config"),
             ):
                 value = await read_file(filename)
                 if value is None:

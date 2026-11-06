@@ -16,6 +16,30 @@ variables, reasoning markers, and `enable_thinking`. Missing metadata means
 unknown, not an assertion that a feature is unsupported. Tags and descriptions in
 search results remain weaker hints.
 
+Structured findings distinguish **supported**, **unsupported**, and **unknown**
+and retain source/confidence evidence. A reasoning marker alone does not establish
+a toggle, effort levels, a budget, or separate reasoning output. Template controls
+identify mechanisms, not successful inference. Conflicting collected findings are
+retained rather than silently choosing one source.
+
+Published `generation_config.json` sampling recommendations are collected during
+explicit metadata inspection. They are advice, not engine defaults, and are never
+automatically saved. Compatibility is checked against the selected runtime schema
+before they can be offered for application. Free-form model-card prose is not yet
+parsed into recommendations.
+
+### Contributor reference: capability preview
+
+`POST /api/capabilities/preview` accepts `configuration` (the existing profile
+shape) and an optional `template_override`. It returns separate `model` and
+`effective` finding maps, warnings, and schema-checked recommendations. It neither
+executes an engine nor changes registry records. A llama.cpp image-capable model
+without a configured projector/advertised projector flag has unavailable effective
+image input; a configured projector remains unverified until runtime evidence or
+inference acceptance establishes compatibility. Client declarations are retained
+as user evidence, not used to certify serving support. Other runtime families do
+not inherit llama.cpp's projector requirements.
+
 GGUF `mmproj` files are shown as companion **candidates**, never automatically
 paired. Select a compatible projector explicitly during download. It is pinned to
 the same repository commit, checksummed, and compared to an upstream digest when
