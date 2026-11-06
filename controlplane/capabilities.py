@@ -177,13 +177,35 @@ def recommendations(metadata, schema=None):
     return result
 
 
-def effective(artifact, runtime, profile, *, template=None, observation=None):
+def effective(
+    artifact,
+    runtime,
+    profile,
+    *,
+    template=None,
+    template_source="tokenizer",
+    observation=None,
+):
     """Resolve model and deployment evidence without mutating configuration."""
     metadata = dict(artifact.get("metadata", {}))
-    if template is not None:
-        metadata["tokenizer.chat_template"] = template
     model = structured(metadata)
     deployed = deepcopy(model)
+    if template is not None:
+        selected = structured({"chat_template": template})
+        for key in (
+            "reasoning",
+            "reasoning_control",
+            "reasoning_mechanism",
+            "reasoning_output",
+            "reasoning_budget",
+            "tools",
+        ):
+            deployed[key] = selected[key]
+            for evidence in deployed[key]["evidence"]:
+                evidence["source"] = template_source
+                evidence["detail"] = (
+                    "Selected deployment template: " + evidence["detail"]
+                )
     warnings = []
     flags = set(runtime.get("capabilities", {}).get("flags", []))
     for key, entry in deployed.items():
@@ -235,10 +257,16 @@ def effective(artifact, runtime, profile, *, template=None, observation=None):
     if observation:
         for key, value in observation.get("capabilities", {}).items():
             if key in deployed and type(value) is bool:
+                previous = deployed[key]
+                conflicting = previous.get("conflicting", False) or (
+                    previous["status"] != "unknown"
+                    and (previous["status"] == "supported") != value
+                )
                 deployed[key] = {
                     "status": "supported" if value else "unsupported",
                     "value": value,
-                    "evidence": deployed[key]["evidence"]
+                    "conflicting": conflicting,
+                    "evidence": previous["evidence"]
                     + [
                         {
                             "source": "runtime",
@@ -250,6 +278,11 @@ def effective(artifact, runtime, profile, *, template=None, observation=None):
                         }
                     ],
                 }
+                if conflicting:
+                    warnings.append(
+                        key
+                        + ": current runtime observation conflicts with earlier evidence"
+                    )
     declared = profile.get("catalog", {}).get("model", {}).get("capabilities", {})
     for key in deployed:
         if key == "reasoning" and "reasoning" in declared:

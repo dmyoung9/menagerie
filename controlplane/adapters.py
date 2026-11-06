@@ -593,6 +593,12 @@ def runtime_observation(properties):
         else "resident",
         "resolved": resolved,
         "source": "runtime /props",
+        "capabilities": {
+            target: properties["modalities"][source]
+            for source, target in (("vision", "input_image"), ("audio", "input_audio"))
+            if isinstance(properties.get("modalities"), dict)
+            and type(properties["modalities"].get(source)) is bool
+        },
     }
 
 

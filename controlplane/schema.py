@@ -117,6 +117,7 @@ class Profile(Record):
 class CapabilityPreview(BaseModel):
     configuration: Profile
     template_override: dict | None = None
+    deployment_id: str | None = None
 
 
 class DeploymentPolicy(Record):

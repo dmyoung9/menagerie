@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import httpx
 
+from controlplane import adapters
 from controlplane.api import create_app
 from controlplane.capabilities import effective, inspect, recommendations
 
@@ -21,6 +22,44 @@ def test_markers_do_not_imply_toggle_effort_or_output_separation():
     assert findings["reasoning"]["status"] == "supported"
     for key in ("reasoning_control", "reasoning_budget", "reasoning_output"):
         assert findings[key]["status"] == "unknown"
+
+
+def test_template_comments_do_not_advertise_controls():
+    finding = inspect({"chat_template": "{# enable_thinking <think> #}hello"})[
+        "findings"
+    ]
+    assert finding["reasoning"]["status"] == "unknown"
+    assert finding["reasoning_control"]["status"] == "unknown"
+
+
+def test_selected_custom_template_does_not_rewrite_model_findings():
+    result = effective(
+        {"metadata": {"chat_template": "{% if enable_thinking %}<think>{% endif %}"}},
+        {"engine": "llama.cpp"}, {"config": {}}, template="{{ content }}", template_source="user",
+    )
+    assert result["model"]["reasoning_control"]["status"] == "supported"
+    assert result["effective"]["reasoning_control"]["status"] == "unknown"
+    result = effective({"metadata": {}}, {"engine": "llama.cpp"}, {"config": {}},
+        template="{% if enable_thinking %}<think>{% endif %}", template_source="user")
+    assert result["model"]["reasoning"]["status"] == "unknown"
+    assert result["effective"]["reasoning"]["evidence"][0]["source"] == "user"
+
+
+def test_runtime_modalities_are_whitelisted_observations_not_template_content():
+    facts = adapters.runtime_observation(
+        {
+            "modalities": {"vision": True, "audio": False, "prompt": "private"},
+            "prompt": "private",
+        }
+    )
+    assert facts["capabilities"] == {"input_image": True, "input_audio": False}
+    assert "private" not in str(facts)
+    result = effective(
+        {"metadata": {}}, {"engine": "llama.cpp"}, {"config": {}}, observation=facts
+    )
+    assert result["model"]["input_image"]["status"] == "unknown"
+    assert result["effective"]["input_image"]["status"] == "supported"
+    assert result["effective"]["input_audio"]["status"] == "unsupported"
 
 
 def test_template_controls_are_distinct_and_named_templates_are_inspected():
@@ -142,3 +181,71 @@ async def test_preview_is_read_only_and_keeps_manual_declarations_unverified(tmp
         assert image["evidence"][-1]["source"] == "user"
     assert store.get("artifact", "model") == before
     assert store.list("profile") == []
+
+
+async def test_observed_preview_requires_matching_session_and_requested_configuration(
+    tmp_path,
+):
+    app = create_app(tmp_path / "state")
+    store = app.state.store
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        token = (await client.get("/api/status")).json()["csrf_token"]
+    store.put("artifact", {"id": "model", "metadata": {}})
+    store.put("runtime", {"id": "runtime", "engine": "llama.cpp"})
+    profile = {
+        "name": "Synthetic",
+        "artifact_id": "model",
+        "runtime_id": "runtime",
+        "config": {},
+        "raw_args": [],
+        "catalog": {},
+    }
+    deployment = store.put(
+        "deployment",
+        {
+            "id": "deployment",
+            "state": "READY",
+            "session_id": "session",
+            "profile_snapshot": profile,
+        },
+    )
+    store.put(
+        "runtime_observation",
+        {
+            "id": "deployment",
+            "session_id": "session",
+            "facts": {"capabilities": {"input_image": True}},
+        },
+        historical=False,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        headers = {"X-Menagerie-Token": token}
+        body = {"deployment_id": "deployment", "configuration": profile}
+        response = await client.post(
+            "/api/capabilities/preview", headers=headers, json=body
+        )
+        assert response.json()["effective"]["input_image"]["status"] == "supported"
+        body["configuration"] = profile | {"config": {"mmproj": "different-projector"}}
+        response = await client.post(
+            "/api/capabilities/preview", headers=headers, json=body
+        )
+        assert response.json()["effective"]["input_image"]["status"] == "unknown"
+        store.put(
+            "runtime_observation",
+            {
+                "id": "deployment",
+                "session_id": "previous-session",
+                "facts": {"capabilities": {"input_image": True}},
+            },
+            historical=False,
+        )
+        body["configuration"] = profile
+        response = await client.post(
+            "/api/capabilities/preview", headers=headers, json=body
+        )
+        assert response.json()["effective"]["input_image"]["status"] == "unknown"
+    assert store.get("deployment", "deployment") == deployment

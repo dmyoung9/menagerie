@@ -394,8 +394,25 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             {"template_override": body.template_override}, artifact, store
         )
         asset = selection.get("asset")
+        observed = None
+        if body.deployment_id:
+            deployment = store.get("deployment", body.deployment_id)
+            saved = deployment.get("profile_snapshot", {})
+            execution_keys = ("artifact_id", "runtime_id", "config", "raw_args")
+            if (
+                all(saved.get(key) == profile.get(key) for key in execution_keys)
+                and deployment.get("template_override") == body.template_override
+            ):
+                observed = runtime_protocol.observation(store, deployment)
         return effective(
-            artifact, runtime, profile, template=asset["content"] if asset else None
+            artifact,
+            runtime,
+            profile,
+            template=asset["content"] if asset else None,
+            template_source="user"
+            if asset and asset.get("kind") == "custom"
+            else "tokenizer",
+            observation=observed,
         )
 
     @app.get("/api/models/{ident}/templates")
