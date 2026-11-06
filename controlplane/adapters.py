@@ -13,6 +13,7 @@ from pathlib import Path
 import psutil
 
 from . import runtime_protocol, templates
+from .schema import ParameterPresentation
 
 FIELDS = {
     "mmproj": {"type": "string", "label": "Multimodal projector path"},
@@ -430,6 +431,50 @@ async def configuration_schema(runtime):
     return help_defaults(text, schema, runtime)
 
 
+def parameter_presentation(key, engine):
+    """Describe existing CLI fields without changing their values or ownership.
+
+    Native llama pools render these model-server options in each child's preset;
+    router policy is separate and must not be inferred from child option names.
+    """
+    generation = {
+        "temp",
+        "top-p",
+        "top-k",
+        "min-p",
+        "presence-penalty",
+        "repeat-penalty",
+        "reasoning-budget",
+    }
+    resources = {"ctx-size", "parallel", "fit", "device", "max-model-len"}
+    category = (
+        "generation"
+        if key in generation
+        else "resources-context"
+        if key in resources
+        else "model-runtime"
+        if key == "mmproj"
+        else "advanced"
+    )
+    automatic = (
+        {"ctx-size": 0, "parallel": -1, "gpu-layers": "auto", "flash-attn": "auto"}
+        if engine == "llama.cpp"
+        else {}
+    )
+    return ParameterPresentation(
+        category=category,
+        owner="runtime-process",
+        owner_by_mode={
+            "standalone": "runtime-process",
+            "native-pool": "model-deployment",
+        }
+        if engine == "llama.cpp"
+        else {},
+        request_overridable=key in generation - {"reasoning-budget"},
+        **({"automatic_value": automatic[key]} if key in automatic else {}),
+    ).model_dump(exclude_none=True)
+
+
 def option_schema(runtime, flags=None, help_text=None):
     flags = (
         flags if flags is not None else runtime.get("capabilities", {}).get("flags", [])
@@ -444,7 +489,12 @@ def option_schema(runtime, flags=None, help_text=None):
             if modern in flags
         }
         schema = {
-            k: v | {"restart_required": True, "description": OPTION_HELP.get(k, "")}
+            k: v
+            | {
+                "restart_required": True,
+                "description": OPTION_HELP.get(k, ""),
+                "presentation": parameter_presentation(k, runtime["engine"]),
+            }
             for k, v in FIELDS.items()
             if k in flags and k not in retired
         }
@@ -462,7 +512,7 @@ def option_schema(runtime, flags=None, help_text=None):
             ):
                 field["default"] = saved["default"]
         return help_defaults(help_text, schema, runtime) if help_text else schema
-    return (
+    schema = (
         {
             "max-model-len": {
                 "type": "integer",
@@ -481,6 +531,9 @@ def option_schema(runtime, flags=None, help_text=None):
         if runtime["engine"] == "vllm"
         else {}
     )
+    for key, field in schema.items():
+        field["presentation"] = parameter_presentation(key, runtime["engine"])
+    return schema
 
 
 def file_hash(path):

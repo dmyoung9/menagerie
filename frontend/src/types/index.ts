@@ -4,6 +4,35 @@ export type JsonValue =
 export type JsonObject = Record<string, JsonValue>;
 export type UnknownRecord = Record<string, unknown>;
 
+export type SupportStatus = 'supported' | 'unsupported' | 'unknown';
+export type CapabilityEvidence = {
+  source:
+    | 'artifact'
+    | 'tokenizer'
+    | 'model-card'
+    | 'runtime'
+    | 'inference-test'
+    | 'user';
+  detail: string;
+  confidence: 'high' | 'medium' | 'low';
+};
+export type Capability<T = JsonValue> = {
+  status: SupportStatus;
+  value?: T | null;
+  evidence: CapabilityEvidence[];
+};
+export type ParameterOwner =
+  'installation' | 'runtime-process' | 'model-deployment' | 'request-variant';
+export type ParameterPresentation = {
+  category: 'model-runtime' | 'resources-context' | 'generation' | 'advanced';
+  owner: ParameterOwner;
+  owner_by_mode?: Partial<Record<'standalone' | 'native-pool', ParameterOwner>>;
+  inheritable: boolean;
+  automatic_value?: string | number | boolean | null;
+  request_overridable: boolean;
+  provenance: 'adapter' | 'executable-help';
+};
+
 export type RuntimeField = {
   type?: string;
   label?: string;
@@ -19,6 +48,8 @@ export type RuntimeField = {
   choices?: string[];
   units?: string;
   cpu_only?: boolean;
+  restart_required?: boolean;
+  presentation?: ParameterPresentation;
 };
 
 export type ModelCapabilities = {

@@ -16,6 +16,51 @@ const maybeNumber = opt(d.nullable(d.number));
 const maybeString = opt(d.nullable(d.string));
 const unknownObject = d.record(d.unknown);
 
+export const capabilityEvidence = d.object<T.CapabilityEvidence>({
+  source: d.oneOf(
+    'artifact',
+    'tokenizer',
+    'model-card',
+    'runtime',
+    'inference-test',
+    'user',
+  ),
+  detail: d.string,
+  confidence: d.oneOf('high', 'medium', 'low'),
+});
+export const capability = d.object<T.Capability>({
+  status: d.oneOf('supported', 'unsupported', 'unknown'),
+  value: opt(jsonValue),
+  evidence: d.array(capabilityEvidence),
+});
+const parameterOwner = d.oneOf(
+  'installation',
+  'runtime-process',
+  'model-deployment',
+  'request-variant',
+);
+export const parameterPresentation = d.object<T.ParameterPresentation>({
+  category: d.oneOf(
+    'model-runtime',
+    'resources-context',
+    'generation',
+    'advanced',
+  ),
+  owner: parameterOwner,
+  owner_by_mode: opt(
+    d.object({
+      standalone: opt(parameterOwner),
+      'native-pool': opt(parameterOwner),
+    }),
+  ),
+  inheritable: d.boolean,
+  automatic_value: opt(
+    d.nullable(d.union(d.string, d.union(d.number, d.boolean))),
+  ),
+  request_overridable: d.boolean,
+  provenance: d.oneOf('adapter', 'executable-help'),
+});
+
 export const runtimeField = d.object<T.RuntimeField>({
   type: opt(d.string),
   label: opt(d.string),
@@ -31,6 +76,8 @@ export const runtimeField = d.object<T.RuntimeField>({
   choices: opt(stringArray),
   units: opt(d.string),
   cpu_only: opt(d.boolean),
+  restart_required: opt(d.boolean),
+  presentation: opt(parameterPresentation),
 });
 const reasoning = d.union(
   d.boolean,

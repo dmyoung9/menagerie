@@ -65,6 +65,38 @@ independent aliases/ports for reused weights, and inactive history restoration.
 See `tests/test_deployment_sets.py` and `tests/test_multi_configuration.py` for
 fake-runtime regression coverage, not live GPU acceptance.
 
+### Configuration presentation contracts
+
+Runtime option schemas expose additive `presentation` annotations: category,
+owner, mode-specific ownership, omission support, known explicit automatic values,
+request override support, and annotation provenance. These describe the adapter's
+CLI mapping; they are not claims of successful model or hardware verification.
+For llama.cpp, the existing model-server options are process startup settings in
+standalone mode and child-model preset settings in native-pool mode. Router
+policy (`max_loaded`, eviction consent and membership) remains owned by the pool,
+not by these child presets. Other engines do not inherit that pool mapping.
+
+Keep the following values separate:
+
+- **Unspecified/inherited:** the key is absent from `Profile.config`; do not
+  materialize schema defaults, recommendations, or observations when saving.
+- **Automatic:** an explicitly selected engine sentinel remains a saved value.
+  For llama.cpp, context `0` requests the engine's model-derived context,
+  parallel `-1` requests automatic slot selection, and GPU layers `auto` requests
+  automatic offloading. None is equivalent to omission or a guaranteed fit.
+- **Explicit:** retain concrete values, including zero and values equal to a
+  default. Removing an override removes the key rather than substituting null.
+- **Observed:** facts from the current runtime session remain operational
+  `runtime_observation` records, never configuration defaults or revisions.
+- **Estimated:** resource estimates remain advisory and are not requested or
+  observed allocations. Aggregate native-pool peaks remain pool-level facts.
+
+`Capability` and `CapabilityEvidence` define the shared structured finding
+contract, with supported/unsupported/unknown status and retained source evidence.
+They are a foundation for discovery integration, not a replacement for existing
+catalog declarations or a claim that the current hint endpoint resolves effective
+deployment support. Missing metadata must resolve to uncertainty, not rejection.
+
 ## Checks
 
 Prerequisites: Python 3.12+, uv, Node.js 22+, npm, and Git. Install dependencies

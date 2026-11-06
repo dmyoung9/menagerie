@@ -1,7 +1,42 @@
 import re
-from typing import Literal
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+SupportStatus = Literal["supported", "unsupported", "unknown"]
+ParameterOwner = Literal[
+    "installation", "runtime-process", "model-deployment", "request-variant"
+]
+CapabilityValue = TypeVar("CapabilityValue")
+
+
+class CapabilityEvidence(BaseModel):
+    source: Literal[
+        "artifact", "tokenizer", "model-card", "runtime", "inference-test", "user"
+    ]
+    detail: str
+    confidence: Literal["high", "medium", "low"]
+
+
+class Capability(BaseModel, Generic[CapabilityValue]):
+    status: SupportStatus = "unknown"
+    value: CapabilityValue | None = None
+    evidence: list[CapabilityEvidence] = Field(default_factory=list)
+
+
+class ParameterPresentation(BaseModel):
+    """Read-only schema annotations, never defaults to merge into a profile."""
+
+    category: Literal["model-runtime", "resources-context", "generation", "advanced"]
+    owner: ParameterOwner
+    owner_by_mode: dict[Literal["standalone", "native-pool"], ParameterOwner] = Field(
+        default_factory=dict
+    )
+    inheritable: bool = True
+    # Absence means no known explicit automatic sentinel, not unsupported auto-fit.
+    automatic_value: str | int | bool | None = None
+    request_overridable: bool = False
+    provenance: Literal["adapter", "executable-help"] = "adapter"
 
 
 class Record(BaseModel):
