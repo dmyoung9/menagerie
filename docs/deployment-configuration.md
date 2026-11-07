@@ -54,6 +54,10 @@ and automatic GPU offloading. These are different from omission and do not guara
 fit or performance. **Explicit override** saves a concrete value. Removing an override
 returns control to the engine, rather than sending a disabled value.
 
+An explicit context pool (`ctx-size`) is honored as that context even when parallel
+slots stay automatic; only a concrete positive slot count divides the pool.
+Removing the context override returns control to the engine default.
+
 Reported runtime settings are labeled **observed** and remain separate from the
 draft. They describe the loaded session, not what a future load must choose.
 Resource estimates are advisory, not allocations or launch reservations. Native

@@ -60,6 +60,23 @@ def test_automatic_sizing_never_becomes_zero_or_negative_client_capacity(config)
     assert profile == before
 
 
+@pytest.mark.parametrize(
+    "config, expected",
+    [
+        ({}, 4096),
+        ({"ctx-size": 0, "parallel": -1}, 4096),
+        ({"max-model-len": 32768}, 32768),
+        ({"ctx-size": 32768, "parallel": -1}, 32768),
+        ({"ctx-size": 32768}, 32768),
+        ({"ctx-size": 32768, "parallel": 2}, 16384),
+    ],
+)
+def test_explicit_context_is_honored_instead_of_falling_back(config, expected):
+    profile = {"name": "Synthetic", "config": config, "catalog": {}}
+    assert normalize(profile)["model"]["limit"]["context"] == expected
+    assert normalize(profile)["model"]["limit"]["output"] == min(1024, expected)
+
+
 def test_capabilities_preserve_unknown_and_conflicting_evidence():
     assert Capability[bool]().status == "unknown"
     finding = Capability[bool](

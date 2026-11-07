@@ -161,11 +161,11 @@ def normalize(profile, alias=None):
     context = config.get("max-model-len")
     if "ctx-size" in config:
         pool, slots = config["ctx-size"], config.get("parallel")
-        context = (
-            pool // slots
-            if type(pool) is int and pool > 0 and type(slots) is int and slots > 0
-            else None
-        )
+        if type(pool) is int and pool > 0:
+            # An explicit context pool is an owner request. Automatic slots
+            # cannot divide it, so the pool itself is the context; only a
+            # concrete positive slot count splits the pool.
+            context = pool // slots if type(slots) is int and slots > 0 else pool
     if type(context) is not int or context <= 0:
         context = limits.get("context", 4096)
     if type(context) is not int or context <= 0:
