@@ -95,7 +95,7 @@ def test_executable_defaults_are_scoped_wrapped_and_backend_specific():
         "reasoning-budget",
     ]
     runtime = {
-        "engine": "prism",
+        "engine": "llama.cpp",
         "managed": {"backend": "cuda"},
         "capabilities": {"flags": flags},
     }
@@ -109,9 +109,7 @@ def test_executable_defaults_are_scoped_wrapped_and_backend_specific():
     assert schema["ctx-size"]["engine_default"] == 0
     assert schema["reasoning-budget"]["engine_default"] == -1
     assert "engine_default" not in schema["top-k"]
-    assert (
-        schema["threads"]["default"] == 6
-    )  # historical policy is not silently rewritten
+    assert schema["threads"]["default"] == -1
     assert (
         adapters.option_schema(
             runtime | {"managed": {"backend": "cpu"}}, flags, HELP_DEFAULTS
@@ -146,6 +144,8 @@ async def test_engine_help_defaults_are_cached_without_mutating_runtime(
 ):
     app = create_app(tmp_path / "state")
     store = app.state.store
+    executable = tmp_path / "synthetic-engine"
+    executable.write_text("synthetic executable; never run")
     runtime = store.put(
         "runtime",
         {
@@ -153,7 +153,7 @@ async def test_engine_help_defaults_are_cached_without_mutating_runtime(
             "engine": "llama.cpp",
             "execution_kind": "native",
             "trust": True,
-            "executable": "/engines/fake",
+            "executable": str(executable),
             "capabilities": {"flags": ["temp", "spec-draft-n-max"]},
         },
     )
@@ -172,7 +172,7 @@ async def test_engine_help_defaults_are_cached_without_mutating_runtime(
                 response = await client.get("/api/runtimes/engine/capabilities")
                 assert response.status_code == 200
                 assert response.json()["schema"]["temp"]["engine_default"] == 0.8
-        assert calls == [["/engines/fake", "--help"]]
+        assert calls == [[str(executable), "--help"]]
         assert store.get("runtime", "engine") == runtime
     finally:
         await app.state.manager.close()

@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, openIdentity } from './fixtures';
 import AxeBuilder from '@axe-core/playwright';
 
 test('configuration is inline, guards navigation and saves with the expected revision', async ({
@@ -11,6 +11,7 @@ test('configuration is inline, guards navigation and saves with the expected rev
     page.getByRole('button', { name: 'Edit', exact: true }),
   ).toHaveCount(0);
   const name = page.getByLabel('Display name', { exact: true });
+  await openIdentity(page);
   await name.fill('Changed name');
   await page.getByRole('button', { name: 'Activity', exact: true }).click();
   const confirm = page.getByRole('alertdialog');
@@ -27,7 +28,7 @@ test('configuration is inline, guards navigation and saves with the expected rev
   await expect(
     page.getByRole('heading', { name: 'Changed name', exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Advanced', exact: true }).click();
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
   await expect(confirm).toBeHidden();
 });
 

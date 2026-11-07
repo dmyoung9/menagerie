@@ -38,6 +38,14 @@ workflow actually exercised. Fake runtimes and intercepted APIs cannot establish
 GPU compatibility, memory fit, thermal safety, context limits, or model quality.
 Upstream release discovery does not certify newly discovered builds.
 
+For 3.0 configuration/capability intelligence, execute every scenario in the
+[release hardware matrix](releases/3.0.0.md#hardware-acceptance-status): upstream
+llama.cpp, a Prism-compatible executable, reasoning, multimodal projector/input,
+native routing/residency/eviction/resource attribution, unknown-feature recovery,
+and existing vLLM supervised behavior. Record GPU and CPU combinations separately.
+Keep unexecuted combinations marked unverified; metadata and intercepted-browser
+results must never be promoted to hardware acceptance.
+
 Windows delivery additionally needs a clean Windows 11 installation without
 developer prerequisites and an authorized RTX 5060 acceptance run. Capture exact
 OS, application, driver, engine/backend and model versions, plus sanitized results

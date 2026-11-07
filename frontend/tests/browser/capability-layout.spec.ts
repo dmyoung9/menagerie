@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect } from './fixtures';
+import { test, expect, openCard, openIdentity } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 
 for (const width of [1440, 576, 320]) {
@@ -34,6 +34,9 @@ for (const width of [1440, 576, 320]) {
     });
     const original = structuredClone(catalog.reasoning);
     await page.goto('/#/deployments/idle/configuration');
+    await openCard(page, 'model');
+    await openCard(page, 'variants');
+    await openIdentity(page);
     const panel = page.getByRole('region', {
       name: 'Modalities and capabilities',
       exact: true,
@@ -133,6 +136,7 @@ test('variants can be edited, enabled and selected as default while Reasoning st
     },
   };
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'variants');
   const section = page.getByRole('region', { name: 'Variants', exact: true });
   await section
     .getByRole('button', { name: 'Ultra variant actions', exact: true })
@@ -150,8 +154,8 @@ test('variants can be edited, enabled and selected as default while Reasoning st
   await section
     .getByRole('switch', { name: 'Enable Ultra variant', exact: true })
     .check();
-  await section
-    .getByLabel('Default variant', { exact: true })
+  await page
+    .getByLabel('Default reasoning level', { exact: true })
     .selectOption('ultra');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect

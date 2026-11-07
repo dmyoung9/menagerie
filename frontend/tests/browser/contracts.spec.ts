@@ -59,8 +59,7 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
   });
   await page.goto('/#/deployments/idle/configuration');
   const dialog = page.locator('main');
-  await dialog.getByText('Advanced model settings', { exact: true }).click();
-  await dialog.getByText('Engine arguments', { exact: true }).click();
+  await dialog.locator('[data-settings-section="diagnostics"] summary').click();
   const args = dialog.getByRole('textbox', {
     name: 'Engine arguments',
     exact: true,

@@ -29,15 +29,60 @@ import {
 import { VariantDrawer } from './VariantDrawer';
 import type { ModelCatalog, ReasoningPreset } from './types';
 
-export function Variants({
+export function DefaultReasoning({
   catalog,
   change,
 }: {
   catalog: ModelCatalog;
   change: (catalog: ModelCatalog) => void;
 }) {
+  const saved = reasoningOptions(catalog);
+  return (
+    <Field
+      label="Default reasoning level"
+      hint="What a request gets unless it asks for a specific level."
+    >
+      <NativeSelect
+        aria-label="Default reasoning level"
+        value={catalog.reasoning?.default_mode || ''}
+        onChange={(e) => {
+          const next = setReasoningOptions(catalog, reasoningLevels(catalog));
+          next.reasoning.default_mode = e.target.value || null;
+          change(next);
+        }}
+      >
+        <NativeSelectOption value="">
+          Model default (no overrides)
+        </NativeSelectOption>
+        {saved.map((mode) => (
+          <NativeSelectOption key={mode.id} value={mode.id}>
+            {modeLabel(mode)}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+    </Field>
+  );
+}
+
+export function Variants({
+  catalog,
+  change,
+  collapsible = false,
+  showDefault = true,
+  hidden = false,
+}: {
+  catalog: ModelCatalog;
+  change: (catalog: ModelCatalog) => void;
+  collapsible?: boolean;
+  showDefault?: boolean;
+  hidden?: boolean;
+}) {
   const levels = reasoningLevels(catalog);
   const saved = reasoningOptions(catalog);
+  const defaultMode = levels.find(
+    (mode) => mode.id === catalog.reasoning?.default_mode,
+  );
+  const summary = `${defaultMode ? modeLabel(defaultMode) : 'Model default'} · ${levels.length} levels`;
   const [editing, setEditing] = useState<ReasoningPreset | null>(null);
   const [adding, setAdding] = useState(false);
   const [announcement, setAnnouncement] = useState('');
@@ -74,6 +119,10 @@ export function Variants({
     <SettingsSection
       name="variants"
       title="Variants"
+      collapsible={collapsible}
+      defaultOpen={!collapsible}
+      hidden={hidden}
+      summary={collapsible ? summary : undefined}
       action={
         <Button
           type="button"
@@ -95,25 +144,7 @@ export function Variants({
         </Button>
       }
     >
-      <Field label="Default variant">
-        <NativeSelect
-          value={catalog.reasoning?.default_mode || ''}
-          onChange={(e) => {
-            const next = setReasoningOptions(catalog, levels);
-            next.reasoning.default_mode = e.target.value || null;
-            change(next);
-          }}
-        >
-          <NativeSelectOption value="">
-            Model default (no overrides)
-          </NativeSelectOption>
-          {saved.map((mode) => (
-            <NativeSelectOption key={mode.id} value={mode.id}>
-              {modeLabel(mode)}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </Field>
+      {showDefault && <DefaultReasoning catalog={catalog} change={change} />}
       <ItemGroup aria-label="Variants">
         {levels.map((mode, index) => (
           <Item

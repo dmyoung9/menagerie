@@ -6,10 +6,11 @@ def test_artifact_specific_recommendations():
         recommend({"format": "gguf", "name": "Ternary-Bonsai-2-27B-PTQ1_0.gguf"})[
             "engine"
         ]
-        == "prism"
+        == "llama.cpp"
     )
     assert (
-        recommend({"format": "gguf", "name": "model-PQ2_0.gguf"})["engine"] == "prism"
+        recommend({"format": "gguf", "name": "model-PQ2_0.gguf"})["engine"]
+        == "llama.cpp"
     )
     assert (
         recommend({"format": "gguf", "name": "model-Q4_K_M.gguf"})["engine"]

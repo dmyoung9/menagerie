@@ -1,11 +1,35 @@
 # Multi-model deployments
 
+## Native runtime pools
+
+In Availability, choose **Runtime — native model pool** to delegate model routing
+and residency to a compatible native runtime. All members must share one installed
+runtime and device visibility. This mode is on-demand: starting the pool starts a
+router, not every model. Each model loads when requested. The router uses the
+first member's private port; the remaining member ports are retained configuration
+identities, not additional listeners. Stopping stops the entire pool.
+
+Eviction consent enables pool-local LRU limits and supported device-memory margin
+unloading. Without consent, those automatic eviction limits are disabled. Idle
+sleep still follows the pool's configured timeout when the runtime supports it.
+Use coordinated processes for pinned models or atomic model residency. Native
+pools currently support native llama.cpp-compatible builds, not containers or
+other runtime protocols. See [runtime behavior and limitations](releases/3.0.0.md).
+
+Use **Shared installed engine** and the shared GPU visibility control to change
+process settings for all pool members. Member engine selectors are read-only in
+this mode. Shared device changes preserve each member's API alias and private
+port. Model-server options remain child-preset settings; router limits, eviction
+consent and residency are pool-owned. Router settings cannot be independently
+inserted into member configuration JSON. Resource estimates are not individual
+shares of the aggregate pool process allocation.
+
 A serving deployment owns one or more models. Each member keeps its own API alias,
 runtime, configuration snapshot, port, process log, and session history. Loading mode,
 priority, idle timeout, client availability, and eviction
 permission belong to the deployment.
 
-## Operation
+## Coordinated-process operation
 
 - A request to either alias in an on-demand deployment loads all its members before
   admitting the request. Concurrent cold requests are serialized through admission;

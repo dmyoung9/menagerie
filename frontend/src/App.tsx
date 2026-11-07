@@ -118,19 +118,29 @@ function MainNavigation({
 const titleCase = (s: string) =>
   s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 function useRoute() {
-  const readRoute = () =>
-    window.location.hash.slice(2).split('?')[0].split('/');
+  const readRoute = () => {
+    const parts = window.location.hash.slice(2).split('?')[0].split('/');
+    // The retired Advanced tab now lives inside Configuration cards.
+    if (parts[0] === 'deployments' && parts[2] === 'advanced') {
+      parts[2] = 'configuration';
+      window.history.replaceState(
+        null,
+        '',
+        window.location.hash.replace('/advanced', '/configuration'),
+      );
+    }
+    return parts;
+  };
   const [route, setRoute] = useState(() => readRoute());
   useEffect(() => {
     let previous = window.location.hash,
       pending = false;
     const change = async () => {
       if (pending) return;
-      const next = window.location.hash;
       pending = true;
       if (await canNavigate()) {
-        previous = next;
         setRoute(readRoute());
+        previous = window.location.hash;
       } else window.history.replaceState(null, '', previous || '#/overview');
       pending = false;
     };
@@ -791,7 +801,6 @@ export default function App() {
                         tab={
                           [
                             'configuration',
-                            'advanced',
                             'requests',
                             'policy',
                             'activity',
@@ -813,7 +822,6 @@ export default function App() {
                         tab={
                           [
                             'configuration',
-                            'advanced',
                             'requests',
                             'activity',
                             'logs',
@@ -1134,7 +1142,11 @@ export default function App() {
               <>
                 <p>
                   Unloads every model in this deployment and discards its KV
-                  caches. Active requests finish first.
+                  caches. Active requests finish first.{' '}
+                  {'members' in modal.row && modal.row.members.length > 1
+                    ? 'Sibling models remain available so dependent work can finish.'
+                    : 'New requests are paused while waiting.'}{' '}
+                  To interrupt generation, choose Cancel requests and unload.
                 </p>
                 {modal.row.residency === 'on-demand' && (
                   <p className="muted">
@@ -1149,6 +1161,22 @@ export default function App() {
                     onClick={close}
                   >
                     Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void perform(
+                        () =>
+                          api(`/api/${modal.kind}/${modal.row.id}/stop`, {
+                            cancel_requests: true,
+                          }),
+                        'Cancelling requests and unloading',
+                      )
+                    }
+                  >
+                    Cancel requests and unload
                   </Button>
                   <Button
                     variant="destructive"

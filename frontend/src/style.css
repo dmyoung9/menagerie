@@ -733,12 +733,169 @@ meter::-moz-meter-bar {
 .configuration-editor > fieldset {
   gap: 20px;
 }
-.configuration-jumps {
+.configuration-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+.configuration-toolbar > [data-slot='field'] {
+  flex: 1;
+  margin-bottom: 0;
+}
+.configuration-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  grid-column: 1;
+}
+.configuration-grid > .settings-card {
+  min-width: 0;
+  container-type: inline-size;
+}
+.configuration-grid .settings-card [data-slot='field-group'].grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+@container (min-width: 440px) {
+  .configuration-grid .settings-card [data-slot='field-group'].grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.settings-card > [data-slot='card']:has(> .settings-disclosure) {
+  padding-block: 0;
+}
+.settings-disclosure {
+  margin: 0;
+}
+.settings-disclosure[open] > [data-slot='card-content'] {
+  padding-bottom: 16px;
+}
+.settings-disclosure[open] > summary,
+.card-advanced[open] > summary {
+  margin-bottom: 0;
+}
+.configuration-card-wide {
+  grid-column: 1 / -1;
+}
+@media (min-width: 1200px) {
+  .configuration-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 1199px) {
+  .configuration-editor.resource-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.settings-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.settings-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.settings-disclosure-chevron,
+.card-advanced-chevron {
+  flex-shrink: 0;
+  transition: transform 150ms ease;
+}
+.settings-disclosure[open] > summary .settings-disclosure-chevron,
+.card-advanced[open] > summary .card-advanced-chevron {
+  transform: rotate(90deg);
+}
+.settings-disclosure-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.settings-disclosure-note {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.settings-disclosure-description {
+  padding: 0 16px 8px;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+.settings-disclosure-actions {
+  padding: 0 16px 8px;
+}
+.card-advanced {
+  margin: 16px 0 0;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.card-advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  list-style: none;
+}
+.card-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.card-advanced-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.card-advanced-content h4 {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.preset-row {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  grid-column: 1 / -1;
-  margin-bottom: 0;
+}
+.exact-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.exact-control > * {
+  min-width: 0;
+  flex: 1;
+}
+.unsupported-overrides {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 0;
+  list-style: none;
+}
+.unsupported-overrides li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.json-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.json-inline h4 {
+  font-size: 12px;
+  font-weight: 600;
+}
+.flag-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 .configuration-save-bar {
   position: sticky;
@@ -780,8 +937,6 @@ meter::-moz-meter-bar {
   .configuration-resources {
     position: sticky;
     top: 20px;
-    max-height: calc(100dvh - 100px);
-    overflow-y: auto;
   }
 }
 .draft-resources small,
@@ -815,8 +970,6 @@ meter::-moz-meter-bar {
   .resource-editor > .draft-resources {
     position: sticky;
     top: 0;
-    max-height: calc(100dvh - 180px);
-    overflow: auto;
     margin-top: 0;
   }
   .resource-editor > .dialog-actions {

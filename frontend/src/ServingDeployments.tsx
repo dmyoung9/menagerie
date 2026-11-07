@@ -68,19 +68,17 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { SettingsSection } from '@/components/settings-section';
+import { CardAdvanced } from '@/components/card-advanced';
 import { readApi } from './ui';
 import * as contracts from './contracts';
-import { artifactLimits } from './artifact-metadata';
 import type {
   Deployment,
   DeploymentActions,
   DeploymentDraft,
   DeploymentSet,
   DeploymentSetDraft,
-  GpuSnapshot,
   HostSnapshot,
   OperationEvent,
-  RuntimeField,
   ServingDeployment,
 } from './types';
 
@@ -326,6 +324,8 @@ export function DeploymentSetEditor({
   } = useDraftForm<DeploymentSetDraft>(
     {
       name: 'New deployment',
+      engine_pool: false,
+      max_loaded: 4,
       residency: 'on-demand',
       priority: 50,
       idle_timeout: 300,
@@ -336,6 +336,8 @@ export function DeploymentSetEditor({
         ? {
             id: initial.id,
             name: initial.name,
+            engine_pool: initial.engine_pool ?? false,
+            max_loaded: initial.max_loaded ?? 4,
             residency: initial.residency || 'on-demand',
             priority: initial.priority ?? 50,
             idle_timeout: initial.idle_timeout ?? 300,
@@ -375,6 +377,26 @@ export function DeploymentSetEditor({
       ...v,
       members: v.members.map((m, i) => (i === index ? { ...m, ...change } : m)),
     }));
+  const idleMinutes =
+    value.idle_timeout && value.idle_timeout % 60 === 0
+      ? value.idle_timeout / 60
+      : undefined;
+  const sharedPolicy = [
+    value.residency === 'pinned'
+      ? 'Pinned'
+      : value.residency === 'evictable'
+        ? 'Evictable'
+        : 'On demand',
+    `priority ${value.priority}`,
+    value.residency === 'on-demand'
+      ? value.idle_timeout
+        ? `unload after ${idleMinutes ? `${idleMinutes} min` : `${value.idle_timeout}s`} idle`
+        : 'never unload'
+      : 'always resident',
+    value.allow_eviction ? 'may unload for others' : 'no eviction',
+    `queue ${value.queue_timeout}s`,
+    value.enabled ? 'enabled for clients' : 'disabled for clients',
+  ].join(' · ');
   async function addModel() {
     const model = data.models?.find((m) => m.id === artifactId);
     if (!model) {
@@ -400,7 +422,16 @@ export function DeploymentSetEditor({
         r.capabilities?.formats?.includes(model.format),
     );
     const runtime =
-      compatible.find((r) => r.engine === recommended) || compatible[0];
+      value.engine_pool && value.members.length
+        ? compatible.find(
+            (r) => r.id === value.members[0].configuration?.runtime_id,
+          )
+        : compatible.find((r) => r.engine === recommended) || compatible[0];
+    if (value.engine_pool && value.members.length && !runtime) {
+      setError('This model is incompatible with the shared pool engine.');
+      setBusy(false);
+      return;
+    }
     const used = [...(data.deployments || []), ...value.members];
     const slug = (text: string) =>
       text
@@ -420,41 +451,13 @@ export function DeploymentSetEditor({
       setBusy(false);
       return;
     }
-    const schema: Record<string, RuntimeField> =
-      runtime?.capabilities?.schema || {};
     const config: Record<string, import('./types').JsonValue> = {};
-    for (const [key, field] of Object.entries(schema)) {
-      if (field.default === undefined) continue;
-      config[key] =
-        ['threads', 'threads-batch'].includes(key) &&
-        typeof field.default === 'number' &&
-        data.host[0]?.cpu_count
-          ? Math.min(field.default, data.host[0].cpu_count)
-          : field.default;
-    }
-    if (runtime?.managed?.backend === 'cpu') config['gpu-layers'] = '0';
-    const { context: modelContext } = artifactLimits(model);
-    if (modelContext)
-      for (const key of ['ctx-size', 'max-model-len'])
-        if (typeof config[key] === 'number')
-          config[key] = Math.min(config[key], modelContext);
-    const gpus = data.host?.[0]?.gpus || [];
-    const gpu =
-      [...gpus].sort(
-        (a: GpuSnapshot, b: GpuSnapshot) =>
-          (b.free_mib ?? 0) -
-          (preview.data?.gpus?.find((g) => g.index === b.index)?.draft_mib ||
-            0) -
-          ((a.free_mib ?? 0) -
-            (preview.data?.gpus?.find((g) => g.index === a.index)?.draft_mib ||
-              0)),
-      )[0]?.index ?? 0;
     const member: DeploymentDraft = {
       ...defaults.deployments,
       name: model.name,
       alias,
       port,
-      gpu,
+      gpu: null,
       configuration: {
         name: model.name,
         artifact_id: model.id,
@@ -467,51 +470,15 @@ export function DeploymentSetEditor({
     set('members', [...value.members, member]);
     setSelected(value.members.length);
     setError('');
-    setBusy(true);
-    try {
-      if (!runtime) return;
-      const budget = await readApi(
-        '/api/resources/preview',
-        contracts.resourcePreview,
-        {
-          members: [...value.members, member],
-        },
-      );
-      const rec = budget.members.at(-1)?.recommendation;
-      const contextKey = rec?.context_key;
-      const contextDefault = rec?.context_default;
-      if (typeof contextDefault === 'number' && contextKey)
-        setValue((v) => ({
-          ...v,
-          members: v.members.map((m) =>
-            m.port === port &&
-            m.configuration &&
-            JSON.stringify(m.configuration?.config) === JSON.stringify(config)
-              ? {
-                  ...m,
-                  configuration: {
-                    ...m.configuration,
-                    config: {
-                      ...config,
-                      [contextKey]: contextDefault,
-                    },
-                  },
-                }
-              : m,
-          ),
-        }));
-    } catch {
-      /* Keep engine defaults when telemetry/preview is unavailable; the preview explains the gap. */
-    } finally {
-      setBusy(false);
-    }
+    setBusy(false);
   }
   const submit = async (value: DeploymentSetDraft) => {
     if (busy || Object.values(invalid).some(Boolean)) return;
     setBusy(true);
     setError('');
     try {
-      const single = !initial && value.members.length === 1;
+      const single =
+        !initial && value.members.length === 1 && !value.engine_pool;
       const path =
         (single ? '/api/deployments' : '/api/deployment-sets') +
         (initial ? '?expected=' + initial.revision : '');
@@ -627,6 +594,11 @@ export function DeploymentSetEditor({
                   key={m.id || m.port}
                 >
                   <h3>{m.name}</h3>
+                  <p className="text-muted-foreground text-sm">
+                    Shared policy: {sharedPolicy}. Loading policy, priority,
+                    idle unload, eviction and the queue timeout belong to this
+                    deployment set; edit them once in Availability.
+                  </p>
                   <Field label="Model display name">
                     <Input
                       required
@@ -653,52 +625,67 @@ export function DeploymentSetEditor({
                       </small>
                     )}
                   </Field>
-                  <ConfigurationFields
-                    formPath={`members[${index}].configuration.config`}
-                    value={m.configuration!}
-                    data={data}
-                    set={(configuration) =>
-                      updateMember(index, { configuration })
-                    }
-                    onValid={(valid) =>
-                      setInvalid((v) => ({ ...v, [m.id || m.port]: !valid }))
-                    }
-                    recommendation={
-                      preview.data?.members?.[index]?.recommendation
-                    }
-                    modelFields={
-                      m.configuration && (
-                        <ChatTemplateSettings
-                          label="Chat template"
-                          model={data.models.find(
-                            (x) => x.id === m.configuration?.artifact_id,
-                          )}
-                          override={m.template_override || null}
-                          onChange={(selection) =>
-                            updateMember(index, {
-                              template_override: selection,
-                            })
-                          }
-                        />
-                      )
-                    }
-                    placementFields={
-                      <Placement
-                        part="gpu"
-                        value={m}
-                        change={(v) => updateMember(index, v)}
-                        host={data.host?.[0]}
-                      />
-                    }
-                  />
-                  <SettingsSection name="network" title="Networking">
-                    <Placement
-                      part="network"
-                      value={m}
-                      change={(v) => updateMember(index, v)}
-                      host={data.host?.[0]}
+                  <div className="configuration-grid">
+                    <ConfigurationFields
+                      formPath={`members[${index}].configuration.config`}
+                      value={m.configuration!}
+                      deploymentId={m.id}
+                      templateOverride={m.template_override}
+                      runtimeLocked={Boolean(value.engine_pool)}
+                      observed={
+                        data.deployments?.find((entry) => entry.id === m.id)
+                          ?.runtime_observation?.resolved
+                      }
+                      observedAt={
+                        data.deployments?.find((entry) => entry.id === m.id)
+                          ?.runtime_observation?.observed_at
+                      }
+                      data={data}
+                      set={(configuration) =>
+                        updateMember(index, { configuration })
+                      }
+                      onValid={(valid) =>
+                        setInvalid((v) => ({ ...v, [m.id || m.port]: !valid }))
+                      }
+                      recommendation={
+                        preview.data?.members?.[index]?.recommendation
+                      }
+                      modelFields={
+                        m.configuration && (
+                          <ChatTemplateSettings
+                            label="Chat template"
+                            model={data.models.find(
+                              (x) => x.id === m.configuration?.artifact_id,
+                            )}
+                            override={m.template_override || null}
+                            onChange={(selection) =>
+                              updateMember(index, {
+                                template_override: selection,
+                              })
+                            }
+                          />
+                        )
+                      }
+                      placementFields={
+                        value.engine_pool ? (
+                          <p className="text-muted-foreground text-sm">
+                            Process visibility is shared by all{' '}
+                            {value.members.length} pool members. Edit shared
+                            devices in Availability. Model-server options below
+                            belong to this child preset; native routing and
+                            residency remain pool-controlled.
+                          </p>
+                        ) : (
+                          <Placement
+                            part="gpu"
+                            value={m}
+                            change={(v) => updateMember(index, v)}
+                            host={data.host?.[0]}
+                          />
+                        )
+                      }
                     />
-                  </SettingsSection>
+                  </div>
                   <Button
                     variant="destructive"
                     type="button"
@@ -723,10 +710,116 @@ export function DeploymentSetEditor({
                 </section>
               ))}
             </FieldSet>
-            <SettingsSection name="lifecycle" title="Lifecycle">
+            <SettingsSection name="lifecycle" title="Availability">
+              {value.engine_pool && (
+                <>
+                  <p className="text-muted-foreground text-sm">
+                    Shared engine, device visibility, loading policy and
+                    resident-model limit affect every pool member. Resource
+                    estimates are per-model advice, not individual shares of the
+                    pool process allocation. Unload the entire pool before
+                    editing.
+                  </p>
+                  <Field label="Shared installed engine">
+                    <NativeSelect
+                      value={value.members[0]?.configuration?.runtime_id || ''}
+                      onChange={async (e) => {
+                        const runtimeId = e.target.value;
+                        if (
+                          !(await confirm(
+                            'Change the shared engine? Engine-specific options for every pool member will be reset.',
+                          ))
+                        )
+                          return;
+                        setValue((previous) => ({
+                          ...previous,
+                          members: previous.members.map((member) => ({
+                            ...member,
+                            configuration: member.configuration
+                              ? {
+                                  ...member.configuration,
+                                  runtime_id: runtimeId,
+                                  config: {},
+                                  raw_args: [],
+                                }
+                              : undefined,
+                          })),
+                        }));
+                      }}
+                    >
+                      {data.runtimes
+                        .filter(
+                          (runtime) =>
+                            runtime.id ===
+                              value.members[0]?.configuration?.runtime_id ||
+                            (runtime.execution_kind === 'native' &&
+                              runtime.engine === 'llama.cpp' &&
+                              runtime.capabilities?.flags?.includes(
+                                'models-preset',
+                              )),
+                        )
+                        .map((runtime) => (
+                          <NativeSelectOption
+                            key={runtime.id}
+                            value={runtime.id}
+                          >
+                            {runtime.name}
+                          </NativeSelectOption>
+                        ))}
+                    </NativeSelect>
+                  </Field>
+                  {value.members[0] && (
+                    <Placement
+                      part="gpu"
+                      value={value.members[0]}
+                      host={data.host?.[0]}
+                      change={(placement) =>
+                        setValue((previous) => ({
+                          ...previous,
+                          members: previous.members.map((member) => ({
+                            ...member,
+                            gpu: placement.gpu,
+                          })),
+                        }))
+                      }
+                    />
+                  )}
+                </>
+              )}
+              <Field
+                label="Lifecycle owner"
+                hint="Runtime pools share one native router and load models independently on request. Pinned and atomic groups use supervised processes. Pools require one compatible native runtime and shared device visibility."
+              >
+                <NativeSelect
+                  value={value.engine_pool ? 'runtime' : 'supervisor'}
+                  onChange={(e) => {
+                    set('engine_pool', e.target.value === 'runtime');
+                    if (e.target.value === 'runtime')
+                      set('residency', 'on-demand');
+                  }}
+                >
+                  <NativeSelectOption value="supervisor">
+                    Menagerie — coordinated processes
+                  </NativeSelectOption>
+                  <NativeSelectOption value="runtime">
+                    Runtime — native model pool
+                  </NativeSelectOption>
+                </NativeSelect>
+              </Field>
+              {value.engine_pool && value.allow_eviction && (
+                <Field label="Maximum resident models">
+                  <NumberControl
+                    label="Maximum resident models"
+                    min={1}
+                    max={128}
+                    value={value.max_loaded ?? 4}
+                    change={(v) => set('max_loaded', v ?? 4)}
+                  />
+                </Field>
+              )}
               <Field label="Mode">
                 <Select
-                  disabled={busy}
+                  disabled={busy || value.engine_pool}
                   items={[
                     { value: 'on-demand', label: 'On demand' },
                     { value: 'pinned', label: 'Pinned' },
@@ -777,9 +870,11 @@ export function DeploymentSetEditor({
                     change={(v) => set('priority', v ?? 0)}
                   />
                 </Field>
-                <Field label="Switch timeout (seconds)">
+              </FieldGroup>
+              <CardAdvanced title="Advanced availability">
+                <Field label="Queue timeout (seconds)">
                   <NumberControl
-                    label="Switch timeout (seconds)"
+                    label="Queue timeout (seconds)"
                     required
                     min={1}
                     max={1800}
@@ -787,7 +882,19 @@ export function DeploymentSetEditor({
                     change={(v) => set('queue_timeout', v ?? 0)}
                   />
                 </Field>
-              </FieldGroup>
+                {!value.engine_pool &&
+                  value.members.map((member, index) => (
+                    <FieldSet key={member.id || member.port}>
+                      <FieldLegend>{member.name} endpoint</FieldLegend>
+                      <Placement
+                        part="network"
+                        value={member}
+                        change={(placement) => updateMember(index, placement)}
+                        host={data.host?.[0]}
+                      />
+                    </FieldSet>
+                  ))}
+              </CardAdvanced>
               <label className="check">
                 <Switch
                   disabled={busy}
@@ -801,6 +908,14 @@ export function DeploymentSetEditor({
           {value.members.length > 0 && (
             <DraftResources preview={preview.data} error={preview.error} />
           )}
+          <details className="card-advanced">
+            <summary className="card-advanced-summary">
+              Raw deployment set
+            </summary>
+            <div className="card-advanced-content">
+              <Json value={value} />
+            </div>
+          </details>
           <div className="dialog-actions configuration-save-bar">
             <span className="muted" role="status">
               {changed ? 'Unsaved changes' : 'All changes saved'}
@@ -971,14 +1086,7 @@ export function MultiDeploymentDetail({
         </Alert>
       )}
       <Tabs
-        items={[
-          'Models',
-          'Configuration',
-          'Advanced',
-          'Activity',
-          'Requests',
-          'Logs',
-        ]}
+        items={['Models', 'Configuration', 'Activity', 'Requests', 'Logs']}
         value={tab}
         onChange={(t) => go(`deployments/${d.id}/${t.toLowerCase()}`)}
       />
@@ -997,13 +1105,6 @@ export function MultiDeploymentDetail({
             />
           )}
         </>
-      )}
-      {tab === 'Advanced' && (
-        <Card>
-          <CardContent>
-            <Json value={d} />
-          </CardContent>
-        </Card>
       )}
       {tab === 'Requests' && (
         <RequestHistory deploymentId={d.id} deployments={data.deployments} />

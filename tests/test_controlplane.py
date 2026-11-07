@@ -397,6 +397,9 @@ async def test_ui_revision_guard_and_model_catalog_contract(tmp_path):
 
 async def test_on_demand_idle_unload_and_reload(store, tmp_path, monkeypatch):
     await seed(store, tmp_path)
+    runtime = store.get("runtime", "runtime")
+    runtime["capabilities"]["mechanisms"]["native_idle_sleep"] = False
+    store.put("runtime", runtime)
     d = store.get("deployment", "a")
     store.put("deployment", d | {"residency": "on-demand", "idle_timeout": 1})
     m = Manager(store)

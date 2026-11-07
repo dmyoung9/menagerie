@@ -495,16 +495,12 @@ export function SourceBuild({
             <NativeSelect
               value={value.engine}
               onChange={(e) => {
-                if (
-                  e.target.value !== 'llama.cpp' &&
-                  e.target.value !== 'prism'
-                )
-                  return;
+                if (e.target.value !== 'llama.cpp') return;
                 setValue({ ...value, engine: e.target.value });
                 setPlan(null);
               }}
             >
-              {['llama.cpp', 'prism'].map((v) => (
+              {['llama.cpp'].map((v) => (
                 <NativeSelectOption key={v}>{v}</NativeSelectOption>
               ))}
             </NativeSelect>

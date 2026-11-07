@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect } from './fixtures';
+import { test, expect, openIdentity, openCard } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 import { defaultReasoningOptions } from '../../src/capabilityOptions';
 import type { ModelCatalog } from '../../src/types';
@@ -26,6 +26,7 @@ for (const enabled of [true, false]) {
       },
     };
     await page.goto('/#/deployments/idle/configuration');
+    await openCard(page, 'variants');
     const section = page.getByRole('region', { name: 'Variants', exact: true });
     const row = section.locator('[data-variant="default"]');
     await expect(row.getByRole('switch')).toHaveCount(0);
@@ -63,6 +64,7 @@ for (const enabled of [true, false]) {
       saved.reasoning?.presets?.find((p) => p.id === 'default'),
     ).toMatchObject({ enabled, body: { reasoning_budget: 2048 } });
     await page.reload();
+    await openCard(page, 'variants');
     await expect(row.getByRole('switch')).toHaveCount(0);
     await row.getByRole('button', { name: 'Default', exact: true }).click();
     await expect(
@@ -82,6 +84,7 @@ test('selecting legacy blank Instant as default persists its configured thinking
     reasoning: { presets: [{ id: 'instant', enabled: false, body: {} }] },
   };
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'variants');
   const section = page.getByRole('region', { name: 'Variants', exact: true });
   await expect(
     section.getByRole('switch', {
@@ -98,8 +101,8 @@ test('selecting legacy blank Instant as default persists its configured thinking
     'false',
   );
   await drawer.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await section
-    .getByLabel('Default variant', { exact: true })
+  await page
+    .getByLabel('Default reasoning level', { exact: true })
     .selectOption('instant');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect
@@ -157,6 +160,7 @@ for (const width of [1440, 320]) {
       },
     };
     await page.goto('/#/deployments/idle/configuration');
+    await openCard(page, 'variants');
     const section = page.getByRole('region', { name: 'Variants', exact: true });
     const item = section.getByRole('listitem').first();
     const actions = item.locator('[data-slot="item-actions"]');
@@ -235,6 +239,8 @@ test('new deployment members get common defaults and a nested Drawer without sub
     .getByRole('dialog')
     .getByRole('button', { name: 'Add model', exact: true })
     .click();
+  await openCard(page, 'model');
+  await openCard(page, 'variants');
   await expect(
     page
       .getByRole('group', { name: 'Capabilities', exact: true })
@@ -299,6 +305,7 @@ test('guided destination changes and JSON preserve additional template controls'
     },
   };
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'variants');
   await page
     .getByRole('region', { name: 'Variants', exact: true })
     .getByRole('button', { name: 'Low', exact: true })
@@ -352,12 +359,14 @@ for (const width of [1440, 576, 320]) {
       reasoning: { presets: defaultReasoningOptions() },
     };
     await page.goto('/#/deployments/idle/configuration');
+    await openCard(page, 'variants');
     const section = page.getByRole('region', { name: 'Variants', exact: true });
     const variants = section.getByRole('list', { name: 'Variants' });
-    const header = section.locator('[data-slot="card-header"]');
-    const add = header
-      .locator('[data-slot="card-action"]')
-      .getByRole('button', { name: 'Add variant', exact: true });
+    const header = section.locator('summary');
+    const add = section.getByRole('button', {
+      name: 'Add variant',
+      exact: true,
+    });
     await expect(add).toBeVisible();
     await expect(
       section
@@ -374,11 +383,9 @@ for (const width of [1440, 576, 320]) {
         /Named reasoning and prompt configurations|Used when a request does not select a variant|Switches expose variants to clients/,
       ),
     ).toHaveCount(0);
-    const titleBox = (await header
-      .getByRole('heading', { name: 'Variants', exact: true })
-      .boundingBox())!;
+    const titleBox = (await header.boundingBox())!;
     const addBox = (await add.boundingBox())!;
-    expect(addBox.x).toBeGreaterThan(titleBox.x + titleBox.width);
+    expect(addBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
     await add.click();
     const addDrawer = page.getByRole('dialog', {
       name: 'Add variant',
@@ -518,8 +525,8 @@ for (const width of [1440, 576, 320]) {
       'data-variant',
       'research',
     );
-    await section
-      .getByLabel('Default variant', { exact: true })
+    await page
+      .getByLabel('Default reasoning level', { exact: true })
       .selectOption('research');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect
@@ -549,6 +556,7 @@ for (const width of [1440, 576, 320]) {
       prompt_prefix: 'Think carefully.',
     });
     await page.reload();
+    await openCard(page, 'variants');
     await expect(variants.getByRole('listitem').nth(5)).toHaveAttribute(
       'data-variant',
       'research',
@@ -584,9 +592,10 @@ for (const width of [1440, 576, 320]) {
     await page.getByRole('menuitem', { name: 'Remove', exact: true }).click();
     await expect(custom).toHaveCount(0);
     await expect(
-      section.getByLabel('Default variant', { exact: true }),
+      page.getByLabel('Default reasoning level', { exact: true }),
     ).toHaveValue('');
     await page.getByRole('button', { name: 'Discard', exact: true }).click();
+    await openCard(page, 'variants');
     await expect(custom).toBeChecked();
   });
 }
@@ -626,13 +635,14 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
     (d) => d.id === 'idle',
   )!.profile_snapshot!.catalog = structuredClone(catalog);
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'variants');
   const section = page.getByRole('region', { name: 'Variants', exact: true });
   await expect(section.getByRole('listitem').first()).toHaveAttribute(
     'data-variant',
     'private-level',
   );
   await expect(
-    section.getByLabel('Default variant', { exact: true }),
+    page.getByLabel('Default reasoning level', { exact: true }),
   ).toHaveValue('private-level');
   // A resource preview can precede Save; select the saved request by endpoint.
   await expect
@@ -640,6 +650,7 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
       fixture.writes.some((write) => write.path === '/api/resources/preview'),
     )
     .toBe(true);
+  await openIdentity(page);
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Preserved variants');
@@ -656,6 +667,7 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
       )!.body,
     ).configuration!.catalog.reasoning,
   ).toEqual(catalog.reasoning);
+  await openCard(page, 'variants');
   await section
     .getByRole('button', { name: 'Private level', exact: true })
     .click();
@@ -689,6 +701,7 @@ test('invalid JSON stays local, cancellation guards drafts, and prompt-only vari
     reasoning: { presets: defaultReasoningOptions() },
   };
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'variants');
   const section = page.getByRole('region', { name: 'Variants', exact: true });
   await section.getByRole('button', { name: 'Low', exact: true }).click();
   const drawer = page.getByRole('dialog', { name: 'Edit Low', exact: true });
@@ -781,6 +794,7 @@ test('overflow menus support keyboard reordering and preserve disabled variants'
     reasoning: { presets: defaultReasoningOptions() },
   };
   await page.goto('/#/deployments/idle/configuration');
+  await openCard(page, 'variants');
   const section = page.getByRole('region', { name: 'Variants', exact: true });
   const instantMenu = section.getByRole('button', {
     name: 'Instant variant actions',

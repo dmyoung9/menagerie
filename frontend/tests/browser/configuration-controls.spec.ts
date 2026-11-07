@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, openAdvanced, openCard } from './fixtures';
 import { deploymentDraft } from '../../src/contracts';
 import AxeBuilder from '@axe-core/playwright';
 
@@ -185,7 +185,7 @@ test('numeric flags are absent until added and seed engine rather than policy de
     },
   });
   await page.goto('/#/deployments/idle/configuration');
-  await expect(page.getByLabel('Temperature', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Temperature', { exact: true })).toHaveValue('');
   await expect(
     page.getByRole('button', { name: 'Discard', exact: true }),
   ).toBeDisabled();
@@ -194,8 +194,10 @@ test('numeric flags are absent until added and seed engine rather than policy de
       'performance',
       ['Batch size', 'Physical batch', 'CPU threads', 'Batch threads'],
     ],
-    ['generation', ['Temperature', 'Top-p']],
+    ['generation', ['Top-p']],
   ] as const) {
+    if (category === 'performance') await openAdvanced(page);
+    else await openCard(page, 'generation');
     await page
       .getByRole('button', { name: `Add ${category} flags`, exact: true })
       .click();
@@ -211,8 +213,8 @@ test('numeric flags are absent until added and seed engine rather than policy de
       .getByRole('button', { name: `Add (${labels.length})`, exact: true })
       .click();
   }
+  await page.getByLabel('Temperature', { exact: true }).fill('0.8');
   for (const [label, value] of [
-    ['Temperature', '0.8'],
     ['Top-p', '0.95'],
     ['Batch size', '2048'],
     ['Physical batch', '512'],
@@ -224,12 +226,7 @@ test('numeric flags are absent until added and seed engine rather than policy de
       page.getByRole('slider', { name: label + ' range', exact: true }),
     ).toBeEnabled();
   }
-  const temp = page.getByRole('slider', {
-    name: 'Temperature range',
-    exact: true,
-  });
-  await temp.focus();
-  await page.keyboard.press('ArrowRight');
+  await page.getByLabel('Temperature', { exact: true }).fill('0.81');
   await expect(page.getByLabel('Temperature', { exact: true })).toHaveValue(
     '0.81',
   );
@@ -332,6 +329,8 @@ for (const width of [1440, 576, 320]) {
       name: 'Maximum draft tokens',
       exact: true,
     });
+    await openCard(page, 'model');
+    await openCard(page, 'generation');
     await expect(range.locator('[data-slot="slider"]')).toHaveCount(1);
     await expect(minimum).toBeDisabled();
     await expect(maximum).toBeDisabled();
@@ -409,12 +408,14 @@ for (const width of [1440, 576, 320]) {
         .body,
     ).configuration!.config;
     expect(saved).toMatchObject({ [keys[0]]: 1, [keys[1]]: 8 });
+    await openCard(page, 'model');
     await page
       .getByRole('combobox', { name: 'MTP head', exact: true })
       .selectOption('');
     await expect(minimum).toBeDisabled();
     await expect(maximum).toBeDisabled();
     await page.getByRole('button', { name: 'Discard', exact: true }).click();
+    await openCard(page, 'model');
     await expect(minInput).toHaveValue('1');
     await expect(maxInput).toHaveValue('8');
     await expect(minimum).toBeEnabled();

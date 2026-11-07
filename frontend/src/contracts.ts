@@ -16,6 +16,65 @@ const maybeNumber = opt(d.nullable(d.number));
 const maybeString = opt(d.nullable(d.string));
 const unknownObject = d.record(d.unknown);
 
+export const capabilityEvidence = d.object<T.CapabilityEvidence>({
+  source: d.oneOf(
+    'artifact',
+    'tokenizer',
+    'model-card',
+    'runtime',
+    'inference-test',
+    'user',
+  ),
+  detail: d.string,
+  confidence: d.oneOf('high', 'medium', 'low'),
+});
+export const capability = d.object<T.Capability>({
+  status: d.oneOf('supported', 'unsupported', 'unknown'),
+  value: opt(jsonValue),
+  evidence: d.array(capabilityEvidence),
+  conflicting: opt(d.boolean),
+});
+export const parameterRecommendation = d.object<T.ParameterRecommendation>({
+  parameter: d.string,
+  value: d.number,
+  compatible: d.nullable(d.boolean),
+  source: d.string,
+  detail: d.string,
+});
+export const capabilityPreview = d.object<T.CapabilityPreview>({
+  model: d.record(capability),
+  effective: d.record(capability),
+  warnings: stringArray,
+  recommendations: d.array(parameterRecommendation),
+});
+const parameterOwner = d.oneOf(
+  'installation',
+  'runtime-process',
+  'model-deployment',
+  'request-variant',
+);
+export const parameterPresentation = d.object<T.ParameterPresentation>({
+  category: d.oneOf(
+    'model-runtime',
+    'resources-context',
+    'generation',
+    'advanced',
+  ),
+  owner: parameterOwner,
+  owner_by_mode: opt(
+    d.object({
+      standalone: opt(parameterOwner),
+      'native-pool': opt(parameterOwner),
+    }),
+  ),
+  inheritable: d.boolean,
+  automatic_value: opt(
+    d.nullable(d.union(d.string, d.union(d.number, d.boolean))),
+  ),
+  request_overridable: d.boolean,
+  provenance: d.oneOf('adapter', 'executable-help'),
+});
+
 export const runtimeField = d.object<T.RuntimeField>({
   type: opt(d.string),
   label: opt(d.string),
@@ -31,6 +90,8 @@ export const runtimeField = d.object<T.RuntimeField>({
   choices: opt(stringArray),
   units: opt(d.string),
   cpu_only: opt(d.boolean),
+  restart_required: opt(d.boolean),
+  presentation: opt(parameterPresentation),
 });
 const reasoning = d.union(
   d.boolean,
@@ -88,6 +149,8 @@ const dependency = d.object<{ name: string; size?: number | null }>({
   size: maybeNumber,
 });
 export const discoveredCapabilities = d.object<T.DiscoveredCapabilities>({
+  findings: opt(d.record(capability)),
+  recommendations: opt(d.array(parameterRecommendation)),
   input: opt(stringArray),
   tools: opt(d.boolean),
   reasoning: opt(reasoning),
@@ -156,6 +219,10 @@ export const artifact = d.object<T.Artifact>({
   templates: opt(d.array(templateAssetPublic)),
 });
 export const runtimeCapabilities = d.object<T.RuntimeCapabilities>({
+  features: opt(d.record(capability)),
+  sha256: opt(d.string),
+  version: opt(d.string),
+  flags: opt(stringArray),
   formats: opt(stringArray),
   schema: opt(d.record(runtimeField)),
 });
@@ -218,6 +285,9 @@ const lifecycle = d.object<T.DeploymentLifecycle>({
 });
 export const deployment: d.Decoder<T.Deployment> = (value, path) =>
   d.object<T.Deployment>({
+    draining: opt(d.boolean),
+    engine_pool: opt(d.boolean),
+    max_loaded: opt(d.number),
     id: d.string,
     name: d.string,
     profile_id: maybeString,
@@ -230,7 +300,7 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     allow_eviction: opt(d.boolean),
     enabled: d.boolean,
     state: d.string,
-    gpu: opt(d.number),
+    gpu: opt(d.nullable(d.number)),
     queue_timeout: opt(d.number),
     revision: d.number,
     member_only: opt(d.boolean),
@@ -239,6 +309,17 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     inflight: opt(d.number),
     historical_requests: opt(d.number),
     template_override: opt(d.nullable(templateSelection)),
+    runtime_observation: opt(
+      d.nullable(
+        d.object({
+          residency: d.string,
+          resolved: opt(d.record(d.number)),
+          memory: opt(jsonValue),
+          source: d.string,
+          observed_at: opt(d.number),
+        }),
+      ),
+    ),
   })(value, path);
 export const servingDeployment: d.Decoder<T.ServingDeployment> = (
   value,
@@ -268,9 +349,12 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
       d.fail(`${path}.${key}`, 'no member-specific field on a serving group');
   }
   const common = d.object({
+    draining: opt(d.boolean),
     id: d.string,
     name: d.string,
     enabled: d.boolean,
+    engine_pool: opt(d.boolean),
+    max_loaded: opt(d.number),
     state: d.string,
     residency: opt(d.string),
     priority: opt(d.number),
@@ -296,13 +380,15 @@ export const deploymentDraft = d.object<T.DeploymentDraft>({
   idle_timeout: d.number,
   allow_eviction: d.boolean,
   enabled: d.boolean,
-  gpu: d.number,
+  gpu: d.nullable(d.number),
   queue_timeout: d.number,
   template_override: opt(d.nullable(templateSelection)),
 });
 export const deploymentSetDraft = d.object<T.DeploymentSetDraft>({
   id: opt(d.string),
   name: d.string,
+  engine_pool: opt(d.boolean),
+  max_loaded: opt(d.number),
   residency: d.string,
   priority: d.number,
   idle_timeout: d.number,
@@ -461,7 +547,7 @@ export const resourceEstimate = d.object<T.ResourceEstimate>({
   file_size_bytes: d.nullable(d.number),
   kv_mib: d.nullable(d.number),
   components: opt(d.nullable(d.record(d.number))),
-  basis: d.oneOf('observed', 'derived', 'unavailable'),
+  basis: d.oneOf('observed', 'derived', 'engine', 'unavailable'),
   sample_count: d.number,
   provenance: d.string,
   profile_hash: d.string,
@@ -502,7 +588,7 @@ export const resourcePreview = d.object<T.ResourcePreview>({
     d.object<T.ResourcePreviewMember>({
       key: d.string,
       name: d.string,
-      gpu: d.number,
+      gpu: d.nullable(d.number),
       estimate: resourceEstimate,
       recommendation: opt(recommendation),
     }),
@@ -530,12 +616,12 @@ export const resourcePreview = d.object<T.ResourcePreview>({
 });
 export const resourcePreviewDraft = d.object<T.ResourcePreviewDraft>({
   name: opt(d.string),
-  gpu: opt(d.number),
+  gpu: opt(d.nullable(d.number)),
   configuration: opt(profileDraft),
 });
 export const resourceDraft = d.object<T.ResourceDraft>({
   name: d.string,
-  gpu: d.number,
+  gpu: d.nullable(d.number),
   configuration: profileDraft,
 });
 export const resourcePreviewRequest = d.object<T.ResourcePreviewRequest>({

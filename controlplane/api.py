@@ -18,11 +18,12 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-from . import adapters, deployment_sets, host, lifecycle, templates
+from . import adapters, deployment_sets, host, lifecycle, runtime_protocol, templates
 from .catalog import apply_reasoning, export_config, normalize
 from .jobs import Jobs
 from .manager import ACTIVE, Conflict, Manager, redact
 from .schema import (
+    CapabilityPreview,
     Deployment,
     DeploymentSet,
     Profile,
@@ -109,6 +110,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     | {
                         "unit_id": unit["id"],
                         "unit_name": unit["name"],
+                        "draining": bool(manager.draining.get(unit["id"])),
                         "lifecycle": lifecycle.describe(d, settings)
                         | {"serving": published},
                     }
@@ -119,6 +121,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         totals = store.request_totals()
         return [
             deployment_sets.describe(u, manager.settings(), manager.inflight, totals)
+            | {"draining": bool(manager.draining.get(u["id"]))}
             for u in deployment_sets.units(store)
         ]
 
@@ -137,6 +140,15 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             previous["member_ids"] if previous else []
         )
         members = [store.get("deployment", i, c) for i in affected]
+        from . import runtime_pool
+
+        errors = runtime_pool.validate(
+            data
+            | {"members": [store.get("deployment", i, c) for i in data["member_ids"]]},
+            store,
+        )
+        if errors:
+            raise ValueError("; ".join(errors))
         if any(
             d["state"] in ACTIVE or manager.inflight.get(d["id"], 0) for d in members
         ):
@@ -370,6 +382,38 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.get("/api/models")
     async def models():
         return _model_rows()
+
+    @app.post("/api/capabilities/preview")
+    async def capability_preview(body: CapabilityPreview):
+        from .capabilities import effective
+
+        profile = body.configuration.model_dump(exclude_none=True)
+        artifact = store.get("artifact", profile["artifact_id"])
+        runtime = store.get("runtime", profile["runtime_id"])
+        selection = templates.effective_selection(
+            {"template_override": body.template_override}, artifact, store
+        )
+        asset = selection.get("asset")
+        observed = None
+        if body.deployment_id:
+            deployment = store.get("deployment", body.deployment_id)
+            saved = deployment.get("profile_snapshot", {})
+            execution_keys = ("artifact_id", "runtime_id", "config", "raw_args")
+            if (
+                all(saved.get(key) == profile.get(key) for key in execution_keys)
+                and deployment.get("template_override") == body.template_override
+            ):
+                observed = runtime_protocol.observation(store, deployment)
+        return effective(
+            artifact,
+            runtime,
+            profile,
+            template=asset["content"] if asset else None,
+            template_source="user"
+            if asset and asset.get("kind") == "custom"
+            else "tokenizer",
+            observation=observed,
+        )
 
     @app.get("/api/models/{ident}/templates")
     async def model_templates(ident: str):
@@ -611,11 +655,18 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         )
 
     @app.post("/api/serving-deployments/{ident}/stop")
-    async def stop_serving(ident: str):
+    async def stop_serving(ident: str, request: Request):
+        cancel = (await request.json()).get("cancel_requests", False)
+        if not isinstance(cancel, bool):
+            raise ValueError("cancel_requests must be true or false")
         unit = manager.unit(ident)
         return jobs.submit(
             "Unload " + unit["name"],
-            lambda job: manager.stop(ident),
+            lambda job: manager.stop(
+                ident,
+                cancel_requests=cancel,
+                progress=lambda text: jobs.progress(job, text),
+            ),
             deployment_id=ident,
             operation="unload",
         )
@@ -743,7 +794,12 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.get("/api/runtimes/{ident}/capabilities")
     async def capabilities(ident: str):
         runtime = store.get("runtime", ident)
-        key = (ident, runtime["revision"])
+        fingerprint = adapters.executable_fingerprint(runtime)
+        key = (ident, runtime["revision"], fingerprint)
+        for previous in list(runtime_schema_tasks):
+            if previous[0] == ident and previous != key:
+                task = runtime_schema_tasks.pop(previous)
+                task.cancel()
         if key not in runtime_schema_tasks:
             runtime_schema_tasks[key] = asyncio.create_task(
                 adapters.configuration_schema(runtime)
@@ -753,7 +809,12 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         except Exception:
             runtime_schema_tasks.pop(key, None)
             raise
-        return runtime["capabilities"] | {"schema": schema}
+        return runtime["capabilities"] | {
+            "schema": schema,
+            "features": runtime_protocol.features(
+                runtime, runtime["capabilities"].get("flags", [])
+            ),
+        }
 
     @app.post("/api/profiles")
     async def profile(body: Profile, expected: int | None = None):
@@ -765,15 +826,6 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         errors = adapters.validate_profile(data, artifact, runtime)
         if errors:
             raise ValueError("; ".join(errors))
-        catalog = data.get("catalog", {})
-        if catalog.get("model"):
-            limits = catalog["model"].setdefault("limit", {})
-            context = data["config"].get(
-                "ctx-size", data["config"].get("max-model-len")
-            )
-            if context:
-                limits["context"] = context // data["config"].get("parallel", 1)
-                limits["output"] = min(limits.get("output", 8192), limits["context"])
         data["catalog"] = normalize(data)
         return store.put("profile", data, expected=expected)
 
@@ -796,6 +848,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 return saved
 
     def save_member(data, expected=None, c=None, owner_id=None):
+        data.setdefault("gpu", None)
         all_d = store.list("deployment", c)
         previous = next((d for d in all_d if d["id"] == data.get("id")), None)
         owner = deployment_sets.unit_for(store, data["id"]) if data.get("id") else None
@@ -889,8 +942,18 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         )
 
     @app.post("/api/deployments/{ident}/stop")
-    async def stop(ident: str):
-        return jobs.submit("Stop deployment", lambda job: manager.stop(ident))
+    async def stop(ident: str, request: Request):
+        cancel = (await request.json()).get("cancel_requests", False)
+        if not isinstance(cancel, bool):
+            raise ValueError("cancel_requests must be true or false")
+        return jobs.submit(
+            "Stop deployment",
+            lambda job: manager.stop(
+                ident,
+                cancel_requests=cancel,
+                progress=lambda text: jobs.progress(job, text),
+            ),
+        )
 
     @app.post("/api/deployments/{ident}/enabled")
     async def set_deployed(ident: str, request: Request):
@@ -1481,7 +1544,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             "output_tokens": None,
         }
 
+        finished = False
+
         def finish(error=None):
+            nonlocal finished
+            if finished:
+                return
+            finished = True
             manager.release(d)
             record.update(latency=time.monotonic() - started, error=error)
             with store.connect() as c:
@@ -1521,7 +1590,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             manager.client.send(
                 manager.client.build_request(
                     "POST",
-                    f"http://127.0.0.1:{d['port']}/v1/chat/completions",
+                    f"http://127.0.0.1:{manager.runtime_port(d)}/v1/chat/completions",
                     json=body,
                     headers={"X-Request-ID": correlation},
                 ),
@@ -1558,9 +1627,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 502,
             )
         if upstream.status_code != 200:
-            raw = await upstream.aread()
-            await upstream.aclose()
-            finish(f"Upstream HTTP {upstream.status_code}")
+            try:
+                raw = await upstream.aread()
+            finally:
+                try:
+                    await upstream.aclose()
+                finally:
+                    finish(f"Upstream HTTP {upstream.status_code}")
             return PlainTextResponse(
                 raw,
                 status_code=upstream.status_code,
@@ -1632,8 +1705,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 error = redact(str(exc))
                 raise
             finally:
-                await upstream.aclose()
-                finish(error)
+                try:
+                    await upstream.aclose()
+                finally:
+                    finish(error)
 
         return StreamingResponse(
             relay(),
