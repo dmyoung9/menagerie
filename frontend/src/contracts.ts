@@ -240,7 +240,13 @@ export const runtime = d.object<T.Runtime>({
   commit: maybeString,
   fork_url: maybeString,
   formats: opt(stringArray),
-  managed: opt(d.object({ recipe_id: opt(d.string), backend: opt(d.string) })),
+  managed: opt(
+    d.object({
+      recipe_id: opt(d.string),
+      backend: opt(d.string),
+      source: opt(d.string),
+    }),
+  ),
   capabilities: opt(runtimeCapabilities),
 });
 export const runtimeDraft = d.object<T.RuntimeDraft>({
@@ -539,6 +545,7 @@ export const recommendation = d.object<T.RuntimeRecommendation>({
 });
 export const engineRecommendation = d.object<T.EngineRecommendation>({
   engine: maybeString,
+  source: maybeString,
   reason: opt(d.string),
 });
 export const resourceEstimate = d.object<T.ResourceEstimate>({
@@ -642,12 +649,16 @@ export const engineCatalog = d.object<T.EngineReleaseCatalog>({
       name: d.string,
       description: opt(d.string),
       note: opt(d.string),
+      protocol: opt(d.string),
+      repository: opt(d.string),
       releases: d.array(
         d.object<T.EngineRelease>({
           id: d.string,
           version: d.string,
           backend: d.string,
           requirements: opt(d.string),
+          source: opt(d.string),
+          repository: opt(d.string),
         }),
       ),
     }),

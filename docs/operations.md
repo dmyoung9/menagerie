@@ -12,8 +12,14 @@ Models supports **Discover** (Hugging Face) and
 complete choice; split GGUF shards are registered together. Existing
 files are referenced in place, not copied or uploaded by the browser.
 
-Settings → Engines installs versioned llama.cpp release binaries or an
-isolated vLLM environment. Downloads, verification, and probing appear in Activity.
+Settings → Engines installs versioned builds from the declared sources: official
+llama.cpp and Prism's llama.cpp fork, which carries ternary quantizations and
+tensor-core flash attention for quantized KV caches. Each source publishes its
+own asset names, so the installer selects that source's checksummed binaries for
+this platform; a CUDA build whose runtime companion is missing is not offered.
+An installed fork registers under the shared `llama.cpp` protocol, with its
+source repository recorded as provenance. An isolated vLLM environment is also
+available. Downloads, verification, and probing appear in Activity.
 Updates install alongside existing engines; deployments retain their chosen version.
 Referenced engines cannot be removed. Existing executables, source builds, and
 digest-pinned OCI images are available from the engine toolbar.

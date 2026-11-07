@@ -482,7 +482,11 @@ export function ConfigurationFields({
               {engines.map((r) => (
                 <NativeSelectOption key={r.id} value={r.id}>
                   {r.name}
-                  {engineHint.engine === r.engine ? ' · Recommended' : ''}
+                  {engineHint.engine === r.engine &&
+                  (!engineHint.source ||
+                    r.managed?.source === engineHint.source)
+                    ? ' · Recommended'
+                    : ''}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -499,7 +503,7 @@ export function ConfigurationFields({
         {installing && (
           <EngineCatalog
             runtimes={data.runtimes || []}
-            recommended={engineHint.engine ?? undefined}
+            recommended={engineHint.source ?? engineHint.engine ?? undefined}
           />
         )}
         {modelFields}

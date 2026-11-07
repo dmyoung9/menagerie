@@ -558,9 +558,9 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
 
     @app.get("/api/engines/catalog")
     async def engine_catalog():
-        from .engine_catalog import ENGINES
+        from .engine_catalog import sources
 
-        return ENGINES
+        return sources()
 
     @app.get("/api/engines/releases")
     async def engine_releases():
@@ -575,7 +575,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         body = await request.json()
         recipe = store.get("engine_recipe", body["recipe_id"])
         return jobs.submit(
-            f"Install {recipe['engine']} {recipe['version']}",
+            f"Install {recipe.get('source_name') or recipe['engine']} {recipe['version']}",
             lambda ident: install(jobs, ident, recipe["id"]),
         )
 

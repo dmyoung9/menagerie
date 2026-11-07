@@ -14,6 +14,9 @@ history. Serving deployments own shared loading/eviction policy; model instances
 retain their engine configuration snapshots and stable aliases.
 
 Runtime suppliers/forks are installation provenance, not adapter families.
+`engine_catalog.py` declares each installable source as a protocol, a release tag
+pattern, and per-system asset patterns with an optional runtime companion; adding
+a supplier is a declaration, not a new engine literal or adapter branch.
 `runtime_protocol.py` defines the small CLI/observation boundary and advertised
 mechanisms. `runtime_pool.py` renders explicit native model presets and validates
 pool policy. Capabilities are tied to executable hashes, not repository names.

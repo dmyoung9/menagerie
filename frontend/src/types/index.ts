@@ -182,7 +182,7 @@ export type Runtime = {
   commit?: string | null;
   fork_url?: string | null;
   formats?: string[];
-  managed?: { recipe_id?: string; backend?: string };
+  managed?: { recipe_id?: string; backend?: string; source?: string };
   capabilities?: RuntimeCapabilities;
 };
 export type Profile = {
@@ -371,6 +371,7 @@ export type RuntimeRecommendation = {
 };
 export type EngineRecommendation = {
   engine?: string | null;
+  source?: string | null;
   reason?: string;
 };
 export type CollectorHealth = {
@@ -439,12 +440,16 @@ export type EngineRelease = {
   version: string;
   backend: string;
   requirements?: string;
+  source?: string;
+  repository?: string;
 };
 export type EngineCatalogEntry = {
   id: string;
   name: string;
   description?: string;
   note?: string;
+  protocol?: string;
+  repository?: string;
   releases: EngineRelease[];
 };
 export type EngineReleaseCatalog = {
