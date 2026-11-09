@@ -64,6 +64,10 @@ def third(store):
 
 def observed_capacity(manager):
     """Switch scenarios use measured history/processes, not invented reservations."""
+    # Auto-device deployments (gpu=None) still run on a real GPU; attribute
+    # their measured MiB to the first GPU in this fixture instead of a
+    # literal "None" key that would break int() in the stop planner.
+    default_device = str(manager.host["gpus"][0]["index"])
     for d in manager.store.list("deployment"):
         manager.store.put(
             "session",
@@ -77,7 +81,9 @@ def observed_capacity(manager):
         )
         manager.host.setdefault("deployments", {})[d["id"]] = {
             "gpu_mib": 6000,
-            "gpu_by_device_mib": {str(d["gpu"]): 6000},
+            "gpu_by_device_mib": {
+                str(d["gpu"] if d["gpu"] is not None else default_device): 6000
+            },
         }
 
 
@@ -360,6 +366,45 @@ async def test_per_gpu_planning_does_not_evict_an_unrelated_gpu(tmp_path):
         store.put("deployment", store.get("deployment", "c") | {"gpu": 1})
         m.host["deployments"]["c"]["gpu_by_device_mib"] = {"1": 6000}
         assert m.automatic_stops(["pair"]) == ["c"]
+    finally:
+        store.put("deployment", store.get("deployment", "c") | {"state": "STOPPED"})
+        await m.close()
+
+
+async def test_auto_device_stops_count_residents_and_priority_gates_eviction(tmp_path):
+    """Auto-device residents (gpu=None) count against the GPU they run on.
+
+    On a single-GPU box the auto device is the default, so a resident must be
+    a candidate whenever pressure arrives.  The incoming side only wins when
+    its priority is at least as high as the resident's.
+    """
+    _, store, m = await setup(tmp_path)
+    link(store)
+    third(store)
+    # Single-GPU box where everything runs on the auto device (the UI
+    # default) instead of an explicit GPU index.
+    for d in store.list("deployment"):
+        store.put("deployment", d | {"gpu": None})
+    observed_capacity(m)
+    # c is the resident; the GPU is tight enough that the incoming pair
+    # (2000 MiB each, observed) does not fit unless it is evicted.
+    store.put(
+        "deployment",
+        store.get("deployment", "c") | {"state": "READY", "reservation_active": 6000},
+    )
+    m.host["gpus"][0]["free_mib"] = 3000
+    try:
+        # Equal priority (50): the resident is counted and selected.
+        assert m.automatic_stops(["a"]) == ["c"]
+        # The user-facing plan hands the same stops into validate.
+        assert m.plan(["a"])["stops"] == ["c"]
+        # A strictly higher resident is protected; pressure alone cannot
+        # pull it down.
+        store.put(
+            "deployment",
+            store.get("deployment", "c") | {"priority": 90},
+        )
+        assert m.automatic_stops(["a"]) == []
     finally:
         store.put("deployment", store.get("deployment", "c") | {"state": "STOPPED"})
         await m.close()

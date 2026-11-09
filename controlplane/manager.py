@@ -115,7 +115,7 @@ class Manager:
             needed = sum(
                 self.estimate(d)["peak_mib"] or 0
                 for d in (self.store.get("deployment", i) for i in selected)
-                if d["gpu"] == gpu["index"] and d["state"] not in ACTIVE
+                if d["gpu"] in (None, gpu["index"]) and d["state"] not in ACTIVE
             )
             deficits[gpu["index"]] = max(
                 0,
@@ -446,7 +446,7 @@ class Manager:
             new = [
                 d
                 for d in selected
-                if d["gpu"] == gpu["index"] and d["state"] not in ACTIVE
+                if d["gpu"] in (None, gpu["index"]) and d["state"] not in ACTIVE
             ]
             needed = sum(estimates[d["id"]]["peak_mib"] or 0 for d in new)
             if (
