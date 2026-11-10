@@ -178,4 +178,4 @@ async def test_windows_catalog_does_not_advertise_linux_vllm(tmp_path, monkeypat
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[]))
     ) as client:
         catalog = await engines.catalog(client, Store(tmp_path / "state"))
-    assert [e["id"] for e in catalog["engines"]] == ["llama.cpp"]
+    assert [e["id"] for e in catalog["engines"]] == ["llama.cpp", "prism"]

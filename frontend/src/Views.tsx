@@ -31,7 +31,6 @@ import {
   Dialog,
   Empty,
   Field,
-  Json,
   Menu,
   isRecord,
   message,
@@ -328,14 +327,7 @@ export function DeploymentDetail({
         </Alert>
       )}
       <Tabs
-        items={[
-          'Overview',
-          'Configuration',
-          'Advanced',
-          'Activity',
-          'Requests',
-          'Logs',
-        ]}
+        items={['Overview', 'Configuration', 'Activity', 'Requests', 'Logs']}
         value={tab}
         onChange={(t) =>
           go(
@@ -429,49 +421,6 @@ export function DeploymentDetail({
       )}
       {tab === 'Requests' && (
         <RequestHistory deploymentId={d.id} deployments={data.deployments} />
-      )}
-      {tab === 'Advanced' && (
-        <Card className="mb-5 min-w-0 gap-0 p-5">
-          <CardContent className="p-0">
-            <dl className="properties">
-              <dt>Model</dt>
-              <dd>
-                {data.models?.find((m) => m.id === profile?.artifact_id)
-                  ?.name || profile?.artifact_id}
-              </dd>
-              <dt>Engine</dt>
-              <dd>
-                {data.runtimes?.find((r) => r.id === profile?.runtime_id)
-                  ?.name || profile?.runtime_id}
-              </dd>
-              {Object.entries(profile?.config || {}).map(([k, v]) => (
-                <div className="property-pair" key={k}>
-                  <dt>{k}</dt>
-                  <dd>{String(v)}</dd>
-                </div>
-              ))}
-            </dl>
-            <details>
-              <summary>Advanced</summary>
-              <dl className="properties">
-                <dt>Private port</dt>
-                <dd>{d.port}</dd>
-                <dt>GPU</dt>
-                <dd>{d.gpu}</dd>
-                <dt>Priority</dt>
-                <dd>{d.priority}</dd>
-                <dt>Queue timeout (s)</dt>
-                <dd>{d.queue_timeout}</dd>
-              </dl>
-              <Json
-                value={{
-                  arguments: profile?.raw_args,
-                  capabilities: profile?.catalog,
-                }}
-              />
-            </details>
-          </CardContent>
-        </Card>
       )}
       {tab === 'Activity' && (
         <Card className="mb-5 min-w-0 gap-0 p-0">

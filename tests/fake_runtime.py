@@ -2,6 +2,7 @@
 """Subprocess fixture for lifecycle/streaming tests; never loads weights or CUDA."""
 
 import argparse
+import configparser
 import json
 import subprocess
 import sys
@@ -25,7 +26,20 @@ parser.add_argument("--metrics", action="store_true")
 parser.add_argument("--fail", action="store_true")
 parser.add_argument("--spawn-child", action="store_true")
 parser.add_argument("--gpu-layers", type=int, default=0)
+parser.add_argument("--models-preset")
+parser.add_argument("--models-max", type=int, default=4)
+parser.add_argument("--models-memory-margin", type=int, default=0)
+parser.add_argument("--models-autoload", action="store_true")
+parser.add_argument("--sleep-idle-seconds", type=int, default=-1)
+parser.add_argument("--fit", choices=["on", "off"], default="on")
 args = parser.parse_args()
+presets = configparser.ConfigParser(interpolation=None)
+if args.models_preset:
+    presets.read_string(Path(args.models_preset).read_text().partition("\n\n")[2])
+models = (
+    [s for s in presets.sections() if s != "*"] if args.models_preset else [args.alias]
+)
+loaded = set()
 if args.fail:
     print("Fixture engine error: CUDA out of memory", file=sys.stderr, flush=True)
     raise SystemExit(42)
@@ -53,12 +67,45 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self.send({"status": "ok"})
         elif self.path == "/v1/models":
-            self.send({"data": [{"id": args.alias}]})
+            self.send({"data": [{"id": name} for name in models]})
+        elif self.path == "/models":
+            self.send(
+                {
+                    "data": [
+                        {
+                            "id": name,
+                            "status": {
+                                "value": "loaded" if name in loaded else "unloaded"
+                            },
+                            "memory": {
+                                "status": "measured",
+                                "min": {
+                                    "n_ctx": 4096,
+                                    "devices": [
+                                        {
+                                            "kind": "device",
+                                            "name": "fixture",
+                                            "model": 1024,
+                                            "context": 512,
+                                            "compute": 256,
+                                        }
+                                    ],
+                                },
+                            },
+                        }
+                        for name in models
+                    ]
+                }
+            )
         else:
             self.send({"error": "missing"}, 404)
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if args.models_preset:
+            if body.get("model") not in models:
+                return self.send({"error": "unknown model"}, 404)
+            loaded.add(body["model"])
         if not body.get("stream"):
             return self.send(
                 {

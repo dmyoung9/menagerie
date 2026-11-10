@@ -59,7 +59,7 @@ test('catalog effects switch API clients and ignore the old in-flight response',
   ).toHaveCount(0);
 });
 
-test('wizard preserves edits on identical polling snapshots but updates changed supported defaults', async ({
+test('wizard preserves explicit edits on polling and schema refresh without seeding defaults', async ({
   page,
 }) => {
   await page.route('**/api/resources/preview', (route) =>
@@ -84,11 +84,7 @@ test('wizard preserves edits on identical polling snapshots but updates changed 
   await expect(page.getByLabel('Registry snapshot')).toHaveText('1');
   await expect(input).toHaveValue('{"gpu-layers":"17"}');
   await page.evaluate(() => window.dispatchEvent(new Event('change-schema')));
-  await expect(input).toHaveValue(
-    '{\n  "flash-attn": "auto",\n  "gpu-layers": "17"\n}',
-  );
+  await expect(input).toHaveValue('{"gpu-layers":"17"}');
   await page.evaluate(() => window.dispatchEvent(new Event('replace-engine')));
-  await expect(input).toHaveValue(
-    '{\n  "gpu-layers": "all",\n  "flash-attn": "auto"\n}',
-  );
+  await expect(input).toHaveValue('{}');
 });

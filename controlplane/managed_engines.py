@@ -11,66 +11,81 @@ import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-from . import adapters, host
-from .engine_catalog import ENGINES
+from . import adapters, engine_catalog, host
 from .store import identity
 
 
-def release_recipes(engine, releases, machine, system="Linux"):
-    """Select concrete assets, never the moving GitHub /latest download URL."""
-    arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64"}.get(machine.lower())
-    if not arch:
+def _fill(template, values):
+    """Substitute declared placeholders without raising on a source typo."""
+    return re.sub(
+        r"\{(\w+)\}",
+        lambda match: str(values.get(match.group(1), match.group(0))),
+        template,
+    )
+
+
+def repository_url(repository):
+    """Turn a GitHub owner/repo slug into the provenance URL we record."""
+    if not repository or "://" in repository:
+        return repository
+    return "https://github.com/" + repository
+
+
+def release_recipes(source, releases, machine, system="Linux"):
+    """Select concrete assets for a source; never the moving GitHub /latest URL.
+
+    ``source`` is a declared source dictionary or its id, so upstream and fork
+    builds share one selection path. Patterns match the exact release tag, and
+    a build whose required runtime companion is absent is not offered.
+    """
+    if isinstance(source, str):
+        source = engine_catalog.source(source)
+    arch = engine_catalog.ARCHITECTURES.get((machine or "").lower())
+    if not source or source.get("install") != "release" or not arch:
         return []
+    target = source["systems"].get(system) or {}
+    if arch not in target.get("arches", list(engine_catalog.ARCHITECTURES.values())):
+        return []
+    tags = re.compile(source.get("tags") or r".+")
     recipes = {}
+    order = {}
     for release in releases:
-        # llama.cpp publishes its normal numbered builds as GitHub prereleases.
-        if release.get("draft") or (
-            release.get("prerelease")
-            and not (
-                engine == "llama.cpp"
-                and re.fullmatch(r"b\d+", release.get("tag_name", ""))
-            )
-        ):
+        tag = release.get("tag_name", "")
+        if release.get("draft") or not tags.fullmatch(tag):
             continue
-        tag = release["tag_name"]
+        if release.get("prerelease") and not source.get("prerelease"):
+            continue
         assets = release.get("assets", [])
-        for asset in assets:
-            name = asset["name"]
-            if system == "Windows":
-                # CUDA 12.4 builds do not establish Blackwell support. Select
-                # a modern toolkit build and still require a driver/probe check.
-                match = re.fullmatch(
-                    rf"llama-{re.escape(tag)}-bin-win-(cpu|cuda-(?:12\.8|13\.\d+))-{arch}\.zip",
-                    name,
-                )
-                if not match or arch != "x64":
-                    continue
-                backend = "cpu" if match[1] == "cpu" else "cuda"
-            elif system == "Linux":
-                if not name.startswith("llama-") or not name.endswith(
-                    f"-{arch}.tar.gz"
-                ):
-                    continue
-                if "-cuda-12.8-" in name and "-bin-ubuntu-" in name:
-                    backend = "cuda"
-                elif re.search(rf"-bin-(?:ubuntu|linux)-{arch}\.tar\.gz$", name):
-                    backend = "cpu"
-                else:
-                    continue
-            else:
-                continue
+        for spec in target.get("assets", []):
+            backend = spec["backend"]
             if backend in recipes:
                 continue
-            selected = [asset]
-            if engine == "llama.cpp" and backend == "cuda":
-                companion_name = (
-                    "cudart-" + name.replace(f"-{tag}-", "-")
-                    if system == "Windows"
-                    else "cudart-" + name
+            pattern = re.compile(
+                spec["pattern"]
+                .replace("{tag}", re.escape(tag))
+                .replace("{arch}", re.escape(arch))
+            )
+            matched = None
+            for asset in assets:
+                match = pattern.fullmatch(asset["name"])
+                if match:
+                    matched = asset, match
+                    break
+            if matched is None:
+                continue
+            chosen, match = matched
+            selected = [chosen]
+            if spec.get("companion"):
+                wanted = _fill(
+                    spec["companion"],
+                    {
+                        "name": chosen["name"],
+                        "tag": tag,
+                        "arch": arch,
+                        **match.groupdict(),
+                    },
                 )
-                companion = next(
-                    (a for a in assets if a["name"] == companion_name), None
-                )
+                companion = next((a for a in assets if a["name"] == wanted), None)
                 if not companion:
                     continue
                 selected.append(companion)
@@ -79,13 +94,27 @@ def release_recipes(engine, releases, machine, system="Linux"):
                 for a in selected
             ):
                 continue
+            cuda = match.groupdict().get("cuda")
+            if backend == "cuda":
+                requirements = (
+                    f"{system}; CUDA {cuda} runtime; NVIDIA driver compatible "
+                    "with it; installed executable probe required"
+                    if cuda
+                    else f"{system}; NVIDIA driver compatible with the selected "
+                    "CUDA build; installed executable probe required"
+                )
+            else:
+                requirements = f"{system} CPU"
             recipes[backend] = {
-                "engine": engine,
+                "engine": source["protocol"],
+                "source": source["id"],
+                "source_name": source["name"],
+                "repository": source.get("repository"),
                 "version": tag,
                 "backend": backend,
                 "kind": "archive",
                 "system": system,
-                "archive_format": "zip" if system == "Windows" else "tar.gz",
+                "archive_format": target["archive_format"],
                 "assets": [
                     {
                         "url": a["browser_download_url"],
@@ -94,11 +123,11 @@ def release_recipes(engine, releases, machine, system="Linux"):
                     }
                     for a in selected
                 ],
-                "requirements": f"{system}; NVIDIA driver compatible with the selected CUDA build; installed executable probe required"
-                if backend == "cuda"
-                else f"{system} CPU",
+                "requirements": requirements,
             }
-    return list(recipes.values())
+            # Present builds in the order upstream published them.
+            order[backend] = assets.index(chosen)
+    return [recipes[backend] for backend in sorted(recipes, key=order.get)]
 
 
 async def catalog(client, store):
@@ -109,11 +138,14 @@ async def catalog(client, store):
             "note": "Managed engines support Linux and Windows x64. Register an existing engine on other platforms.",
         }
 
-    async def discover(engine):
+    async def discover(item):
         try:
-            if engine["id"] == "vllm":
+            if item.get("install") == "pypi":
                 response = await client.get(
-                    "https://pypi.org/pypi/vllm/json", timeout=30
+                    "https://pypi.org/pypi/"
+                    + item.get("package", item["id"])
+                    + "/json",
+                    timeout=30,
                 )
                 response.raise_for_status()
                 version = response.json()["info"]["version"]
@@ -121,7 +153,10 @@ async def catalog(client, store):
                     raise ValueError("No stable vLLM release found")
                 recipes = [
                     {
-                        "engine": "vllm",
+                        "engine": item["protocol"],
+                        "source": item["id"],
+                        "source_name": item["name"],
+                        "repository": item.get("repository"),
                         "version": version,
                         "backend": "cuda",
                         "kind": "venv",
@@ -130,32 +165,48 @@ async def catalog(client, store):
                 ]
             else:
                 response = await client.get(
-                    f"https://api.github.com/repos/{engine['repository']}/releases",
+                    f"https://api.github.com/repos/{item['repository']}/releases",
                     params={"per_page": 10},
                     timeout=30,
                 )
                 response.raise_for_status()
                 recipes = release_recipes(
-                    engine["id"], response.json(), platform.machine(), system
+                    item, response.json(), platform.machine(), system
                 )
             for recipe in recipes:
-                recipe["repository"] = engine["repository"]
                 recipe["id"] = identity(recipe)
                 store.put("engine_recipe", recipe, historical=False)
-            return engine | {
+            return {
+                "id": item["id"],
+                "name": item["name"],
+                "description": item["description"],
+                "protocol": item["protocol"],
+                "repository": item.get("repository"),
                 "releases": recipes,
                 "note": ""
                 if recipes
                 else "No matching checksummed binary found for this platform.",
             }
         except (ValueError, KeyError, OSError) as exc:
-            return engine | {"releases": [], "note": str(exc)}
+            return _unavailable(item, str(exc))
         except Exception as exc:
             # One unavailable supplier must not hide the other engines.
-            return engine | {"releases": [], "note": f"Release discovery failed: {exc}"}
+            return _unavailable(item, f"Release discovery failed: {exc}")
 
-    supported = [e for e in ENGINES if system == "Linux" or e["id"] == "llama.cpp"]
+    supported = [item for item in engine_catalog.SOURCES if system in item["systems"]]
     return {"engines": await asyncio.gather(*(discover(e) for e in supported))}
+
+
+def _unavailable(item, note):
+    return {
+        "id": item["id"],
+        "name": item["name"],
+        "description": item["description"],
+        "protocol": item["protocol"],
+        "repository": item.get("repository"),
+        "releases": [],
+        "note": note,
+    }
 
 
 def unpack(archive, destination):
@@ -323,9 +374,10 @@ async def install(jobs, ident, recipe_id):
             }
         runtime = {
             "id": "managed-" + recipe_id[:32],
-            "name": f"{recipe['engine']} {recipe['version']} · {recipe['backend']}",
+            "name": f"{recipe.get('source_name') or recipe['engine']} {recipe['version']} · {recipe['backend']}",
             "engine": recipe["engine"],
             "version": recipe["version"],
+            "fork_url": repository_url(recipe.get("repository")),
             "execution_kind": "native",
             "executable": str(executable),
             "env": env,
@@ -334,6 +386,7 @@ async def install(jobs, ident, recipe_id):
             "managed": {
                 "root": str(root),
                 "recipe_id": recipe_id,
+                "source": recipe.get("source") or recipe["engine"],
                 "backend": recipe["backend"],
                 "dll_dirs": sorted({str(p.parent) for p in root.rglob("*.dll")})
                 if platform.system() == "Windows"

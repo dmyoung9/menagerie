@@ -6,8 +6,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from controlplane import adapters
+from controlplane import adapters, host
 from controlplane import managed_engines as engines
+from controlplane.jobs import Jobs
 from controlplane.store import Store
 
 
@@ -37,6 +38,40 @@ def test_release_selection_skips_marker_release_and_requires_cuda_libraries():
     assert engines.release_recipes("llama.cpp", releases, "unsupported") == []
     cpu.pop("digest")
     assert len(engines.release_recipes("llama.cpp", releases, "x86_64")) == 1
+
+
+def test_prism_release_selection_keeps_shared_protocol_and_fork_assets():
+    cuda = asset("llama-prism-b12128-d7b2896-bin-linux-cuda-12.8-x64.tar.gz")
+    cpu = asset("llama-prism-b12128-d7b2896-bin-ubuntu-x64.tar.gz")
+    releases = [
+        {"tag_name": "prism-b10831-9d9efea", "assets": []},
+        {"tag_name": "prism-b12128-d7b2896", "assets": [cpu, cuda]},
+    ]
+    recipes = {
+        r["backend"]: r for r in engines.release_recipes("prism", releases, "x86_64")
+    }
+    assert set(recipes) == {"cuda", "cpu"}
+    prism = recipes["cuda"]
+    assert prism["engine"] == "llama.cpp"
+    assert prism["source"] == "prism"
+    assert prism["repository"] == "PrismML-Eng/llama.cpp"
+    assert prism["version"] == "prism-b12128-d7b2896"
+    # Prism links CUDA statically on Linux and publishes no cudart companion.
+    assert len(prism["assets"]) == 1
+    assert "CUDA 12.8" in prism["requirements"]
+    assert recipes["cpu"]["assets"][0]["url"].endswith(cpu["name"])
+
+
+def test_prism_source_ignores_upstream_and_unknown_tags():
+    upstream = asset("llama-b12128-bin-ubuntu-cuda-12.8-x64.tar.gz")
+    releases = [
+        {"tag_name": "b12128", "prerelease": True, "assets": [upstream]},
+        {
+            "tag_name": "prism-b12128",
+            "assets": [asset("llama-prism-b12128-bin-ubuntu-x64.tar.gz")],
+        },
+    ]
+    assert engines.release_recipes("prism", releases, "x86_64") == []
 
 
 def archive(name="bin/llama-server", link=None):
@@ -125,3 +160,76 @@ async def test_install_verifies_probes_and_preserves_existing_install(tmp_path):
         with pytest.raises(ValueError, match="verification"):
             await engines.install(jobs, "job", recipe["id"])
         assert not (tmp_path / "engines/test-recipe").exists()
+
+
+@pytest.mark.asyncio
+async def test_install_records_fork_provenance_under_the_shared_protocol(tmp_path):
+    store = Store(tmp_path)
+    content = archive()
+    recipe = {
+        "id": "prism-recipe",
+        "engine": "llama.cpp",
+        "source": "prism",
+        "source_name": "llama.cpp · Prism",
+        "repository": "PrismML-Eng/llama.cpp",
+        "version": "prism-b12128-d7b2896",
+        "backend": "cuda",
+        "kind": "archive",
+        "assets": [
+            {
+                "url": "https://example.test/prism.tar.gz",
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        ],
+    }
+    store.put("engine_recipe", recipe)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=content)
+        )
+    ) as client:
+        jobs = SimpleNamespace(
+            store=store,
+            manager=SimpleNamespace(client=client),
+            progress=lambda *args: None,
+        )
+        runtime = await engines.install(jobs, "job", recipe["id"])
+    assert runtime["engine"] == "llama.cpp"
+    assert runtime["fork_url"] == "https://github.com/PrismML-Eng/llama.cpp"
+    assert runtime["managed"]["source"] == "prism"
+    assert runtime["name"].startswith("llama.cpp · Prism prism-b12128-d7b2896")
+
+
+def test_source_build_preflight_rejects_toolkits_that_cannot_target_the_gpu(
+    tmp_path, monkeypatch
+):
+    jobs = Jobs(SimpleNamespace(store=Store(tmp_path)))
+    source = {
+        "engine": "llama.cpp",
+        "url": "https://example.test/llama.cpp",
+        "commit": "a" * 40,
+    }
+    monkeypatch.setattr(host, "gpu_capabilities", lambda: [(12, 0)])
+    monkeypatch.setattr(host, "cuda_toolkit", lambda: None)
+    with pytest.raises(ValueError, match="nvcc"):
+        jobs.install_plan(source)
+    monkeypatch.setattr(host, "cuda_toolkit", lambda: (12, 0))
+    with pytest.raises(ValueError, match="12.8"):
+        jobs.install_plan(source)
+    monkeypatch.setattr(host, "cuda_toolkit", lambda: (12, 8))
+    plan = jobs.install_plan(source)
+    joined = [" ".join(command) for command in plan["commands"]]
+    assert any("submodule update --init --recursive" in c for c in joined)
+    assert any("-DCMAKE_CUDA_ARCHITECTURES=120" in c for c in joined)
+    assert plan["toolchain"] == {"cuda": "12.8", "architectures": ["120"]}
+
+
+def test_cuda_host_probes_parse_toolkit_and_compute_capability_output():
+    assert host.cuda_release("Cuda compilation tools, release 12.8, V12.8.61") == (
+        12,
+        8,
+    )
+    assert host.cuda_release("command not found") is None
+    assert host.compute_capabilities("12.0\n8.6\n") == [(8, 6), (12, 0)]
+    assert host.compute_capabilities("") == []

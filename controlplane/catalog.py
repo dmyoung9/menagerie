@@ -153,10 +153,23 @@ def normalize(profile, alias=None):
             "reasoningField", "reasoning_content"
         )
     model["cost"] = costs(model.get("cost"))
-    context = profile["config"].get(
-        "ctx-size", profile["config"].get("max-model-len", 4096)
-    ) // profile["config"].get("parallel", 1)
     limits = model.setdefault("limit", {})
+    # Automatic/omitted native sizing is not a measured per-request capacity.
+    # Keep the client catalog fallback separate; never divide by auto slot -1
+    # or treat context sentinel 0 as an actual zero-token model.
+    config = profile["config"]
+    context = config.get("max-model-len")
+    if "ctx-size" in config:
+        pool, slots = config["ctx-size"], config.get("parallel")
+        if type(pool) is int and pool > 0:
+            # An explicit context pool is an owner request. Automatic slots
+            # cannot divide it, so the pool itself is the context; only a
+            # concrete positive slot count splits the pool.
+            context = pool // slots if type(slots) is int and slots > 0 else pool
+    if type(context) is not int or context <= 0:
+        context = limits.get("context", 4096)
+    if type(context) is not int or context <= 0:
+        context = 4096
     limits["context"] = context
     limits["output"] = min(limits.get("output", 1024), context)
     if type(limits["output"]) is not int or limits["output"] <= 0:

@@ -7,6 +7,11 @@ or **Refresh capability metadata** to inspect an older registration without movi
 or redownloading its weights. Refresh is a visible Activity job and does not change
 deployment declarations.
 
+In deployment Configuration, detected statuses and **Capability evidence** separate
+model findings from effective deployment findings. Advanced client declarations
+change discovery/exposure metadata, not the engine's abilities. Variants and manual
+template configuration remain available regardless of detection status.
+
 ## Discovery is evidence, not serving certification
 
 Hugging Face inspection reads bounded configuration and chat-template files from
@@ -15,6 +20,36 @@ configuration/templates. These can identify modality configurations, tool-templa
 variables, reasoning markers, and `enable_thinking`. Missing metadata means
 unknown, not an assertion that a feature is unsupported. Tags and descriptions in
 search results remain weaker hints.
+
+Structured findings distinguish **supported**, **unsupported**, and **unknown**
+and retain source/confidence evidence. A reasoning marker alone does not establish
+a toggle, effort levels, a budget, or separate reasoning output. Template controls
+identify mechanisms, not successful inference. Conflicting collected findings are
+retained rather than silently choosing one source.
+
+Published `generation_config.json` sampling recommendations are collected during
+explicit metadata inspection. They are advice, not engine defaults, and are never
+automatically saved. Compatibility is checked against the selected runtime schema
+before they can be offered for application. Free-form model-card prose is not yet
+parsed into recommendations.
+
+### Contributor reference: capability preview
+
+`POST /api/capabilities/preview` accepts `configuration` (the existing profile
+shape) and an optional `template_override`. It returns separate `model` and
+`effective` finding maps, warnings, and schema-checked recommendations. It neither
+executes an engine nor changes registry records. A llama.cpp image-capable model
+without a configured projector/advertised projector flag has unavailable effective
+image input; a configured projector remains unverified until runtime evidence or
+inference acceptance establishes compatibility. Client declarations are retained
+as user evidence, not used to certify serving support. Other runtime families do
+not inherit llama.cpp's projector requirements.
+
+An optional `deployment_id` permits current-session operational observations only
+when artifact, runtime, requested options, raw arguments and template override still
+match the saved deployment. A changed draft or a previous-session observation cannot
+certify the new configuration. Observed modality booleans are whitelisted from
+runtime properties; they do not advance configuration revisions.
 
 GGUF `mmproj` files are shown as companion **candidates**, never automatically
 paired. Select a compatible projector explicitly during download. It is pinned to
@@ -28,7 +63,7 @@ cross-repository projector resolution are not inferred.
 
 A chat template is the file that tells an engine how to format a conversation
 before inference. Menagerie applies the chosen template with the flag that
-matches the engine: **`--chat-template-file`** for llama.cpp and Prism,
+matches the adapter: **`--chat-template-file`** for llama.cpp-compatible builds,
 **`--chat-template`** for vLLM. Models registered before this feature, or any
 selection that was never set, default to **Automatic (engine default)**, which
 means no template file.

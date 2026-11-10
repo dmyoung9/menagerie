@@ -12,8 +12,14 @@ Models supports **Discover** (Hugging Face) and
 complete choice; split GGUF shards are registered together. Existing
 files are referenced in place, not copied or uploaded by the browser.
 
-Settings → Engines installs versioned llama.cpp/Prism release binaries or an
-isolated vLLM environment. Downloads, verification, and probing appear in Activity.
+Settings → Engines installs versioned builds from the declared sources: official
+llama.cpp and Prism's llama.cpp fork, which carries ternary quantizations and
+tensor-core flash attention for quantized KV caches. Each source publishes its
+own asset names, so the installer selects that source's checksummed binaries for
+this platform; a CUDA build whose runtime companion is missing is not offered.
+An installed fork registers under the shared `llama.cpp` protocol, with its
+source repository recorded as provenance. An isolated vLLM environment is also
+available. Downloads, verification, and probing appear in Activity.
 Updates install alongside existing engines; deployments retain their chosen version.
 Referenced engines cannot be removed. Existing executables, source builds, and
 digest-pinned OCI images are available from the engine toolbar.
@@ -33,12 +39,16 @@ The resource preview sits alongside the form on wide screens; on narrow screens
 its summary stays visible and **Show resource charts** expands the graphics.
 
 Sampling controls include top-p, top-k, min-p, presence and repetition penalties
-when advertised by the selected llama.cpp/Prism engine. MTP/speculative controls
+when advertised by the selected llama.cpp-compatible installation. MTP/speculative controls
 also depend on advertised engine flags: select its supported speculative type
 (such as `draft-mtp`), optionally supply a compatible local draft/head file, and
 set draft-token limits. Blank new controls retain engine defaults. Engine flag
 availability does not establish model compatibility or inference acceptance.
-Layer and MoE-expert CPU offload live with memory placement; the default reasoning
+Context and concurrency stay prominent in Memory & placement. Offload, cache
+precision, automatic-fit margins and multi-device controls live under **Advanced
+memory and placement**, with explanations; most users can leave them omitted.
+Performance shows an engine-default empty state, or explains that an engine must
+be selected before supported overrides can be added. The default reasoning
 budget lives with generation settings. The separate Variants list opens a Drawer
 for editing each variant. Variants can have custom names,
 effort values, budgets and template controls; choose the deployment default
@@ -96,14 +106,21 @@ requests. This integration endpoint is separate from the built-in dashboard char
 - Pinned deployments are never automatically evicted. Idle, explicitly authorized
   evictable deployments can be stopped for pressure/higher-priority demand.
   Pinned pressure is visible, not a guarantee against OOM.
-- On-demand requests use bounded queues/timeouts. Multi-model deployments load,
-  idle, and make room as a unit. Busy members protect the unit from unloading.
+- On-demand requests use bounded queues/timeouts. Coordinated multi-model deployments
+  load, idle, and make room as a unit; native pools manage individual model residency.
+  Busy members protect the unit from ordinary unloading.
   Full queues return 429; unavailable/loading failures return structured 503 errors.
 - Ready means the runtime responds successfully and advertises the expected model.
   A running process alone is not readiness. Crashes and degraded health are distinct states.
 - Failed starts stop new processes, report captured engine errors, and attempt to restore
   explicitly stopped predecessors. Failed restoration is recorded, not hidden.
   Active requests block ordinary stops/evictions.
+- Manual **Unload** waits for active requests and reports that wait. Single-model
+  deployments pause new admissions while draining; coordinated siblings remain
+  available so dependent work can finish. **Cancel requests and unload** explicitly
+  interrupts active work and unloads the complete deployment. It can escalate a
+  waiting unload. No request cancellation is implied by the ordinary Unload action.
+  An on-demand deployment stays enabled and may load again on the next request.
 - Streaming stays streamed; cancellation closes the upstream connection. Request
   records retain correlation ID, deployment, latency, observable TTFT/output tokens,
   and errors—not prompt bodies.

@@ -14,12 +14,16 @@ export function JsonEdit<T>({
   onChange,
   onValid,
   decode,
+  inline = false,
+  readOnly = false,
 }: {
   label: string;
   value: T;
   onChange: (value: T) => void;
   onValid?: (valid: boolean) => void;
   decode: Decoder<T>;
+  inline?: boolean;
+  readOnly?: boolean;
 }) {
   const [text, setText] = useState(pretty(value));
   const [error, setError] = useState('');
@@ -34,10 +38,11 @@ export function JsonEdit<T>({
       onValid?.(true);
     }
   }, [serialized, onValid]);
-  return (
-    <details>
-      <summary>{label}</summary>
+  const field = (
+    <>
+      {inline && <h4>{label}</h4>}
       <Textarea
+        readOnly={readOnly}
         aria-label={label}
         aria-invalid={!!error}
         rows={8}
@@ -69,6 +74,13 @@ export function JsonEdit<T>({
           {error}
         </p>
       )}
+    </>
+  );
+  if (inline) return <div className="json-inline">{field}</div>;
+  return (
+    <details>
+      <summary>{label}</summary>
+      {field}
     </details>
   );
 }

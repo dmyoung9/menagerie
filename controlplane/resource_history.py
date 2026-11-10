@@ -38,6 +38,7 @@ def performance_samples(store, ident, hours):
             and (s.get("deployment_id") or s.get("deployment_snapshot", {}).get("id"))
             == ident
             and run_profile_hash(s) == fingerprint
+            and not s.get("pool_aggregate")
         ),
         key=lambda s: s["started_at"],
         reverse=True,
@@ -100,6 +101,8 @@ def retained(store, settings):
 def summaries(store, settings, artifact_id=None):
     groups = {}
     for run in retained(store, settings):
+        if run.get("pool_aggregate"):
+            continue
         artifact = run.get("artifact_identity", {})
         if artifact_id is not None and artifact.get("id") != artifact_id:
             continue
@@ -129,6 +132,7 @@ def summaries(store, settings, artifact_id=None):
                     "outcome",
                     "peak_gpu_mib",
                     "peak_ram_mib",
+                    "runtime_observation",
                 )
             }
         )
@@ -179,6 +183,7 @@ def prune(store, settings, c):
                         "ended_at",
                         "peak_gpu_mib",
                         "peak_ram_mib",
+                        "runtime_observation",
                     )
                 }
             )
@@ -186,6 +191,7 @@ def prune(store, settings, c):
         if run.get("started_at", 0) < cutoff or size > quota:
             run.pop("peak_gpu_mib", None)
             run.pop("peak_ram_mib", None)
+            run.pop("runtime_observation", None)
             store.put(
                 "session",
                 run | {"resource_history_retained": False},

@@ -10,6 +10,16 @@ import psutil
 from controlplane.store import Store
 
 
+def wait_for_controls(read_controls, required, attempts=100):
+    """A window handle can exist before its child controls finish creation."""
+    for _ in range(attempts):
+        controls = read_controls()
+        if all(label in controls for label in required):
+            return controls
+        time.sleep(0.1)
+    raise AssertionError("Missing granular removal option after dialog initialization")
+
+
 def check_dialog_defaults(app, root, env):
     user = ctypes.WinDLL("user32", use_last_error=True)
     callback = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -59,7 +69,6 @@ def check_dialog_defaults(app, root, env):
                 controls[title.value] = handle
             return True
 
-        user.EnumChildWindows(window, collect, 0)
         labels = (
             "Settings, model/engine references, history and registry backups",
             "Menagerie-managed engines and source-build installations",
@@ -67,6 +76,13 @@ def check_dialog_defaults(app, root, env):
             "Engine/application caches (separate from model downloads)",
             "Application and runtime logs",
         )
+
+        def read_controls():
+            controls.clear()
+            user.EnumChildWindows(window, collect, 0)
+            return controls
+
+        controls = wait_for_controls(read_controls, (*labels, "Cancel"))
         for label in labels:
             assert label in controls, "Missing granular removal option"
             assert user.SendMessageW(controls[label], 0x00F0, 0, 0) == 0, (

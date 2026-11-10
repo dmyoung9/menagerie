@@ -4,6 +4,60 @@ import * as contracts from '../src/contracts.ts';
 import { editable } from '../src/editor-state.ts';
 import { artifactLimits } from '../src/artifact-metadata.ts';
 
+test('parameter annotations remain additive and validate mode ownership', () => {
+  assert.deepEqual(contracts.runtimeField({ type: 'integer' }), {
+    type: 'integer',
+  });
+  const presentation = {
+    category: 'resources-context',
+    owner: 'runtime-process',
+    owner_by_mode: { 'native-pool': 'model-deployment' },
+    inheritable: true,
+    automatic_value: 0,
+    request_overridable: false,
+    provenance: 'adapter',
+  };
+  assert.deepEqual(contracts.parameterPresentation(presentation), presentation);
+  assert.throws(
+    () =>
+      contracts.parameterPresentation({
+        ...presentation,
+        owner_by_mode: { 'native-pool': 'model' },
+      }),
+    /native-pool/,
+  );
+  assert.throws(
+    () => contracts.runtimeField({ restart_required: 'yes' }),
+    /restart_required/,
+  );
+});
+
+test('capability descriptors retain uncertainty and all evidence', () => {
+  const finding = {
+    status: 'unknown',
+    evidence: [
+      { source: 'artifact', detail: 'Image architecture', confidence: 'high' },
+      { source: 'runtime', detail: 'Missing projector', confidence: 'high' },
+    ],
+  };
+  assert.deepEqual(contracts.capability(finding), finding);
+  assert.equal('value' in contracts.capability(finding), false);
+  assert.throws(
+    () => contracts.capability({ ...finding, status: false }),
+    /status/,
+  );
+  assert.throws(
+    () =>
+      contracts.capability({
+        ...finding,
+        evidence: [
+          { source: 'model-name', detail: 'Guess', confidence: 'high' },
+        ],
+      }),
+    /source/,
+  );
+});
+
 test('Hugging Face catalog fields accept SDK nulls without accepting invalid shapes', () => {
   const model = {
     id: 'fixture/qwen',

@@ -51,7 +51,62 @@ def executable(name):
         Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
         / "NVIDIA Corporation/NVSMI",
     ):
-        candidate = directory / "nvidia-smi.exe"
+        candidate = directory / f"{name}.exe"
         if candidate.is_file():
             return str(candidate)
     return None
+
+
+def cuda_release(output):
+    """Parse nvcc's ``release X.Y`` line."""
+    import re
+
+    match = re.search(r"release (\d+)\.(\d+)", output or "")
+    return (int(match[1]), int(match[2])) if match else None
+
+
+def compute_capabilities(output):
+    """Parse ``nvidia-smi --query-gpu=compute_cap`` CSV output."""
+    import re
+
+    found = set()
+    for line in (output or "").splitlines():
+        match = re.fullmatch(r"\s*(\d+)\.(\d+)\s*", line)
+        if match:
+            found.add((int(match[1]), int(match[2])))
+    return sorted(found)
+
+
+def cuda_toolkit():
+    """Return the CUDA toolkit version nvcc reports, or None."""
+    import subprocess
+
+    tool = executable("nvcc")
+    if not tool:
+        return None
+    try:
+        output = subprocess.run(
+            [tool, "--version"], capture_output=True, text=True, timeout=30
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return cuda_release(output)
+
+
+def gpu_capabilities():
+    """Return the compute capabilities nvidia-smi reports, ascending."""
+    import subprocess
+
+    tool = executable("nvidia-smi")
+    if not tool:
+        return []
+    try:
+        output = subprocess.run(
+            [tool, "--query-gpu=compute_cap", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return compute_capabilities(output)

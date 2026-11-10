@@ -26,6 +26,13 @@ def runtime(deployment):
     if state in LOADING:
         return "loading"
     if state == "READY":
+        observation = deployment.get("runtime_observation") or {}
+        if observation.get("residency") == "sleeping":
+            return "sleeping"
+        if observation.get("residency") == "unloaded":
+            return "idle"
+        if observation.get("residency") == "loading":
+            return "loading"
         return "running"
     if state == "DEGRADED":
         return "degraded"

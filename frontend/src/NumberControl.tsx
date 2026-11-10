@@ -1,7 +1,7 @@
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Field, FieldGroup } from '@/components/ui/field';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 /** An exact numeric editor with a bounded slider; display-only defaults stay implicit. */
@@ -115,5 +115,81 @@ export function NumberControl({
         />
       </Field>
     </FieldGroup>
+  );
+}
+
+/**
+ * A compact exact value editor. An unset value stays visibly empty; the engine
+ * default is only a placeholder, so viewing a card never creates an override.
+ */
+export function ExactNumber({
+  label,
+  value,
+  placeholder = 'Engine default',
+  min,
+  max,
+  step = 1,
+  required = false,
+  disabled = false,
+  change,
+  describedBy,
+  invalid = false,
+}: {
+  label: string;
+  value?: number;
+  placeholder?: string;
+  min?: number;
+  max?: number;
+  step?: number | 'any';
+  required?: boolean;
+  disabled?: boolean;
+  change: (value: number | undefined) => void;
+  describedBy?: string;
+  invalid?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(value === undefined ? '' : String(value));
+  useEffect(() => {
+    if (!editing) setText(value === undefined ? '' : String(value));
+  }, [value, editing]);
+  return (
+    <Input
+      aria-label={label}
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      required={required}
+      disabled={disabled}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      value={text}
+      placeholder={placeholder}
+      onFocus={() => setEditing(true)}
+      onChange={(event) => {
+        const next = event.target.value;
+        setText(next);
+        if (next.trim() === '') change(undefined);
+        else if (Number.isFinite(Number(next))) change(Number(next));
+      }}
+      onBlur={() => {
+        setEditing(false);
+        const next = text.trim();
+        if (next === '') change(undefined);
+        else if (!Number.isFinite(Number(next)) || next.endsWith('.')) {
+          setText(value === undefined ? '' : String(value));
+          if (value === undefined) change(undefined);
+        } else change(Number(next));
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          const input = event.currentTarget;
+          if (!input.reportValidity()) return;
+          flushSync(() => input.blur());
+          input.form?.requestSubmit();
+        }
+      }}
+    />
   );
 }

@@ -21,6 +21,7 @@ import {
 import { FieldGroup, FieldLegend, FieldSet } from '@/components/ui/field';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { RuntimeFlagField } from './RuntimeFlagField';
+import { Empty } from './ui';
 import type { ConfigPath } from './draft-form';
 import { flagDefault, flagDefaultNote, runtimeFlags } from './runtime-flags';
 import type { HostSnapshot, JsonValue, RuntimeField } from './types';
@@ -37,6 +38,12 @@ export function RuntimeFlagCard({
   before,
   after,
   formPath,
+  engineSelected = true,
+  curated = false,
+  bare = false,
+  exclude = [],
+  showAdvanced = true,
+  showEmpty = true,
 }: {
   name: string;
   title: string;
@@ -49,12 +56,42 @@ export function RuntimeFlagCard({
   before?: ReactNode;
   after?: ReactNode;
   formPath: ConfigPath;
+  engineSelected?: boolean;
+  curated?: boolean;
+  /** Render inside a parent card's advanced section instead of as its own card. */
+  bare?: boolean;
+  exclude?: string[];
+  showAdvanced?: boolean;
+  showEmpty?: boolean;
 }) {
   const [selected, setSelected] = useState<string[] | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const mobile = useIsMobile();
-  const supported = keys.filter((key) => schema[key]);
+  const supported = keys.filter((key) => schema[key] && !exclude.includes(key));
   const available = supported.filter((key) => value[key] === undefined);
+  const main = supported.filter(
+    (key) =>
+      value[key] !== undefined && (!curated || !showAdvanced || key === 'temp'),
+  );
+  const collapsed =
+    curated && showAdvanced
+      ? supported.filter((key) => key !== 'temp' && value[key] !== undefined)
+      : [];
+  const nothing = !supported.some((key) => value[key] !== undefined);
+  const add = (
+    <Button
+      ref={trigger}
+      type="button"
+      variant="outline"
+      size="sm"
+      aria-label={`Add ${name} flags`}
+      disabled={disabled || !available.length}
+      onClick={() => setSelected([])}
+    >
+      <Plus data-icon="inline-start" />
+      Add
+    </Button>
+  );
   const content = (key: string) => (
     <ItemContent className="min-w-0">
       <ItemTitle className="line-clamp-none">
@@ -68,45 +105,98 @@ export function RuntimeFlagCard({
       </ItemDescription>
     </ItemContent>
   );
-  return (
-    <SettingsSection
-      name={name}
-      title={title}
-      action={
-        <Button
-          ref={trigger}
-          type="button"
-          variant="outline"
-          size="sm"
-          aria-label={`Add ${name} flags`}
-          disabled={disabled || !available.length}
-          onClick={() => setSelected([])}
-        >
-          <Plus data-icon="inline-start" />
-          Add
-        </Button>
-      }
-    >
+  const body = (
+    <>
       <FieldSet disabled={disabled}>
         <FieldLegend className="sr-only">{title} flags</FieldLegend>
         <FieldGroup>
           {before}
+          {bare && <div className="flag-actions">{add}</div>}
+          {curated && schema.temp && value.temp === undefined && (
+            <p className="text-muted-foreground text-sm">
+              Temperature: unspecified · engine default.{' '}
+              <Button
+                type="button"
+                variant="outline"
+                disabled={disabled}
+                onClick={() =>
+                  change({ ...value, temp: flagDefault('temp', schema, value) })
+                }
+              >
+                Override temperature
+              </Button>
+            </p>
+          )}
           <ItemGroup aria-label={`${title} flag items`}>
-            {supported
-              .filter((key) => value[key] !== undefined)
-              .map((key) => (
-                <RuntimeFlagField
-                  key={key}
-                  flag={key}
-                  schema={schema}
-                  value={value}
-                  change={change}
-                  host={host}
-                  disabled={disabled}
-                  formPath={formPath}
-                />
-              ))}
+            {main.map((key) => (
+              <RuntimeFlagField
+                key={key}
+                flag={key}
+                schema={schema}
+                value={value}
+                change={change}
+                host={host}
+                disabled={disabled}
+                formPath={formPath}
+              />
+            ))}
           </ItemGroup>
+          {collapsed.length > 0 &&
+            (showAdvanced ? (
+              <details>
+                <summary>Advanced sampling ({collapsed.length})</summary>
+                <p className="text-muted-foreground text-sm">
+                  Client requests may override sampling defaults. Changes to
+                  engine startup defaults require reload.
+                </p>
+                <ItemGroup aria-label="Advanced sampling flag items">
+                  {collapsed.map((key) => (
+                    <RuntimeFlagField
+                      key={key}
+                      flag={key}
+                      schema={schema}
+                      value={value}
+                      change={change}
+                      host={host}
+                      disabled={disabled}
+                      formPath={formPath}
+                    />
+                  ))}
+                </ItemGroup>
+              </details>
+            ) : (
+              <ItemGroup aria-label={`${title} flag items`}>
+                {collapsed.map((key) => (
+                  <RuntimeFlagField
+                    key={key}
+                    flag={key}
+                    schema={schema}
+                    value={value}
+                    change={change}
+                    host={host}
+                    disabled={disabled}
+                    formPath={formPath}
+                  />
+                ))}
+              </ItemGroup>
+            ))}
+          {showEmpty && nothing && (
+            <Empty
+              title={
+                !engineSelected
+                  ? 'Choose an engine'
+                  : !supported.length
+                    ? 'No supported options'
+                    : 'Using engine defaults'
+              }
+            >
+              {!engineSelected
+                ? `Choose an engine to see its supported ${name} options.`
+                : !supported.length
+                  ? `This engine does not advertise supported ${name} options.`
+                  : 'Add an override only when you need to tune a specific setting.'}
+            </Empty>
+          )}
           {after}
         </FieldGroup>
       </FieldSet>
@@ -178,6 +268,12 @@ export function RuntimeFlagCard({
           </DrawerContent>
         </Drawer>
       )}
+    </>
+  );
+  if (bare) return body;
+  return (
+    <SettingsSection name={name} title={title} action={add}>
+      {body}
     </SettingsSection>
   );
 }

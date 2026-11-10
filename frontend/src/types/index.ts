@@ -4,6 +4,49 @@ export type JsonValue =
 export type JsonObject = Record<string, JsonValue>;
 export type UnknownRecord = Record<string, unknown>;
 
+export type SupportStatus = 'supported' | 'unsupported' | 'unknown';
+export type CapabilityEvidence = {
+  source:
+    | 'artifact'
+    | 'tokenizer'
+    | 'model-card'
+    | 'runtime'
+    | 'inference-test'
+    | 'user';
+  detail: string;
+  confidence: 'high' | 'medium' | 'low';
+};
+export type Capability<T = JsonValue> = {
+  status: SupportStatus;
+  value?: T | null;
+  evidence: CapabilityEvidence[];
+  conflicting?: boolean;
+};
+export type ParameterRecommendation = {
+  parameter: string;
+  value: number;
+  compatible: boolean | null;
+  source: string;
+  detail: string;
+};
+export type CapabilityPreview = {
+  model: Record<string, Capability>;
+  effective: Record<string, Capability>;
+  warnings: string[];
+  recommendations: ParameterRecommendation[];
+};
+export type ParameterOwner =
+  'installation' | 'runtime-process' | 'model-deployment' | 'request-variant';
+export type ParameterPresentation = {
+  category: 'model-runtime' | 'resources-context' | 'generation' | 'advanced';
+  owner: ParameterOwner;
+  owner_by_mode?: Partial<Record<'standalone' | 'native-pool', ParameterOwner>>;
+  inheritable: boolean;
+  automatic_value?: string | number | boolean | null;
+  request_overridable: boolean;
+  provenance: 'adapter' | 'executable-help';
+};
+
 export type RuntimeField = {
   type?: string;
   label?: string;
@@ -19,6 +62,8 @@ export type RuntimeField = {
   choices?: string[];
   units?: string;
   cpu_only?: boolean;
+  restart_required?: boolean;
+  presentation?: ParameterPresentation;
 };
 
 export type ModelCapabilities = {
@@ -55,6 +100,8 @@ export type ConfiguredModelCatalog = Omit<
 };
 
 export type DiscoveredCapabilities = {
+  findings?: Record<string, Capability>;
+  recommendations?: ParameterRecommendation[];
   input?: string[];
   tools?: boolean;
   reasoning?: boolean | { supported: boolean };
@@ -116,6 +163,10 @@ export type Artifact = {
 export type RuntimeCapabilities = {
   formats?: string[];
   schema?: Record<string, RuntimeField>;
+  features?: Record<string, Capability>;
+  sha256?: string;
+  version?: string;
+  flags?: string[];
 };
 export type Runtime = {
   id: string;
@@ -131,7 +182,7 @@ export type Runtime = {
   commit?: string | null;
   fork_url?: string | null;
   formats?: string[];
-  managed?: { recipe_id?: string; backend?: string };
+  managed?: { recipe_id?: string; backend?: string; source?: string };
   capabilities?: RuntimeCapabilities;
 };
 export type Profile = {
@@ -159,13 +210,15 @@ export type DeploymentDraft = {
   idle_timeout: number;
   allow_eviction: boolean;
   enabled: boolean;
-  gpu: number;
+  gpu: number | null;
   queue_timeout: number;
   template_override?: TemplateSelection | null;
 };
 export type DeploymentSetDraft = {
   id?: string;
   name: string;
+  engine_pool?: boolean;
+  max_loaded?: number;
   residency: string;
   priority: number;
   idle_timeout: number;
@@ -182,8 +235,18 @@ export type DeploymentLifecycle = {
   last_stop_reason?: string | null;
 };
 export type Deployment = {
+  draining?: boolean;
   id: string;
   name: string;
+  engine_pool?: boolean;
+  max_loaded?: number;
+  runtime_observation?: {
+    residency: string;
+    resolved?: Record<string, number>;
+    memory?: JsonValue;
+    source: string;
+    observed_at?: number;
+  } | null;
   profile_id?: string | null;
   profile_snapshot?: Profile;
   alias: string;
@@ -194,7 +257,7 @@ export type Deployment = {
   allow_eviction?: boolean;
   enabled: boolean;
   state: string;
-  gpu?: number;
+  gpu?: number | null;
   queue_timeout?: number;
   revision: number;
   member_only?: boolean;
@@ -308,6 +371,7 @@ export type RuntimeRecommendation = {
 };
 export type EngineRecommendation = {
   engine?: string | null;
+  source?: string | null;
   reason?: string;
 };
 export type CollectorHealth = {
@@ -340,7 +404,7 @@ export type OperationEventPayload =
   | { kind: 'deployment'; enabled: boolean }
   | { kind: 'other'; value: UnknownRecord };
 export type SourceBuildDraft = {
-  engine: 'llama.cpp' | 'prism';
+  engine: 'llama.cpp';
   url: string;
   commit: string;
 };
@@ -376,12 +440,16 @@ export type EngineRelease = {
   version: string;
   backend: string;
   requirements?: string;
+  source?: string;
+  repository?: string;
 };
 export type EngineCatalogEntry = {
   id: string;
   name: string;
   description?: string;
   note?: string;
+  protocol?: string;
+  repository?: string;
   releases: EngineRelease[];
 };
 export type EngineReleaseCatalog = {
@@ -394,7 +462,7 @@ export type ResourceEstimate = {
   file_size_bytes: number | null;
   kv_mib: number | null;
   components?: Record<string, number> | null;
-  basis: 'observed' | 'derived' | 'unavailable';
+  basis: 'observed' | 'derived' | 'engine' | 'unavailable';
   sample_count: number;
   provenance: string;
   profile_hash: string;
@@ -402,7 +470,7 @@ export type ResourceEstimate = {
 export type ResourcePreviewMember = {
   key: string;
   name: string;
-  gpu: number;
+  gpu: number | null;
   estimate: ResourceEstimate;
   recommendation?: RuntimeRecommendation & {
     context_default?: number | null;
@@ -435,7 +503,7 @@ export type ResourcePreview = {
 };
 export type ResourcePreviewDraft = {
   name?: string;
-  gpu?: number;
+  gpu?: number | null;
   configuration?: ProfileDraft;
 };
 export type ResourceDraft = Required<ResourcePreviewDraft>;

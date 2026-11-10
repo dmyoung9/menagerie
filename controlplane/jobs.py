@@ -13,7 +13,7 @@ import httpx
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from tqdm.auto import tqdm
 
-from . import adapters, templates
+from . import adapters, host, templates
 from .manager import redact
 from .store import identity, uid
 
@@ -184,6 +184,7 @@ class Jobs:
             for filename, key in (
                 ("config.json", "config"),
                 ("tokenizer_config.json", "tokenizer_config"),
+                ("generation_config.json", "generation_config"),
             ):
                 value = await read_file(filename)
                 if value is None:
@@ -532,20 +533,52 @@ class Jobs:
 
     def install_plan(self, source):
         engine = source.get("engine")
-        if engine not in {"llama.cpp", "prism"}:
+        if engine != "llama.cpp":
             raise ValueError(
-                "Native source builds currently support llama.cpp/Prism; register isolated vLLM/SGLang binaries or pinned OCI images"
+                "Native source builds support llama.cpp-compatible repositories; register other runtime executables or pinned OCI images"
             )
         url, commit = source.get("url", ""), source.get("commit", "")
         if not re.fullmatch(
             r"https://[A-Za-z0-9.-]+/[A-Za-z0-9_./-]+", url
         ) or not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise ValueError("Supply an HTTPS repository and exact 40-character commit")
+        # Fail before a long clone when the host cannot produce the built
+        # binary: blackwell-class GPUs need a 12.8+ toolkit.
+        toolkit = host.cuda_toolkit()
+        capabilities = host.gpu_capabilities()
+        newest = capabilities[-1] if capabilities else None
+        if toolkit is None:
+            raise ValueError(
+                "No CUDA toolkit (nvcc) found. Source builds request an NVIDIA CUDA "
+                "build; install CUDA 12.8 or newer with the matching driver, or "
+                "install a prebuilt engine instead"
+            )
+        if newest and newest >= (12, 0) and toolkit < (12, 8):
+            raise ValueError(
+                f"CUDA toolkit {toolkit[0]}.{toolkit[1]} cannot target compute "
+                f"capability {newest[0]}.{newest[1]}. Install CUDA 12.8 or newer, "
+                "or install a prebuilt engine instead"
+            )
         root = (
             self.store.root
             / "runtimes"
             / (engine.replace(".", "-") + "-" + commit[:12])
         )
+        configure = [
+            "cmake",
+            "-S",
+            str(root),
+            "-B",
+            str(root / "build"),
+            "-DGGML_CUDA=ON",
+            "-DLLAMA_CURL=OFF",
+            "-DCMAKE_BUILD_TYPE=Release",
+        ]
+        if capabilities:
+            configure.append(
+                "-DCMAKE_CUDA_ARCHITECTURES="
+                + ";".join(f"{major}{minor}" for major, minor in capabilities)
+            )
         commands = [
             [
                 "git",
@@ -557,16 +590,8 @@ class Jobs:
                 str(root),
             ],
             ["git", "-C", str(root), "checkout", "--detach", commit],
-            [
-                "cmake",
-                "-S",
-                str(root),
-                "-B",
-                str(root / "build"),
-                "-DGGML_CUDA=ON",
-                "-DLLAMA_CURL=OFF",
-                "-DCMAKE_BUILD_TYPE=Release",
-            ],
+            ["git", "-C", str(root), "submodule", "update", "--init", "--recursive"],
+            configure,
             [
                 "cmake",
                 "--build",
@@ -582,6 +607,10 @@ class Jobs:
             "url": url,
             "commit": commit,
             "root": str(root),
+            "toolchain": {
+                "cuda": f"{toolkit[0]}.{toolkit[1]}",
+                "architectures": [f"{major}{minor}" for major, minor in capabilities],
+            },
             "commands": commands,
             "warning": "This executes third-party CMake/build code as your user. Review and trust the pinned source. No sudo or downloaded install scripts.",
         }

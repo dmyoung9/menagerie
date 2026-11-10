@@ -13,6 +13,17 @@ admission and process ownership. `Store` uses SQLite WAL, revision checks, and
 history. Serving deployments own shared loading/eviction policy; model instances
 retain their engine configuration snapshots and stable aliases.
 
+Runtime suppliers/forks are installation provenance, not adapter families.
+`engine_catalog.py` declares each installable source as a protocol, a release tag
+pattern, and per-system asset patterns with an optional runtime companion; adding
+a supplier is a declaration, not a new engine literal or adapter branch.
+`runtime_protocol.py` defines the small CLI/observation boundary and advertised
+mechanisms. `runtime_pool.py` renders explicit native model presets and validates
+pool policy. Capabilities are tied to executable hashes, not repository names.
+Native pools use one process owner, pool-local routing/residency, and aggregate
+process telemetry. Supervised groups retain atomic residency. Version 3 opens only
+schema-3 registries; a 2.x state directory must be preserved for rollback, not migrated.
+
 The hardened user service only grants writes inside its state directory. Keep
 registry migrations independent of writable system temporary directories: stream
 scalar history counters rather than grouping/sorting large session JSON blobs.
@@ -24,6 +35,9 @@ artifact, configuration, raw arguments and placement. Legacy session snapshots a
 read through the same fingerprint calculation without rewriting restoration data.
 `GET /api/history/resources?artifact_id=ID` returns configuration groups, per-pool
 measured counts/mean/max peaks, date ranges and individual runs, including failures.
+Groups identify requested configuration; automatic settings can differ between runs.
+Each run retains its last native observation separately. Pool-aggregate process peaks
+are excluded from per-model history and estimates.
 Missing measurements are null. The monitor prunes expired/quota-excess resource
 fields separately from restorable session configuration. Resource summaries have
 the same per-category `summary_days`/`history_quota_mib` bounds as requests/samples.
@@ -53,6 +67,47 @@ Review tokens include membership and policy revisions. Preserve atomic rollback,
 independent aliases/ports for reused weights, and inactive history restoration.
 See `tests/test_deployment_sets.py` and `tests/test_multi_configuration.py` for
 fake-runtime regression coverage, not live GPU acceptance.
+
+### Configuration presentation contracts
+
+Runtime option schemas expose additive `presentation` annotations: category,
+owner, mode-specific ownership, omission support, known explicit automatic values,
+request override support, and annotation provenance. These describe the adapter's
+CLI mapping; they are not claims of successful model or hardware verification.
+For llama.cpp, the existing model-server options are process startup settings in
+standalone mode and child-model preset settings in native-pool mode. Router
+policy (`max_loaded`, eviction consent and membership) remains owned by the pool,
+not by these child presets. Other engines do not inherit that pool mapping.
+
+Executable capability responses include structured feature advertisements beside
+the legacy mechanism map and discovered flags. A supported advertisement means
+the installed help exposes the mechanism, not that any model or device has passed
+inference acceptance. Missing CLI evidence remains unknown. Schema-help caches
+include the executable filesystem fingerprint as well as installation revision;
+on refresh, the saved executable hash is checked before executing help. Replacing
+the binary invalidates cached help and requires registering the updated
+installation. This does not fingerprint dynamically loaded libraries or drivers.
+
+Keep the following values separate:
+
+- **Unspecified/inherited:** the key is absent from `Profile.config`; do not
+  materialize schema defaults, recommendations, or observations when saving.
+- **Automatic:** an explicitly selected engine sentinel remains a saved value.
+  For llama.cpp, context `0` requests the engine's model-derived context,
+  parallel `-1` requests automatic slot selection, and GPU layers `auto` requests
+  automatic offloading. None is equivalent to omission or a guaranteed fit.
+- **Explicit:** retain concrete values, including zero and values equal to a
+  default. Removing an override removes the key rather than substituting null.
+- **Observed:** facts from the current runtime session remain operational
+  `runtime_observation` records, never configuration defaults or revisions.
+- **Estimated:** resource estimates remain advisory and are not requested or
+  observed allocations. Aggregate native-pool peaks remain pool-level facts.
+
+`Capability` and `CapabilityEvidence` define the shared structured finding
+contract, with supported/unsupported/unknown status and retained source evidence.
+They are a foundation for discovery integration, not a replacement for existing
+catalog declarations or a claim that the current hint endpoint resolves effective
+deployment support. Missing metadata must resolve to uncertainty, not rejection.
 
 ## Checks
 
@@ -115,7 +170,7 @@ the wheel needs no Node. Create a fresh environment outside the checkout:
 uv build
 check_dir="$(mktemp -d)"
 uv venv "$check_dir/venv"
-uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-2.5.0-py3-none-any.whl
+uv pip install --python "$check_dir/venv/bin/python" dist/menagerie-3.0.0-py3-none-any.whl
 "$check_dir/venv/bin/python" scripts/check_wheel.py
 ```
 

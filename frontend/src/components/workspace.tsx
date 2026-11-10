@@ -56,6 +56,7 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { ConfigurationMatch } from './configuration-search';
 
 const fieldControls = new Set<unknown>([Input, Textarea, NativeSelect]);
 
@@ -356,12 +357,20 @@ export function Field({
   return (
     <FieldRoot className="mb-4" data-invalid={control?.props['aria-invalid']}>
       {control ? (
-        <FieldLabel htmlFor={control.props.id || id}>{label}</FieldLabel>
+        <FieldLabel htmlFor={control.props.id || id}>
+          <ConfigurationMatch>{label}</ConfigurationMatch>
+        </FieldLabel>
       ) : (
-        <FieldTitle>{label}</FieldTitle>
+        <FieldTitle>
+          <ConfigurationMatch>{label}</ConfigurationMatch>
+        </FieldTitle>
       )}
       {nodes}
-      {hint && <FieldDescription id={`${id}-hint`}>{hint}</FieldDescription>}
+      {hint && (
+        <FieldDescription id={`${id}-hint`}>
+          <ConfigurationMatch>{hint}</ConfigurationMatch>
+        </FieldDescription>
+      )}
     </FieldRoot>
   );
 }

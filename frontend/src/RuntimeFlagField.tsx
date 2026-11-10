@@ -12,6 +12,7 @@ import {
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Item, ItemActions, ItemContent } from '@/components/ui/item';
 import { NumberControl } from './NumberControl';
+import { ConfigurationMatch } from '@/components/configuration-search';
 import { useSharedDraftForm } from './use-draft-form';
 import {
   commitFlagInputs,
@@ -89,9 +90,13 @@ export function RuntimeFlagField({
           data-invalid={invalid}
           data-disabled={disabled}
         >
-          <FieldTitle id={`${id}-label`}>{runtimeFlags[flag].title}</FieldTitle>
+          <FieldTitle id={`${id}-label`}>
+            <ConfigurationMatch>{runtimeFlags[flag].title}</ConfigurationMatch>
+          </FieldTitle>
           <FieldLabel id={`${id}-syntax`} htmlFor={radio ? undefined : id}>
-            <code>({runtimeFlags[flag].syntax})</code>
+            <code>
+              <ConfigurationMatch>{`(${runtimeFlags[flag].syntax})`}</ConfigurationMatch>
+            </code>
           </FieldLabel>
           {radio ? (
             <RadioGroup

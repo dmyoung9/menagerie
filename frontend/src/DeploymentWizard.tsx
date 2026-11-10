@@ -61,6 +61,7 @@ export function DeploymentWizard({
   const [context, setContext] = useState(8192),
     [parallel, setParallel] = useState(1),
     [custom, setCustom] = useState(false);
+  const [automatic, setAutomatic] = useState(true);
   const [residency, setResidency] = useState('on-demand'),
     [idle, setIdle] = useState(300);
   const [catalog, setCatalog] = useState<ModelCatalog>({
@@ -163,10 +164,10 @@ export function DeploymentWizard({
     'model';
   const draftConfig = {
     ...extra,
-    ...(hasContext
+    ...(!automatic && hasContext
       ? { [contextKey]: context * (hasParallel ? parallel : 1) }
       : {}),
-    ...(hasParallel ? { parallel } : {}),
+    ...(!automatic && hasParallel ? { parallel } : {}),
   };
   const preview = useResourcePreview(
     runtime
@@ -359,7 +360,22 @@ export function DeploymentWizard({
                   />
                 </Field>
                 <>
-                  {hasContext && (
+                  <Field label="Configuration">
+                    <NativeSelect
+                      value={automatic ? 'automatic' : 'explicit'}
+                      onChange={(e) =>
+                        setAutomatic(e.target.value === 'automatic')
+                      }
+                    >
+                      <NativeSelectOption value="automatic">
+                        Engine defaults and automatic fit
+                      </NativeSelectOption>
+                      <NativeSelectOption value="explicit">
+                        Explicit context and concurrency
+                      </NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                  {!automatic && hasContext && (
                     <Field
                       label="Context / request"
                       hint={
@@ -422,7 +438,7 @@ export function DeploymentWizard({
                       )}
                     </Field>
                   )}
-                  {hasParallel && (
+                  {!automatic && hasParallel && (
                     <Field
                       label="Concurrent requests"
                       hint={`Shared context pool: ${(context * parallel).toLocaleString()} tokens`}
@@ -514,6 +530,7 @@ export function DeploymentWizard({
                   <summary>Advanced</summary>
                   <>
                     <RuntimeSettings
+                      engineSelected={Boolean(runtime)}
                       formPath="config"
                       schema={Object.fromEntries(
                         Object.entries(schema).filter(
@@ -560,15 +577,21 @@ export function DeploymentWizard({
                     ).map(([key, label, min, max]) => (
                       <Field key={String(key)} label={String(label)}>
                         <Input
-                          required
+                          required={key !== 'gpu'}
                           type="number"
                           min={min}
                           max={max}
-                          value={advanced[key]}
+                          placeholder={
+                            key === 'gpu' ? 'Engine selected' : undefined
+                          }
+                          value={advanced[key] ?? ''}
                           onChange={(e) =>
                             setAdvanced({
                               ...advanced,
-                              [key]: Number(e.target.value),
+                              [key]:
+                                key === 'gpu' && e.target.value === ''
+                                  ? null
+                                  : Number(e.target.value),
                             })
                           }
                         />

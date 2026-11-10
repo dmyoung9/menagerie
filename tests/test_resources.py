@@ -60,7 +60,7 @@ def fixture(tmp_path):
             "name": "Example",
             "artifact_id": "weights",
             "runtime_id": "runtime",
-            "config": {"ctx-size": 8192, "parallel": 1},
+            "config": {"ctx-size": 8192, "parallel": 1, "gpu-layers": "all"},
         },
     }
     return app, manager, draft

@@ -4,7 +4,7 @@ A standalone model is a one-member unit. An owning set supplies shared residency
 policy for multiple members without changing their aliases or profile snapshots.
 """
 
-from . import lifecycle
+from . import lifecycle, runtime_protocol
 
 POLICY_KEYS = (
     "residency",
@@ -17,7 +17,10 @@ POLICY_KEYS = (
 
 
 def units(store):
-    members = {d["id"]: d for d in store.list("deployment")}
+    members = {
+        d["id"]: d | {"runtime_observation": runtime_protocol.observation(store, d)}
+        for d in store.list("deployment")
+    }
     sets = store.list("deployment_set")
     owned = {i for s in sets for i in s["member_ids"]}
     return [
