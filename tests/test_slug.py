@@ -13,6 +13,7 @@ import unicodedata
 import httpx
 
 from controlplane.api import create_app
+from controlplane.schema import Deployment
 from controlplane.slug import (
     BASE_MAX,
     MAX_ALIAS_LEN,
@@ -233,3 +234,67 @@ async def test_suggest_alias_endpoint_rejects_empty_name(tmp_path):
         response = await _suggest(client, "   ")
         assert response.status_code == 400
         assert "name" in response.json()["error"].lower()
+
+
+# ----------------------------------- identifier mode --------------------
+
+
+def _seed(app, **fields):
+    store = app.state.store
+    row = Deployment(id="member", port=8120, **fields).model_dump(exclude_none=True)
+    row.update(state="STOPPED")
+    store.put("deployment", row)
+    return store.get("deployment", "member")
+
+
+def test_new_deployment_defaults_to_generated_mode(tmp_path):
+    app = create_app(tmp_path)
+    row = _seed(app, name="Example", profile_id="p1", alias="example-8b")
+    assert row["identifier_mode"] == "generated"
+    # The stored alias is preserved verbatim (not recomputed from the name).
+    assert row["alias"] == "example-8b"
+
+
+def test_custom_mode_is_persisted_and_alias_is_stable(tmp_path):
+    app = create_app(tmp_path)
+    row = _seed(
+        app,
+        name="Example",
+        profile_id="p1",
+        alias="my-custom-id",
+        identifier_mode="custom",
+    )
+    assert row["identifier_mode"] == "custom"
+    assert row["alias"] == "my-custom-id"
+    # In custom mode the stored alias is authoritative: it does not follow the
+    # name (which would slugify to "example").
+    assert row["alias"] != slug("Example")
+
+
+def test_legacy_deployment_without_mode_is_treated_as_generated(tmp_path):
+    app = create_app(tmp_path)
+    store = app.state.store
+    row = Deployment(
+        id="legacy", name="Legacy", profile_id="p1", alias="legacy", port=8120
+    ).model_dump(exclude_none=True)
+    row.update(state="STOPPED")
+    del row["identifier_mode"]  # simulate a record that predates the field
+    store.put("deployment", row)
+    stored = store.get("deployment", "legacy")
+    # The stored record predates the field; the API/decoder treats it as generated.
+    assert stored.get("identifier_mode") is None
+    # The stored alias is untouched (retained until a name change).
+    assert stored["alias"] == "legacy"
+
+
+async def test_generated_alias_follows_name_via_suggest(tmp_path):
+    app = create_app(tmp_path)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        before = (await _suggest(client, "Writing Assistant")).json()
+        # A rename in generated mode yields the slug of the new name.
+        after = (await _suggest(client, "Writing Assistant v2")).json()
+        assert before["base"] == "writing-assistant"
+        assert after["base"] == "writing-assistant-v2"
+        assert after["mode"] == "generated"

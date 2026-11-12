@@ -134,6 +134,12 @@ class Deployment(DeploymentPolicy):
     profile_id: str | None = None
     configuration: Profile | None = None
     alias: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,159}$")
+    # How the API identifier (alias) is derived. In "generated" mode the
+    # identifier follows the display name (deterministic slug); in "custom"
+    # mode it is user-controlled and stable across renames. Existing deployments
+    # load with this default and keep their stored alias; the identifier is
+    # regenerated only when the name actually changes.
+    identifier_mode: Literal["generated", "custom"] = "generated"
     port: int = Field(ge=1024, le=65535)
     gpu: int | None = Field(default=None, ge=0, le=31)
     # Per-deployment template override. None means "use model default";
