@@ -697,6 +697,48 @@ export const catalogRevision = d.object<T.CatalogRevision>({
   name: d.string,
   kind: d.string,
 });
+
+const acquisitionStatus = d.oneOf(
+  'not_downloaded',
+  'downloading',
+  'downloaded',
+  'failed',
+  'missing',
+);
+const manifestFile = d.object<T.ManifestFile>({
+  name: d.string,
+  size: d.nullable(d.number),
+  sha256: maybeString,
+  status: acquisitionStatus,
+  local_path: opt(d.nullable(d.string)),
+  error: opt(d.nullable(d.string)),
+});
+const manifestGroup = d.object<T.ManifestGroup>({
+  id: d.string,
+  name: d.string,
+  kind: d.oneOf('gguf_split', 'safetensors', 'companion', 'standalone'),
+  required: stringArray,
+  complete: d.boolean,
+  local_status: d.record(acquisitionStatus),
+  downloaded_count: d.number,
+  failed_count: d.number,
+  downloading_count: d.number,
+});
+export const repositoryManifest = d.object<T.RepositoryManifest>({
+  repo: d.string,
+  revision: d.string,
+  files: d.array(manifestFile),
+  groups: d.array(manifestGroup),
+  selected: opt(stringArray),
+  required_files: opt(stringArray),
+  pending: opt(stringArray),
+  retry_targets: opt(stringArray),
+});
+export const repositoryReadme = d.object<T.RepositoryReadme>({
+  repo: d.string,
+  revision: d.string,
+  content: d.string,
+});
 export const historySession = d.object<T.HistorySession>({
   id: d.string,
   started_at: d.number,
