@@ -13,7 +13,7 @@ import httpx
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from tqdm.auto import tqdm
 
-from . import adapters, host, templates
+from . import adapters, host, manifests, templates
 from .manager import redact
 from .store import identity, uid
 
@@ -31,6 +31,50 @@ class _TemplateProgress(tqdm):
 SPLIT_GGUF = re.compile(
     r"^(?P<stem>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.IGNORECASE
 )
+# Deterministic identity for an acquired file. The store keys rows by (kind,
+# id); deriving id from the Stage-1 (repo, revision, name) key makes re-
+# acquiring the same file update one row instead of minting duplicates, and
+# keeps the contract's "two files collide only when same repo/revision/path"
+# invariant enforceable at the storage layer.
+DF_ID_PREFIX = "df-"
+
+
+def downloaded_file_id(repo: str, revision: str, name: str) -> str:
+    return f"{DF_ID_PREFIX}{identity([repo, revision, name])[:20]}"
+
+
+def _download_progress(owner, ident):
+    """tqdm class reporting progress to a job.
+
+    Returns a class (tqdm subclass) whose update() throttles job progress
+    reporting to once per second. The closure captures the owning ``Jobs`` and
+    job ``ident`` so ``hf_hub_download(..., tqdm_class=...)`` can drive it."""
+
+    class Progress(tqdm):
+        def __init__(self, *args, **kwargs):
+            kwargs["file"] = io.StringIO()
+            kwargs["disable"] = False
+            self.last_report = 0
+            super().__init__(*args, **kwargs)
+
+        def update(self, n=1):
+            result = super().update(n)
+            if time.monotonic() - self.last_report > 1:
+                owner.progress(
+                    ident,
+                    "Downloading",
+                    transfer={
+                        "done_bytes": self.n,
+                        "total_bytes": self.total,
+                        "rate_bytes_per_second": self.format_dict.get("rate"),
+                    }
+                    if self.unit == "B"
+                    else None,
+                )
+                self.last_report = time.monotonic()
+            return result
+
+    return Progress
 
 
 def selected_download(files, filename):
@@ -295,31 +339,7 @@ class Jobs:
         return None
 
     async def download(self, ident, repo, revision, filename, projector=None):
-        owner = self
-
-        class Progress(tqdm):
-            def __init__(self, *args, **kwargs):
-                kwargs["file"] = io.StringIO()
-                kwargs["disable"] = False
-                self.last_report = 0
-                super().__init__(*args, **kwargs)
-
-            def update(self, n=1):
-                result = super().update(n)
-                if time.monotonic() - self.last_report > 1:
-                    owner.progress(
-                        ident,
-                        "Downloading",
-                        transfer={
-                            "done_bytes": self.n,
-                            "total_bytes": self.total,
-                            "rate_bytes_per_second": self.format_dict.get("rate"),
-                        }
-                        if self.unit == "B"
-                        else None,
-                    )
-                    self.last_report = time.monotonic()
-                return result
+        Progress = _download_progress(self, ident)
 
         if not re.fullmatch(r"[a-f0-9]{40}", revision):
             raise ValueError("Select a resolved 40-character model revision")
@@ -496,6 +516,179 @@ class Jobs:
         )
         artifact["metadata"]["discovery"] = metadata.get("capabilities", {})
         return await attach_projector(artifact)
+
+    async def download_files(self, ident, repo, revision, selected, bundle_map=None):
+        """Stage 3 independent acquisition: download the selected groups' required
+        files into the per-file inventory (``downloaded_file`` records) without
+        creating a deployable artifact. Partial success: one file failing never
+        cancels the others — each file is recorded with its own status and the
+        job returns a summary. Re-running with the same selection re-acquires only
+        the failed/missing files (already-downloaded bytes are never retransferred),
+        which is exactly the "Retry failed files" path."""
+        if not re.fullmatch(r"[a-f0-9]{40}", revision):
+            raise ValueError("Select a resolved 40-character model revision")
+        metadata = await self.hf_files(repo, revision)
+        resolved = metadata["revision"]
+        manifest = manifests.build_manifest(repo, resolved, metadata["files"], bundle_map)
+        required = manifests.required_files(manifest, selected)
+
+        name_to_group = {n: g["id"] for g in manifest["groups"] for n in g["required"]}
+        files_by_name = {f["name"]: f for f in metadata["files"]}
+        statuses = self._file_statuses(repo, resolved)
+
+        destination = self.store.root / "models" / "hf"
+        destination.mkdir(parents=True, exist_ok=True)
+        # Reserve space only for the bytes we actually intend to transfer (skip
+        # already-downloaded and in-flight files).
+        to_transfer = [
+            n
+            for n in required
+            if statuses.get(n, "not_downloaded") not in ("downloaded", "downloading")
+        ]
+        transfer_bytes = sum(
+            (files_by_name.get(n) or {}).get("size") or 0 for n in to_transfer
+        )
+        if transfer_bytes and shutil.disk_usage(destination).free < transfer_bytes + 1024**3:
+            raise ValueError("Insufficient disk capacity for selected files")
+
+        progress = _download_progress(self, ident)
+        results = {"downloaded": 0, "failed": 0, "skipped": 0, "files": []}
+        for position, name in enumerate(required, 1):
+            status = statuses.get(name, "not_downloaded")
+            file = files_by_name.get(name, {})
+            group_id = name_to_group.get(name)
+            self.progress(ident, f"Downloading {name} ({position}/{len(required)})")
+            if status in ("downloaded", "downloading"):
+                # Already acquired (or still in flight); never retransfer
+                # completed bytes.
+                results["skipped"] += 1
+                results["files"].append({"name": name, "status": status})
+                continue
+            self._set_file(
+                repo,
+                resolved,
+                name,
+                group_id=group_id,
+                size_bytes=file.get("size"),
+                status="downloading",
+            )
+            try:
+                path = await asyncio.to_thread(
+                    hf_hub_download,
+                    repo_id=repo,
+                    filename=name,
+                    revision=resolved,
+                    cache_dir=str(destination),
+                    tqdm_class=progress,
+                )
+                sha = None
+                if file.get("sha256"):
+                    sha = await asyncio.to_thread(adapters.file_hash, path)
+                    if sha != file["sha256"]:
+                        raise ValueError(
+                            "Downloaded checksum does not match repository metadata"
+                        )
+                self._set_file(
+                    repo,
+                    resolved,
+                    name,
+                    status="downloaded",
+                    local_path=str(path),
+                    sha256=sha,
+                    error=None,
+                )
+                results["downloaded"] += 1
+                results["files"].append({"name": name, "status": "downloaded"})
+            except Exception as exc:
+                error = redact(str(exc))
+                self._set_file(repo, resolved, name, status="failed", error=error)
+                results["failed"] += 1
+                results["files"].append(
+                    {"name": name, "status": "failed", "error": error}
+                )
+        self.progress(ident, "Complete")
+        return results
+
+    def _file_statuses(self, repo, resolved):
+        """Current local acquisition status per file at (repo, resolved)."""
+        statuses = {}
+        for record in self.store.list("downloaded_file"):
+            if record.get("repo") == repo and record.get("source_revision") == resolved:
+                statuses[record["name"]] = record.get("status", "not_downloaded")
+        return statuses
+
+    def _get_file(self, repo, resolved, name):
+        try:
+            return self.store.get(
+                "downloaded_file", downloaded_file_id(repo, resolved, name)
+            )
+        except KeyError:
+            return None
+
+    def _set_file(self, repo, resolved, name, **overrides):
+        """Create or update the ``DownloadedFile`` record for (repo, resolved,
+        name). Byte facts already on the row (group_id, size_bytes, sha256,
+        local_path) are preserved unless the caller supplies fresh values;
+        status/error always come from the caller. The deterministic id makes a
+        re-acquire of the same (repo, revision, path) update one row instead
+        of minting a duplicate."""
+        existing = self._get_file(repo, resolved, name)
+        data = manifests.downloaded_file_record(repo, resolved, name)
+        if existing is not None:
+            for key in ("group_id", "size_bytes", "sha256", "local_path", "error"):
+                if key not in overrides:
+                    data[key] = existing[key]
+        data.update(overrides)
+        data["id"] = downloaded_file_id(repo, resolved, name)
+        return self.store.put(
+            "downloaded_file",
+            data,
+            expected=existing["revision"] if existing else None,
+        )
+
+    async def manifest(self, repo, revision="main", bundle_map=None, selected=None):
+        """Repository file manifest (groups) enriched with current local per-file
+        acquisition status; plus required/pending/retry for the given selection
+        (if any). No bytes are transferred. Raises ``ValueError`` if the
+        supplied selection is stale for the resolved revision."""
+        metadata = await self.hf_files(repo, revision)
+        resolved = metadata["revision"]
+        manifest = manifests.build_manifest(repo, resolved, metadata["files"], bundle_map)
+        statuses = self._file_statuses(repo, resolved)
+
+        file_rows = []
+        for file in manifest["files"]:
+            name = file["name"]
+            record = self._get_file(repo, resolved, name)
+            file_rows.append(
+                {
+                    "name": name,
+                    "size": file.get("size"),
+                    "sha256": file.get("sha256"),
+                    "status": statuses.get(name, "not_downloaded"),
+                    "local_path": record.get("local_path") if record else None,
+                    "error": record.get("error") if record else None,
+                }
+            )
+        groups = []
+        for group in manifest["groups"]:
+            per_file = {n: statuses.get(n, "not_downloaded") for n in group["required"]}
+            groups.append(
+                {
+                    **group,
+                    "local_status": per_file,
+                    "downloaded_count": sum(1 for s in per_file.values() if s == "downloaded"),
+                    "failed_count": sum(1 for s in per_file.values() if s == "failed"),
+                    "downloading_count": sum(1 for s in per_file.values() if s == "downloading"),
+                }
+            )
+        result = {"repo": repo, "revision": resolved, "files": file_rows, "groups": groups}
+        if selected is not None:
+            result["selected"] = manifests.validate_selection(manifest, selected)
+            result["required_files"] = manifests.required_files(manifest, selected)
+            result["pending"] = manifests.pending(manifest, selected, statuses)
+            result["retry_targets"] = manifests.retry_targets(manifest, selected, statuses)
+        return result
 
     async def _download_template_file(self, repo, revision, filename):
         destination = self.store.root / "models" / "hf"

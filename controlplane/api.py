@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -354,6 +355,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         "deployments": "deployment",
         "jobs": "job",
         "deployment_sets": "deployment_set",
+        # Per-file repository acquisition (Stage 3). Distinct from "models"
+        # (deployable artifacts): acquiring bytes registers inventory, not a
+        # deployable model.
+        "downloaded_files": "downloaded_file",
     }
 
     @app.get("/api/registry/{kind}")
@@ -1392,6 +1397,54 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             operation="download",
             repo=body["repo"],
             filename=body["filename"],
+        )
+
+    @app.post("/api/downloads/manifest")
+    async def downloads_manifest(request: Request):
+        """Repository file manifest with local acquisition status. POST (not GET)
+        so the selection is a JSON list of group ids — group ids may carry
+        arbitrary characters. Returns the resolved revision, the file list and
+        groups with per-file local status, and (given ``selected``) the required,
+        pending and retry-target sets. A stale selection for the resolved
+        revision is a 409 conflict (revision safety)."""
+        body = await request.json()
+        try:
+            return await jobs.manifest(
+                body["repo"],
+                body.get("revision", "main"),
+                bundle_map=body.get("bundle_map"),
+                selected=body.get("selected"),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/api/downloads/files")
+    async def downloads_files(request: Request):
+        """Independent acquisition: download the selected groups' required files
+        into the per-file inventory (DownloadedFile records) without creating a
+        deployable artifact. Partial success; re-running re-acquires only
+        failed/missing files."""
+        body = await request.json()
+        selected = body.get("selected") or []
+        if not selected:
+            raise HTTPException(400, "Select at least one file or bundle to download")
+        if not re.fullmatch(r"[a-f0-9]{40}", str(body.get("revision", ""))):
+            raise HTTPException(
+                400, "revision must be the resolved 40-character sha from /api/downloads/manifest"
+            )
+        return jobs.submit(
+            "Download files from " + body["repo"],
+            lambda job: jobs.download_files(
+                job,
+                body["repo"],
+                body["revision"],
+                selected,
+                bundle_map=body.get("bundle_map"),
+            ),
+            operation="download_files",
+            repo=body["repo"],
+            revision=body.get("revision"),
+            selected=selected,
         )
 
     @app.post("/api/runtimes/install/preview")
