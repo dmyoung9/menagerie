@@ -790,15 +790,34 @@ meter::-moz-meter-bar {
 .configuration-card-wide {
   grid-column: 1 / -1;
 }
-@media (min-width: 1200px) {
-  .configuration-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+/* Editor sections stack in one column. The card's overflow is "clip" so it
+ * keeps the rounded-corner clipping without becoming a scroll container that
+ * would trap the section's sticky header. Because the sections never overlap,
+ * pinning each section header to the top means only the current section's
+ * header is ever visible at the top. */
+.configuration-editor [data-slot='card'] {
+  overflow: clip;
 }
-@media (max-width: 1199px) {
-  .configuration-editor.resource-editor {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.configuration-editor
+  [data-settings-section]
+  > [data-slot='card']
+  > details.settings-disclosure
+  > summary.settings-disclosure-summary,
+.configuration-editor
+  [data-settings-section]
+  > [data-slot='card']
+  > [data-slot='card-header'] {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  scroll-margin-top: 8px;
+  scroll-margin-bottom: 12px;
+}
+/* Keep focused controls and anchors clear of the sticky header. */
+#main,
+.editor-page .dialog-body {
+  scroll-padding-top: 64px;
+  scroll-padding-bottom: 16px;
 }
 .settings-disclosure > summary {
   display: flex;
