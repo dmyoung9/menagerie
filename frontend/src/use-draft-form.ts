@@ -2,7 +2,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useState,
   type SetStateAction,
 } from 'react';
 import { useForm, useStore } from '@tanstack/react-form';
@@ -42,7 +41,11 @@ export function useDraftForm<T extends FormDraft>(
   initial: T,
   save: (draft: T) => void | Promise<void>,
 ) {
-  const [baseline] = useState(initial);
+  // The baseline follows the mutation acknowledgment: when a fresh server value
+  // arrives (poll, conflict review), "unchanged" is recomputed against it and
+  // Discard resets to it. The form's own values are never reset by this change
+  // (no remount), so in-progress buffers survive.
+  const baseline = initial;
   // The shared context erases only the editor kind; callers retain their draft type.
   const form = useInternalForm(baseline, (draft) => save(draft as T));
   const state = useStore(form.store, (state) => state.values);
@@ -74,5 +77,8 @@ export function useDraftForm<T extends FormDraft>(
     },
     [form],
   );
-  return { form, value, setValue, changed, reset: () => form.reset() };
+  const reset = useCallback(() => {
+    form.reset({ draft: baseline, inputs: flagInputs(baseline) });
+  }, [form, baseline]);
+  return { form, value, setValue, changed, reset };
 }
