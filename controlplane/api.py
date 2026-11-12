@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
@@ -31,6 +31,7 @@ from .schema import (
     Runtime,
     Settings,
 )
+from .slug import resolve_alias, slug
 from .store import Store, encode, identity, uid
 from .version import VERSION
 
@@ -588,6 +589,22 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.get("/api/deployments")
     async def deployments():
         return deployment_rows()
+
+    @app.get("/api/deployments/alias/suggest")
+    async def suggest_alias(name: str = Query(..., min_length=1)):
+        """Deterministic API-identifier preview for a display name.
+
+        Reads the current deployment aliases server-side so the returned
+        value is the one that would be stored. The slug is a pure function
+        of the name: same name and registry always yield the same identifier.
+        """
+        taken = {d["alias"] for d in store.list("deployment")}
+        alias = resolve_alias(name, taken)
+        return {
+            "alias": alias,
+            "base": slug(name),
+            "mode": "generated",
+        }
 
     @app.get("/api/serving-deployments")
     async def serving_deployments():
