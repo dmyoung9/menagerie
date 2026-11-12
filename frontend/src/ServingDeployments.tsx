@@ -1,4 +1,4 @@
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -22,7 +22,7 @@ import {
   CardDescription,
   CardContent,
 } from '@/components/ui/card';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   active,
@@ -71,6 +71,7 @@ import { SettingsSection } from '@/components/settings-section';
 import { CardAdvanced } from '@/components/card-advanced';
 import { readApi } from './ui';
 import * as contracts from './contracts';
+import { reconcileDeep, deploymentSetToDraft } from './reconcile';
 import type {
   Deployment,
   DeploymentActions,
@@ -352,7 +353,9 @@ export function DeploymentSetEditor({
   );
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [separate, setSeparate] = useState(false);
+    [separate, setSeparate] = useState(false),
+    [pendingRevision, setPendingRevision] = useState<number | null>(null),
+    [revisionConflict, setRevisionConflict] = useState(false);
   const [artifactId, setArtifactId] = useState(
       modelId || data.models?.[0]?.id || '',
     ),
@@ -360,6 +363,12 @@ export function DeploymentSetEditor({
   const [selected, setSelected] = useState(0);
   const preview = useResourcePreview(value.members, data.host?.[0]?.ts);
   const [epoch, setEpoch] = useState(0);
+  // Mount-time set draft, the reference for touched-vs-adopted fields. It must
+  // not follow the live initial, or untouched fields would adopt stale server
+  // values during a conflict review.
+  const mountSetRef = useRef<DeploymentSetDraft | null>(null);
+  if (mountSetRef.current === null)
+    mountSetRef.current = deploymentSetToDraft(initial);
   const changed = draftChanged || Object.values(invalid).some(Boolean);
   const aliasError = (m: DeploymentDraft) =>
     value.members.some((other) => other !== m && other.alias === m.alias) ||
@@ -481,7 +490,7 @@ export function DeploymentSetEditor({
         !initial && value.members.length === 1 && !value.engine_pool;
       const path =
         (single ? '/api/deployments' : '/api/deployment-sets') +
-        (initial ? '?expected=' + initial.revision : '');
+        (initial ? '?expected=' + (pendingRevision ?? initial.revision) : '');
       const shared = {
         residency: value.residency,
         priority: value.priority,
@@ -500,11 +509,42 @@ export function DeploymentSetEditor({
       const result = await readApi(path, contracts.identity, payload);
       saved(result.id);
     } catch (e) {
-      setError(message(e));
+      const detail = message(e);
+      if (detail.includes('Revision changed')) {
+        // Concurrent change: surface it for review; do NOT call saved() so the
+        // form is not reset and the user's edits are kept for the re-write.
+        setRevisionConflict(true);
+      } else {
+        setError(detail);
+      }
     } finally {
       setBusy(false);
     }
   };
+  async function reviewRevision() {
+    if (busy || !initial) return;
+    try {
+      const status = (await readApi('/api/status', contracts.status)) as {
+        serving_deployments?: ServingDeployment[];
+      };
+      const freshSet = (status.serving_deployments || []).find(
+        (d): d is DeploymentSet => d.id === initial.id && d.multi_model,
+      );
+      if (!freshSet) return;
+      setValue(
+        reconcileDeep(
+          mountSetRef.current!,
+          deploymentSetToDraft(freshSet),
+          value,
+        ) as DeploymentSetDraft,
+      );
+      setPendingRevision(freshSet.revision);
+      setRevisionConflict(false);
+      setError('');
+    } catch {
+      /* Ignore: the user can review again. */
+    }
+  }
   const Shell = embedded ? EmbeddedEditor : Dialog;
   return (
     <Shell
@@ -916,6 +956,24 @@ export function DeploymentSetEditor({
               <Json value={value} />
             </div>
           </details>
+          {revisionConflict && (
+            <Alert variant="default" className="mb-5" role="alert">
+              <AlertDescription className="whitespace-pre-line">
+                This configuration changed elsewhere. Your edits have been kept.
+              </AlertDescription>
+              <AlertAction>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void reviewRevision()}
+                >
+                  Review changes
+                </Button>
+              </AlertAction>
+            </Alert>
+          )}
           <div className="dialog-actions configuration-save-bar">
             <span className="muted" role="status">
               {changed ? 'Unsaved changes' : 'All changes saved'}

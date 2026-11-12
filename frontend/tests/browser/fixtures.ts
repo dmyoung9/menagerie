@@ -23,6 +23,7 @@ export type Fixture = {
   failSave: boolean;
   holdSave: boolean;
   releaseSave: () => void;
+  conflictSave: boolean;
   jobCounter: number;
 };
 
@@ -181,6 +182,7 @@ export const test = base.extend<{ fixture: Fixture }>({
         failSave: false,
         holdSave: false,
         releaseSave: () => {},
+        conflictSave: false,
         jobCounter: 0,
       };
       page.on('pageerror', (error) => fixture.errors.push(String(error)));
@@ -361,6 +363,45 @@ export const test = base.extend<{ fixture: Fixture }>({
               ? contracts.deploymentSetDraft(body)
               : contracts.deploymentDraft(body);
           const id = input.id || 'created';
+          if (fixture.conflictSave) {
+            // A concurrent change committed behind the user: bump the revision
+            // and move a field the client did not. The client reviews the fresh
+            // value and re-saves; it never overwrites the user's edits.
+            if (path === '/api/deployment-sets') {
+              const idx = fixture.sets.findIndex((group) => group.id === id);
+              if (idx >= 0) {
+                const set = fixture.sets[idx];
+                fixture.sets[idx] = {
+                  ...set,
+                  revision: set.revision + 1,
+                  idle_timeout: 600,
+                };
+                fixture.registry.deployments = fixture.registry.deployments.map(
+                  (d) =>
+                    set.member_ids.includes(d.id)
+                      ? { ...d, revision: d.revision + 1 }
+                      : d,
+                );
+              }
+            } else {
+              const idx = fixture.registry.deployments.findIndex(
+                (d) => d.id === id,
+              );
+              if (idx >= 0) {
+                const d = fixture.registry.deployments[idx];
+                fixture.registry.deployments[idx] = {
+                  ...d,
+                  revision: d.revision + 1,
+                  idle_timeout: 600,
+                };
+              }
+            }
+            fixture.conflictSave = false;
+            return send(
+              { error: 'Revision changed; refresh before saving' },
+              400,
+            );
+          }
           const member = (
             draft: import('../../src/types').DeploymentDraft,
             memberId: string,

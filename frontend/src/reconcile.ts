@@ -89,7 +89,9 @@ export function kindDraft<K extends RecordKind>(
 
 /** Draft shape for a saved deployment set (multi-model group). Mirrors the
  * initial conversion the set editor uses for `initial`. */
-export function deploymentSetToDraft(set: DeploymentSet): DeploymentSetDraft {
+export function deploymentSetToDraft(
+  set: DeploymentSet | undefined,
+): DeploymentSetDraft {
   return {
     name: 'New deployment',
     engine_pool: false,
