@@ -1368,6 +1368,15 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     async def hf_quantizations(repo: str):
         return await jobs.hf_quantizations(repo)
 
+    @app.get("/api/catalog/hf/readme")
+    async def hf_readme(repo: str, revision: str = "main"):
+        """README of the pinned revision. Returns the raw text so the client
+        can parse it with its own deterministic renderer; the client caches
+        the parse keyed on revision so unrelated polling does not remount the
+        article.
+        """
+        return {"repo": repo, "revision": revision, "content": await jobs.hf_readme(repo, revision)}
+
     @app.post("/api/downloads")
     async def download(request: Request):
         body = await request.json()

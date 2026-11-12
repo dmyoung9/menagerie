@@ -262,6 +262,38 @@ class Jobs:
                 "Quantization catalog unavailable: " + redact(str(exc))[:500]
             ) from exc
 
+    async def hf_readme(self, repo, revision="main"):
+        """Fetch the repository's README at a resolved revision.
+
+        The revision is resolved via the same pinned-file metadata path used by
+        ``hf_files`` so the article always describes the bytes the all-files
+        table is showing. Returns the UTF-8 decoded text, or ``None`` when no
+        README file is present at that revision.
+        """
+        metadata = await self.hf_files(repo, revision)
+        resolved = metadata["revision"]
+        base = f"https://huggingface.co/{quote(repo, safe='/')}/resolve/{resolved}"
+
+        async def fetch(filename):
+            raw = bytearray()
+            url = base + "/" + quote(filename, safe="")
+            async with self.manager.client.stream(
+                "GET", url, follow_redirects=True, timeout=15
+            ) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > 2_000_000:
+                        raise ValueError("README exceeds size limit")
+            return raw.decode("utf-8", errors="replace")
+
+        for filename in ("README.md", "README", "readme.md"):
+            try:
+                return await fetch(filename)
+            except (ValueError, OSError, httpx.HTTPError):
+                continue
+        return None
+
     async def download(self, ident, repo, revision, filename, projector=None):
         owner = self
 
