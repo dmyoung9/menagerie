@@ -278,6 +278,7 @@ export default function App() {
   const [connection, setConnection] = useState(false);
   const [modal, setModal] = useState<ModalState | null>(null),
     [modalError, setModalError] = useState(''),
+    [revisionConflict, setRevisionConflict] = useState(false),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState('');
   const [query, setQuery] = useState(''),
@@ -413,6 +414,7 @@ export default function App() {
   }, [revisionId]);
   const open = (value: ModalState | null) => {
     setModalError('');
+    setRevisionConflict(false);
     setModal(value);
   };
   const close = () => {
@@ -439,6 +441,7 @@ export default function App() {
     text = '',
     dismiss = true,
     invalidates?: SliceKey[],
+    suppressError?: (detail: string) => boolean,
   ): Promise<T | null> {
     setBusy(true);
     setModalError('');
@@ -451,7 +454,9 @@ export default function App() {
       }
       return result;
     } catch (e) {
-      setModalError(message(e));
+      const detail = message(e);
+      if (suppressError && suppressError(detail)) return null;
+      setModalError(detail);
       return null;
     } finally {
       setBusy(false);
@@ -1257,7 +1262,7 @@ export default function App() {
             editor={modal.type === 'edit' || modal.type === 'policy'}
             wide={['inspect', 'model', 'edit'].includes(modal.type)}
           >
-            {modalError && (
+            {modalError && !(revisionConflict && modal?.type === 'edit') && (
               <Alert variant="destructive" className="mb-5" role="alert">
                 <AlertDescription className="flex flex-wrap items-center justify-between gap-3 whitespace-pre-line">
                   {modalError}
@@ -1289,6 +1294,14 @@ export default function App() {
                 data={data}
                 busy={busy}
                 memberOnly={modal.memberOnly}
+                revisionConflict={revisionConflict}
+                onReconciled={(fresh) =>
+                  setModal((current) =>
+                    current && current.type === 'edit'
+                      ? { ...current, expected: fresh.revision }
+                      : current,
+                  )
+                }
                 save={(editor) =>
                   void perform(
                     () =>
@@ -1305,6 +1318,14 @@ export default function App() {
                     modal.pull ? 'Image pull queued' : 'Saved',
                     true,
                     affectedSlices(modal.pull ? 'runtimes' : editor.kind),
+                    (detail) => {
+                      if (modal.pull) return false;
+                      if (detail.includes('Revision changed')) {
+                        setRevisionConflict(true);
+                        return true;
+                      }
+                      return false;
+                    },
                   )
                 }
                 remove={
