@@ -28,7 +28,7 @@ import { useResourcePreview } from './hooks/use-resource-preview';
 import { Capabilities, OutputLimit } from './Capabilities';
 import { DefaultReasoning, Variants } from './ReasoningVariants';
 import { useConfirmation } from '@/hooks/use-confirmation';
-import { readApi } from './ui';
+import { readApi, api } from './ui';
 import {
   engineRecommendation,
   jsonObject,
@@ -41,14 +41,20 @@ import {
   runtimeCapabilities,
 } from './contracts';
 import { recordValue } from './decode';
+import { reconcileDeep } from './reconcile';
+import { editable } from './editor-state';
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { artifactLimits } from './artifact-metadata';
 import type {
   Artifact,
+  Deployment,
   EditorDraft,
   EditorDraftMap,
   EditorState,
   EngineRecommendation,
+  EditableSource,
   JsonValue,
+  Profile,
   ProfileDraft,
   Runtime,
   RuntimeRecommendation,
@@ -1041,13 +1047,17 @@ type EditorProps = {
   memberOnly?: boolean;
   disabled?: boolean;
   embedded?: boolean;
+  /** Show the revision-conflict alert with a Review changes action. */
+  revisionConflict?: boolean;
+  /** Called with the freshly fetched record after the draft is reconciled. */
+  onReconciled?: (fresh: EditableSource) => void;
 };
 type EditorField =
   | keyof EditorDraftMap['profiles']
   | keyof EditorDraftMap['deployments']
   | keyof EditorDraftMap['runtimes'];
 export function Editor(props: EditorProps) {
-  const { initial, data, remove, busy } = props;
+  const { initial, data, remove, busy, onReconciled } = props;
   const kind = initial.kind;
   const owner =
     kind === 'deployments'
@@ -1092,7 +1102,33 @@ export function Editor(props: EditorProps) {
       props.save({ kind, value: deploymentDraft(value) });
     else props.save({ kind, value: runtimeDraft(value) });
   });
+  // The mount-time draft is the reference for "touched vs adopted" fields.
+  // It must not follow the live initial (which becomes the fresh value after a
+  // conflict review), or untouched fields would keep stale server values.
+  const mountRef = useRef<EditorDraft | null>(null);
+  if (mountRef.current === null) mountRef.current = initial.value;
   const [epoch, setEpoch] = useState(0);
+  const reviewRevision = async () => {
+    if (busy || props.disabled) return;
+    const list = (await api(`/api/registry/${kind}`)) as {
+      id?: string;
+      revision?: number;
+    }[];
+    const fresh = list.find(
+      (r) => r.id === (initial.value.id as string | undefined),
+    );
+    if (!fresh) return;
+    const freshValue =
+      kind === 'profiles'
+        ? editable('profiles', fresh as Profile)
+        : kind === 'deployments'
+          ? editable('deployments', fresh as Deployment)
+          : editable('runtimes', fresh as Runtime);
+    setValue(
+      reconcileDeep(mountRef.current!, freshValue, value) as EditorDraft,
+    );
+    onReconciled?.(fresh as EditableSource);
+  };
   const changed = draftChanged || Object.values(invalid).some(Boolean);
   const navigationGuard = useUnsavedChanges(
     !!props.embedded && changed,
@@ -1569,6 +1605,24 @@ export function Editor(props: EditorProps) {
               </>
             )}
           </FieldSet>
+        )}
+        {props.revisionConflict && (
+          <Alert variant="default" className="mb-5" role="alert">
+            <AlertDescription className="whitespace-pre-line">
+              This configuration changed elsewhere. Your edits have been kept.
+            </AlertDescription>
+            <AlertAction>
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                disabled={busy || props.disabled}
+                onClick={() => void reviewRevision()}
+              >
+                Review changes
+              </Button>
+            </AlertAction>
+          </Alert>
         )}
         <div className="dialog-actions configuration-save-bar">
           {deployment && (
