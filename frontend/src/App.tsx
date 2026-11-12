@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   ArrowUpRight,
@@ -59,17 +59,31 @@ import {
   SettingsPage,
 } from './Views';
 import { go, canNavigate } from './navigation';
-import { api, Dialog, Empty, Field, Json, message, number, Tabs } from './ui';
+import {
+  api,
+  Dialog,
+  Empty,
+  Field,
+  Json,
+  message,
+  number,
+  telemetryStale,
+  Tabs,
+} from './ui';
 import brandLogo from './assets/logo-mono.png';
 import type {
   AppStatus,
+  Artifact,
+  Deployment,
   EditableSource,
   HostSnapshot,
+  Job,
   MetricSample,
   ModalState,
   OperationEvent,
   Profile,
   Registry,
+  Runtime,
   ServingDeployment,
 } from './types';
 
@@ -149,69 +163,120 @@ function useRoute() {
   }, []);
   return route;
 }
+
+type SliceKey =
+  'status' | 'models' | 'runtimes' | 'profiles' | 'deployments' | 'jobs';
+
+/** The six inventory endpoints, fetched independently. A slice that errors or
+ * is slow keeps its last-good value and only its own error/loading state. */
+const ENDPOINTS: Record<
+  SliceKey,
+  { path: string; decode: (value: unknown, path?: string) => unknown }
+> = {
+  status: { path: '/api/status', decode: contracts.status },
+  models: { path: '/api/registry/models', decode: array(contracts.artifact) },
+  runtimes: {
+    path: '/api/registry/runtimes',
+    decode: array(contracts.runtime),
+  },
+  profiles: {
+    path: '/api/registry/profiles',
+    decode: array(contracts.profile),
+  },
+  deployments: {
+    path: '/api/registry/deployments',
+    decode: array(contracts.deployment),
+  },
+  jobs: { path: '/api/registry/jobs', decode: array(contracts.job) },
+};
+
+const SLICE_KEYS = Object.keys(ENDPOINTS) as SliceKey[];
+
+/** Typed payload for each slice; the keyed state maps to it one-to-one. */
+type SliceData = {
+  status: AppStatus | null;
+  models: Artifact[];
+  runtimes: Runtime[];
+  profiles: Profile[];
+  deployments: Deployment[];
+  jobs: Job[];
+};
+type Slice<T> = {
+  data: T;
+  loading: boolean;
+  error: string | null;
+  updatedAt: number | null;
+};
+type Slices = { [K in keyof SliceData]: Slice<SliceData[K]> };
+/** The union of every slice's data shape; enough to type a decoupled fetch result. */
+type SliceDataValue =
+  AppStatus | null | Artifact[] | Runtime[] | Profile[] | Deployment[] | Job[];
+
+function initSlice<T>(data: T): Slice<T> {
+  return { data, loading: true, error: null, updatedAt: null };
+}
+
 export default function App() {
   const route = useRoute(),
     page = route[0] || 'overview';
-  const [status, setStatus] = useState<AppStatus | null>(null),
-    [data, setData] = useState<Registry>({
-      models: [],
-      runtimes: [],
-      profiles: [],
-      deployments: [],
-      jobs: [],
-      host: [],
+  const [slices, setSlices] = useState<Slices>({
+      status: initSlice<AppStatus | null>(null),
+      models: initSlice<Artifact[]>([]),
+      runtimes: initSlice<Runtime[]>([]),
+      profiles: initSlice<Profile[]>([]),
+      deployments: initSlice<Deployment[]>([]),
+      jobs: initSlice<Job[]>([]),
     }),
     [samples, setSamples] = useState<MetricSample[]>([]),
     [events, setEvents] = useState<OperationEvent[]>([]);
-  const [connection, setConnection] = useState(false),
-    [loading, setLoading] = useState(true),
-    [fetchError, setFetchError] = useState('');
+  const [connection, setConnection] = useState(false);
   const [modal, setModal] = useState<ModalState | null>(null),
     [modalError, setModalError] = useState(''),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState('');
   const [query, setQuery] = useState(''),
     [endpoint, setEndpoint] = useState('');
-  const refresh = useCallback(async () => {
-    const [s, models, runtimes, profiles, deployments, jobs] =
-      await Promise.all([
-        readApi('/api/status', contracts.status),
-        readApi('/api/registry/models', array(contracts.artifact)),
-        readApi('/api/registry/runtimes', array(contracts.runtime)),
-        readApi('/api/registry/profiles', array(contracts.profile)),
-        readApi('/api/registry/deployments', array(contracts.deployment)),
-        readApi('/api/registry/jobs', array(contracts.job)),
-      ]);
-    setStatus(s);
-    setData({
-      models,
-      runtimes,
-      profiles,
-      deployments,
-      jobs,
-      host: s.host ? [s.host] : [],
-      ...(s.serving_deployments ? { serving: s.serving_deployments } : {}),
-    });
-    if (s.gateway_url) setEndpoint(s.gateway_url);
-    setFetchError('');
-    setLoading(false);
+  // Per-slice sequence counters guard against stale responses: a refresh that
+  // starts after one in-flight discards the older one's result.
+  const seq = useRef<Record<SliceKey, number>>({
+    status: 0,
+    models: 0,
+    runtimes: 0,
+    profiles: 0,
+    deployments: 0,
+    jobs: 0,
+  });
+  const fetchSlice = useCallback(async (key: SliceKey): Promise<void> => {
+    const spec = ENDPOINTS[key];
+    const mySeq = ++seq.current[key];
+    setSlices((s) => ({ ...s, [key]: { ...s[key], loading: true } }));
+    try {
+      const value = await readApi(spec.path, spec.decode);
+      if (mySeq !== seq.current[key]) return;
+      setSlices((s) => ({
+        ...s,
+        [key]: {
+          data: value as SliceDataValue,
+          loading: false,
+          error: null,
+          updatedAt: Date.now(),
+        },
+      }));
+    } catch (e) {
+      if (mySeq !== seq.current[key]) return;
+      setSlices((s) => ({
+        ...s,
+        [key]: { ...s[key], loading: false, error: message(e) },
+      }));
+    }
   }, []);
+  const refresh = useCallback(async (): Promise<void> => {
+    await Promise.all(SLICE_KEYS.map((key) => fetchSlice(key)));
+  }, [fetchSlice]);
   useEffect(() => {
-    let alive = true,
-      pending = false;
-    const poll = async () => {
-      if (pending) return;
-      pending = true;
-      try {
-        await refresh();
-      } catch {
-        if (alive) {
-          setFetchError('Connection lost. Displayed data may be out of date.');
-          setLoading(false);
-        }
-      } finally {
-        pending = false;
-      }
+    let alive = true;
+    const poll = () => {
+      void refresh();
     };
     void poll();
     const timer = setInterval(poll, 5000);
@@ -232,16 +297,22 @@ export default function App() {
       try {
         const value: unknown = JSON.parse((e as MessageEvent<string>).data);
         const host = contracts.host(value);
-        setStatus((s) => (s ? { ...s, host } : s));
+        // Refresh the host sample inside the status slice; the registry data
+        // (models, runtimes, ...) stays untouched by telemetry.
+        setSlices((s) => {
+          if (!s.status.data) return s;
+          return {
+            ...s,
+            status: { ...s.status, data: { ...s.status.data, host } },
+          };
+        });
         setSamples((s) =>
           [...s.filter((old) => old.ts !== host.ts), host]
             .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
             .slice(-500),
         );
       } catch {
-        setFetchError(
-          'Received invalid telemetry. Waiting for a valid update.',
-        );
+        // Malformed telemetry: the next sample recovers; never mask registry data.
       }
     });
     stream.addEventListener('operation', (e) => {
@@ -250,7 +321,6 @@ export default function App() {
         const value: unknown = JSON.parse((e as MessageEvent<string>).data);
         event = contracts.operationEvent(value);
       } catch {
-        setFetchError('Received an invalid event. Refresh to reconnect.');
         return;
       }
       setEvents((s) =>
@@ -302,10 +372,9 @@ export default function App() {
   const close = () => {
     if (!busy) open(null);
   };
-  const reload = () =>
-    refresh().catch(() =>
-      setFetchError('Could not refresh. Displayed data may be out of date.'),
-    );
+  const reload = () => {
+    void refresh();
+  };
   const completed = (text = '') => {
     open(null);
     if (text) setNotice(text);
@@ -333,11 +402,12 @@ export default function App() {
       setBusy(false);
     }
   }
-  const deployments = data.deployments || [],
-    jobs = data.jobs || [],
+  const status = slices.status.data,
+    deployments = slices.deployments.data,
+    jobs = slices.jobs.data,
     host: HostSnapshot = status?.host || { gpus: [] };
   const serving: ServingDeployment[] =
-    data.serving ||
+    status?.serving_deployments ||
     deployments.map((d) => ({
       ...d,
       multi_model: false,
@@ -348,6 +418,34 @@ export default function App() {
   const enabled = serving.filter((d) => d.enabled),
     inactive = serving.filter((d) => !d.enabled),
     running = deployments.filter((d) => d.state === 'READY');
+  // A slice that has answered at least once (success) has a non-null updatedAt.
+  // The initial skeleton only covers the window before the first response.
+  const hasLoaded = SLICE_KEYS.some((k) => slices[k].updatedAt !== null),
+    showSkeleton = !hasLoaded && SLICE_KEYS.every((k) => slices[k].loading),
+    fetchError = SLICE_KEYS.some((k) => slices[k].error)
+      ? 'Connection lost. Displayed data may be out of date.'
+      : '',
+    connLabel = fetchError
+      ? 'Reconnecting'
+      : connection
+        ? telemetryStale(host)
+          ? 'Samples stale'
+          : 'Connected'
+        : 'Events offline',
+    connectionIconClass = fetchError
+      ? ''
+      : connection && !telemetryStale(host)
+        ? 'online'
+        : 'caution';
+  const data: Registry = {
+    models: slices.models.data,
+    runtimes: slices.runtimes.data,
+    profiles: slices.profiles.data,
+    deployments,
+    jobs,
+    host: status?.host ? [status.host] : [],
+    ...(status?.serving_deployments ? { serving } : {}),
+  };
   function edit<K extends keyof import('./types').EditableSourceMap>(
     kind: K,
     row?: import('./types').EditableSourceMap[K],
@@ -518,8 +616,8 @@ export default function App() {
         </SidebarContent>
         <SidebarFooter>
           <div className="connection" role="status">
-            <i className={connection && !fetchError ? 'online' : ''} />
-            {connection && !fetchError ? 'Connected' : 'Reconnecting'}
+            <i className={connectionIconClass || undefined} />
+            {connLabel}
           </div>
         </SidebarFooter>
       </Sidebar>
@@ -585,7 +683,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {loading ? (
+          {showSkeleton ? (
             <div
               role="status"
               aria-label="Loading workspace"
