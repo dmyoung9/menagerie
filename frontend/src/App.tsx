@@ -473,10 +473,22 @@ export default function App() {
   const enabled = serving.filter((d) => d.enabled),
     inactive = serving.filter((d) => !d.enabled),
     running = deployments.filter((d) => d.state === 'READY');
-  // A slice that has answered at least once (success) has a non-null updatedAt.
-  // The initial skeleton only covers the window before the first response.
-  const hasLoaded = SLICE_KEYS.some((k) => slices[k].updatedAt !== null),
-    showSkeleton = !hasLoaded && SLICE_KEYS.every((k) => slices[k].loading),
+  // A slice is only "pending" before its first successful answer; once a slice
+  // has responded, refreshes keep its last-good data and must not re-gate the
+  // destination.
+  const pageKeys: Record<string, SliceKey[]> = {
+    overview: ['status', 'deployments'],
+    models: ['models', 'jobs'],
+    deployments: ['deployments', 'status'],
+    activity: ['jobs'],
+    settings: ['status'],
+  };
+  const pageName = navigation.find((n) => n.id === page)?.label || 'Workspace',
+    pagePending = pageKeys[page]
+      ? pageKeys[page].some(
+          (k) => slices[k].loading && slices[k].updatedAt === null,
+        )
+      : false,
     fetchError = SLICE_KEYS.some((k) => slices[k].error)
       ? 'Connection lost. Displayed data may be out of date.'
       : '',
@@ -763,15 +775,15 @@ export default function App() {
               </div>
             </div>
           )}
-          {showSkeleton ? (
+          {pagePending ? (
             <div
               role="status"
-              aria-label="Loading workspace"
+              aria-label={`Loading ${pageName}`}
               className="flex flex-col gap-5"
             >
               <Skeleton className="h-28 w-full" />
               <Skeleton className="h-72 w-full" />
-              <span className="sr-only">Loading workspace…</span>
+              <span className="sr-only">Loading {pageName}…</span>
             </div>
           ) : (
             <>
