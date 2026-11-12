@@ -334,7 +334,9 @@ for (const width of [1440, 390])
       filename: 'model-7B-Q4_K_M.gguf',
     });
     await expect(
-      page.getByText('Download queued', { exact: true }),
+      page
+        .locator('.operation-notifications')
+        .getByText(/Download fixture\/model/),
     ).toBeVisible();
   });
 

@@ -23,6 +23,7 @@ export type Fixture = {
   failSave: boolean;
   holdSave: boolean;
   releaseSave: () => void;
+  jobCounter: number;
 };
 
 export async function openAdvanced(page: Page) {
@@ -180,6 +181,7 @@ export const test = base.extend<{ fixture: Fixture }>({
         failSave: false,
         holdSave: false,
         releaseSave: () => {},
+        jobCounter: 0,
       };
       page.on('pageerror', (error) => fixture.errors.push(String(error)));
       const serving = (): ServingDeployment[] => {
@@ -226,6 +228,7 @@ export const test = base.extend<{ fixture: Fixture }>({
           expect(request.headers()['x-menagerie-token']).toBe('fixture-token');
           fixture.writes.push({ path: path + url.search, body });
         }
+        const b = body as { repo?: string; filename?: string };
         if (path === '/api/status')
           return send({
             csrf_token: 'fixture-token',
@@ -430,10 +433,42 @@ export const test = base.extend<{ fixture: Fixture }>({
             stops: [],
             plan_token: 'review-token',
           });
-        if (/\/(start|stop|enabled)$/.test(path))
+        if (path.endsWith('/start')) {
+          fixture.registry.jobs.push({
+            id: `job-${++fixture.jobCounter}`,
+            revision: 1,
+            name: 'Start deployment',
+            state: 'QUEUED',
+            deployment_id: path.split('/').at(-2),
+            created_at: fixture.host.ts,
+          });
           return send({ state: 'QUEUED' });
-        if (path === '/api/models/local' || path === '/api/downloads')
+        }
+        if (/\/(stop|enabled)$/.test(path)) return send({ state: 'QUEUED' });
+        if (path === '/api/downloads') {
+          fixture.registry.jobs.push({
+            id: `job-${++fixture.jobCounter}`,
+            revision: 1,
+            name: `Download ${b.repo} · ${b.filename}`,
+            state: 'QUEUED',
+            operation: 'download',
+            repo: b.repo,
+            filename: b.filename,
+            created_at: fixture.host.ts,
+          });
           return send({ state: 'QUEUED' });
+        }
+        if (path === '/api/models/local') {
+          fixture.registry.jobs.push({
+            id: `job-${++fixture.jobCounter}`,
+            revision: 1,
+            name: 'Add local model',
+            state: 'QUEUED',
+            operation: 'local-model',
+            created_at: fixture.host.ts,
+          });
+          return send({ state: 'QUEUED' });
+        }
         if (path === '/api/backup')
           return send({ path: '/fixtures/backup.sqlite' });
         if (path === '/api/settings') return send(body);

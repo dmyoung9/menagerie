@@ -219,6 +219,25 @@ const affectedSlices = (kind?: string): SliceKey[] => {
   }
 };
 
+const BUSY_STATES: ReadonlyArray<string> = ['QUEUED', 'RUNNING'];
+
+const completedJobSlices = (job: Job): SliceKey[] => {
+  if (
+    job.operation === 'download' ||
+    job.repo !== undefined ||
+    job.filename !== undefined
+  ) {
+    return ['models'];
+  }
+  if (job.deployment_id !== undefined) return ['deployments', 'status'];
+  const name = job.name || '';
+  if (/^build runtime/i.test(name) || /^pull runtime/i.test(name)) {
+    return ['runtimes'];
+  }
+  if (job.model_id !== undefined) return ['models'];
+  return SLICE_KEYS;
+};
+
 /** Typed payload for each slice; the keyed state maps to it one-to-one. */
 type SliceData = {
   status: AppStatus | null;
@@ -401,9 +420,12 @@ export default function App() {
   };
   // Refresh a subset of the registry slices. A missing set is a full refresh
   // (used by the global "Retry"); the 5 s polling fallback covers the rest.
-  const refreshSlices = async (invalidates?: SliceKey[]): Promise<void> => {
-    await Promise.all((invalidates ?? SLICE_KEYS).map(fetchSlice));
-  };
+  const refreshSlices = useCallback(
+    async (invalidates?: SliceKey[]): Promise<void> => {
+      await Promise.all((invalidates ?? SLICE_KEYS).map(fetchSlice));
+    },
+    [fetchSlice],
+  );
   const reload = () => {
     void refreshSlices();
   };
@@ -625,6 +647,31 @@ export default function App() {
     if (page === 'deployments' && route[2] === 'policy')
       go(`deployments/${route[1]}/configuration`);
   }, [page, route]);
+
+  const finishedJobs = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const current: Record<string, string> = {};
+    const affected: SliceKey[] = [];
+    for (const job of jobs) {
+      current[job.id] = job.state;
+      const prev = finishedJobs.current[job.id];
+      if (
+        prev !== undefined &&
+        BUSY_STATES.includes(prev) &&
+        !BUSY_STATES.includes(job.state)
+      ) {
+        affected.push(...completedJobSlices(job));
+      }
+    }
+    for (const [id, state] of Object.entries(finishedJobs.current)) {
+      if (BUSY_STATES.includes(state) && !(id in current)) {
+        affected.push(...SLICE_KEYS);
+      }
+    }
+    const unique = [...new Set(affected)];
+    if (unique.length) void refreshSlices(unique);
+    finishedJobs.current = current;
+  }, [jobs, refreshSlices]);
   return (
     <SidebarProvider>
       <a
@@ -915,7 +962,6 @@ export default function App() {
                     <ModelCatalog
                       api={api}
                       queued={() => {
-                        setNotice('Download queued');
                         void refreshSlices(['jobs']);
                       }}
                     />
@@ -1081,13 +1127,25 @@ export default function App() {
             </>
           )}
           {busyJobs.length > 0 && (
-            <a className="operation-indicator" href="#/activity/events">
-              <RefreshCw size={14} className="spin" />
-              {busyJobs.length === 1
-                ? busyJobs[0].name
-                : `${busyJobs.length} operations running`}
-              <ArrowUpRight size={14} />
-            </a>
+            <div
+              className="operation-notifications"
+              aria-label="Operations running"
+            >
+              {busyJobs.map((job) => (
+                <a
+                  key={job.id}
+                  className="operation-indicator"
+                  href="#/activity/events"
+                >
+                  <RefreshCw
+                    size={14}
+                    className={job.state === 'RUNNING' ? 'spin' : undefined}
+                  />
+                  {job.name}
+                  <ArrowUpRight size={14} />
+                </a>
+              ))}
+            </div>
           )}
         </div>
       </SidebarInset>
@@ -1114,7 +1172,7 @@ export default function App() {
           deployments={deployments}
           host={host}
           close={close}
-          done={() => completed('Launch queued', ['deployments', 'status'])}
+          done={() => completed('', ['deployments', 'status', 'jobs'])}
         />
       )}
       {modal?.type === 'connect' && (
@@ -1123,7 +1181,7 @@ export default function App() {
       {modal?.type === 'source' && (
         <SourceBuild
           close={close}
-          done={() => completed('Build queued', ['runtimes'])}
+          done={() => completed('', ['runtimes', 'jobs'])}
         />
       )}
       {modal?.type === 'deployment-set' && (
@@ -1382,9 +1440,9 @@ export default function App() {
                   e.preventDefault();
                   void perform(
                     () => api('/api/models/local', { path: modal.path }),
-                    'Model registration queued',
+                    '',
                     true,
-                    ['models'],
+                    ['models', 'jobs'],
                   );
                 }}
               >

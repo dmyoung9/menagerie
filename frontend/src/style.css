@@ -377,10 +377,17 @@ meter::-moz-meter-bar {
 .operation > [data-slot='button'] {
   margin-left: auto;
 }
-.operation-indicator {
+.operation-notifications {
   position: fixed;
   bottom: 20px;
   right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  z-index: 50;
+}
+.operation-indicator {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -389,8 +396,10 @@ meter::-moz-meter-bar {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   font-size: 12px;
+  color: inherit;
+  text-decoration: none;
   box-shadow: 0 8px 24px #0004;
-  max-width: calc(100vw - 32px);
+  max-width: 100%;
 }
 .dialog-actions {
   display: flex;
@@ -1037,7 +1046,7 @@ meter::-moz-meter-bar {
     gap: 12px;
     flex-wrap: wrap;
   }
-  .operation-indicator {
+  .operation-notifications {
     right: 16px;
     bottom: 14px;
   }
