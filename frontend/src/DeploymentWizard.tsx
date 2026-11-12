@@ -5,6 +5,7 @@ import {
   NativeSelectOption,
 } from '@/components/ui/native-select';
 import { Button } from '@/components/ui/button';
+import { CopyButton } from '@/components/workspace';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -37,6 +38,8 @@ import type {
 } from './types';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
 import { DraftFormProvider, useDraftForm } from './use-draft-form';
+import { useSuggestedAlias } from './hooks/use-suggested-alias';
+import { localAliasFallback, type IdentifierMode } from './alias-suggestion';
 
 export function DeploymentWizard({
   data,
@@ -57,7 +60,8 @@ export function DeploymentWizard({
     );
   const [runtimeId, setRuntimeId] = useState('');
   const [name, setName] = useState(''),
-    [alias, setAlias] = useState('');
+    [alias, setAlias] = useState(''),
+    [identifierMode, setIdentifierMode] = useState<IdentifierMode>('generated');
   const [context, setContext] = useState(8192),
     [parallel, setParallel] = useState(1),
     [custom, setCustom] = useState(false);
@@ -154,14 +158,20 @@ export function DeploymentWizard({
   const hasContext = Boolean(schema[contextKey]),
     hasParallel = Boolean(schema.parallel);
   const displayName = name || artifact?.name || 'New deployment';
+  const suggested = useSuggestedAlias(
+    displayName,
+    identifierMode === 'generated',
+  );
   const apiAlias =
-    alias ||
-    displayName
-      .toLowerCase()
-      .replace(/[^a-z0-9_.-]+/g, '-')
-      .replace(/^-+/, '')
-      .slice(0, 140) ||
-    'model';
+    identifierMode === 'custom'
+      ? alias || localAliasFallback(displayName)
+      : suggested.alias || localAliasFallback(displayName);
+  const generatedHint =
+    suggested.base && suggested.alias !== suggested.base
+      ? `Using ${suggested.alias} because ${suggested.base} is already in use.`
+      : suggested.busy
+        ? 'Generating ID from the name…'
+        : 'Generated from the name and updated when you rename it.';
   const draftConfig = {
     ...extra,
     ...(!automatic && hasContext
@@ -351,14 +361,67 @@ export function DeploymentWizard({
                     onChange={(e) => setName(e.target.value)}
                   />
                 </Field>
-                <Field label="API model">
-                  <Input
-                    required
-                    pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}"
-                    value={apiAlias}
-                    onChange={(e) => setAlias(e.target.value)}
-                  />
-                </Field>
+                {identifierMode === 'generated' ? (
+                  <Field label="API model ID" hint={generatedHint}>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        readOnly
+                        aria-label="API model ID"
+                        placeholder={suggested.busy ? '…' : ''}
+                        value={suggested.alias}
+                      />
+                      {suggested.alias && (
+                        <CopyButton
+                          value={suggested.alias}
+                          label="Copy API model ID"
+                        />
+                      )}
+                    </div>
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-[var(--bg-2)]"
+                        onClick={() => {
+                          setIdentifierMode('custom');
+                          setAlias(
+                            suggested.alias || localAliasFallback(displayName),
+                          );
+                        }}
+                        aria-label="Customize API model ID"
+                      >
+                        Customize API model ID
+                      </button>
+                    </div>
+                  </Field>
+                ) : (
+                  <Field
+                    label="API model"
+                    hint="This ID stays the same when you rename the model."
+                  >
+                    <Input
+                      required
+                      pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}"
+                      value={alias}
+                      onChange={(e) => setAlias(e.target.value)}
+                      aria-label="API model ID"
+                    />
+                    <div className="pt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-[var(--bg-2)]"
+                        onClick={() => {
+                          setIdentifierMode('generated');
+                        }}
+                        aria-label="Generate API model ID from the name"
+                      >
+                        Generate from name
+                      </button>
+                      {alias && (
+                        <CopyButton value={alias} label="Copy API model ID" />
+                      )}
+                    </div>
+                  </Field>
+                )}
                 <>
                   <Field label="Configuration">
                     <NativeSelect
