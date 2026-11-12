@@ -192,6 +192,33 @@ const ENDPOINTS: Record<
 
 const SLICE_KEYS = Object.keys(ENDPOINTS) as SliceKey[];
 
+/** Slices a mutation to the named resource invalidates. Unmapped kinds fall
+ * back to a full refresh; the 5 s polling fallback keeps the registry
+ * consistent either way. */
+const affectedSlices = (kind?: string): SliceKey[] => {
+  if (!kind) return SLICE_KEYS;
+  switch (kind) {
+    case 'models':
+    case 'artifacts':
+    case 'local-model':
+      return ['models'];
+    case 'runtimes':
+      return ['runtimes'];
+    case 'profiles':
+      return ['profiles'];
+    case 'deployments':
+    case 'serving-deployments':
+    case 'deployment_sets':
+    case 'deployment-set':
+      return ['deployments', 'status'];
+    case 'settings':
+    case 'policy':
+      return ['status'];
+    default:
+      return SLICE_KEYS;
+  }
+};
+
 /** Typed payload for each slice; the keyed state maps to it one-to-one. */
 type SliceData = {
   status: AppStatus | null;
@@ -372,27 +399,33 @@ export default function App() {
   const close = () => {
     if (!busy) open(null);
   };
-  const reload = () => {
-    void refresh();
+  // Refresh a subset of the registry slices. A missing set is a full refresh
+  // (used by the global "Retry"); the 5 s polling fallback covers the rest.
+  const refreshSlices = async (invalidates?: SliceKey[]): Promise<void> => {
+    await Promise.all((invalidates ?? SLICE_KEYS).map(fetchSlice));
   };
-  const completed = (text = '') => {
+  const reload = () => {
+    void refreshSlices();
+  };
+  const completed = (text = '', invalidates?: SliceKey[]) => {
     open(null);
     if (text) setNotice(text);
-    void reload();
+    void refreshSlices(invalidates);
   };
   async function perform<T>(
     action: () => Promise<T>,
     text = '',
     dismiss = true,
+    invalidates?: SliceKey[],
   ): Promise<T | null> {
     setBusy(true);
     setModalError('');
     try {
       const result = await action();
-      if (dismiss) completed(text);
+      if (dismiss) completed(text, invalidates);
       else {
         if (text) setNotice(text);
-        void reload();
+        void refreshSlices(invalidates);
       }
       return result;
     } catch (e) {
@@ -883,7 +916,7 @@ export default function App() {
                       api={api}
                       queued={() => {
                         setNotice('Download queued');
-                        void reload();
+                        void refreshSlices(['jobs']);
                       }}
                     />
                   )}
@@ -911,7 +944,9 @@ export default function App() {
                         host={host}
                         actions={actions}
                         events={events}
-                        saved={() => void reload()}
+                        saved={() =>
+                          void refreshSlices(affectedSlices('deployment_set'))
+                        }
                       />
                     ) : (
                       <DeploymentDetail
@@ -932,7 +967,9 @@ export default function App() {
                         inflight={selected.inflight || 0}
                         actions={actions}
                         events={events}
-                        saved={() => void reload()}
+                        saved={() =>
+                          void refreshSlices(affectedSlices('deployments'))
+                        }
                       />
                     )
                   ) : (
@@ -1064,7 +1101,7 @@ export default function App() {
             go('settings/engines');
           }}
           created={(row, load) => {
-            void reload();
+            void refreshSlices(affectedSlices('deployments'));
             go('deployments/' + row.id);
             open(load ? { type: 'launch', kind: 'deployments', row } : null);
             if (!load) setNotice('Deployment created');
@@ -1077,14 +1114,17 @@ export default function App() {
           deployments={deployments}
           host={host}
           close={close}
-          done={() => completed('Launch queued')}
+          done={() => completed('Launch queued', ['deployments', 'status'])}
         />
       )}
       {modal?.type === 'connect' && (
         <Connect endpoint={endpoint} deployments={deployments} close={close} />
       )}
       {modal?.type === 'source' && (
-        <SourceBuild close={close} done={() => completed('Build queued')} />
+        <SourceBuild
+          close={close}
+          done={() => completed('Build queued', ['runtimes'])}
+        />
       )}
       {modal?.type === 'deployment-set' && (
         <DeploymentSetEditor
@@ -1093,7 +1133,7 @@ export default function App() {
           data={data}
           close={close}
           saved={(id) => {
-            completed('Deployment saved');
+            completed('Deployment saved', affectedSlices('deployment_set'));
             go(id ? 'deployments/' + id : 'deployments');
           }}
         />
@@ -1193,6 +1233,8 @@ export default function App() {
                         editor.value,
                       ),
                     modal.pull ? 'Image pull queued' : 'Saved',
+                    true,
+                    affectedSlices(modal.pull ? 'runtimes' : editor.kind),
                   )
                 }
                 remove={
@@ -1228,6 +1270,8 @@ export default function App() {
                             {},
                           ),
                         'Entry removed',
+                        true,
+                        affectedSlices(modal.kind),
                       )
                     }
                   >
@@ -1271,6 +1315,8 @@ export default function App() {
                             cancel_requests: true,
                           }),
                         'Cancelling requests and unloading',
+                        true,
+                        ['deployments', 'status'],
                       )
                     }
                   >
@@ -1285,6 +1331,8 @@ export default function App() {
                         () =>
                           api(`/api/${modal.kind}/${modal.row.id}/stop`, {}),
                         'Unload queued',
+                        true,
+                        ['deployments', 'status'],
                       )
                     }
                   >
@@ -1318,6 +1366,8 @@ export default function App() {
                         modal.enabled
                           ? 'Deployment enabled'
                           : 'Deployment disabled',
+                        true,
+                        ['deployments', 'status'],
                       )
                     }
                   >
@@ -1333,6 +1383,8 @@ export default function App() {
                   void perform(
                     () => api('/api/models/local', { path: modal.path }),
                     'Model registration queued',
+                    true,
+                    ['models'],
                   );
                 }}
               >
@@ -1420,6 +1472,8 @@ export default function App() {
                   void perform(
                     () => api('/api/settings', value),
                     'Policy saved',
+                    true,
+                    ['status'],
                   )
                 }
                 purge={() => open({ type: 'purge', days: 7 })}
