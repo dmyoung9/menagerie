@@ -34,6 +34,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { ModelCatalog } from './ModelCatalog';
+import { RepositoryPage } from './RepositoryPage';
 import { readApi } from './ui';
 import * as contracts from './contracts';
 import { array } from './decode';
@@ -145,7 +146,25 @@ function useRoute() {
     }
     return parts;
   };
+  // Query params live after `?` on the raw hash; `readRoute` drops them because
+  // it splits on `/`. Parse them separately so deep links can carry `revision`
+  // and `returnTo`.
+  const readHashQuery = (): Record<string, string> => {
+    const raw = window.location.hash.slice(2).split('?')[1] || '';
+    const out: Record<string, string> = {};
+    for (const pair of raw.split('&')) {
+      const idx = pair.indexOf('=');
+      if (idx === -1) continue;
+      const key = decodeURIComponent(pair.slice(0, idx));
+      const value = decodeURIComponent(pair.slice(idx + 1));
+      out[key] = value;
+    }
+    return out;
+  };
   const [route, setRoute] = useState(() => readRoute());
+  const [hashQuery, setHashQuery] = useState<Record<string, string>>(() =>
+    readHashQuery(),
+  );
   useEffect(() => {
     let previous = window.location.hash,
       pending = false;
@@ -154,6 +173,7 @@ function useRoute() {
       pending = true;
       if (await canNavigate()) {
         setRoute(readRoute());
+        setHashQuery(readHashQuery());
         previous = window.location.hash;
       } else window.history.replaceState(null, '', previous || '#/overview');
       pending = false;
@@ -161,7 +181,7 @@ function useRoute() {
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
-  return route;
+  return { route, hashQuery };
 }
 
 type SliceKey =
@@ -263,7 +283,7 @@ function initSlice<T>(data: T): Slice<T> {
 }
 
 export default function App() {
-  const route = useRoute(),
+  const { route, hashQuery } = useRoute(),
     page = route[0] || 'overview';
   const [slices, setSlices] = useState<Slices>({
       status: initSlice<AppStatus | null>(null),
@@ -649,6 +669,17 @@ export default function App() {
       : route[1] === 'downloads'
         ? 'Downloads'
         : 'Installed';
+  // Addressable repository page: /models/repo/<repo>[?revision=&returnTo=]
+  const repoRoute = page === 'models' && route[1] === 'repo',
+    repo = repoRoute ? route.slice(2).join('/') : '',
+    repoRevision = repoRoute ? hashQuery.revision || '' : '',
+    repoReturnTo = repoRoute ? hashQuery.returnTo || 'models' : 'models';
+  const onRepoJobFinished = useCallback(
+    (_repo: string) => {
+      void refreshSlices(['jobs']);
+    },
+    [refreshSlices],
+  );
   const activityTab = route[1] === 'requests' ? 'Requests' : 'Events';
   const settingsTab = ['engines', 'host', 'history', 'recovery'].includes(
     route[1],
@@ -951,7 +982,17 @@ export default function App() {
                   />
                 </>
               )}
-              {page === 'models' && (
+              {page === 'models' && route[1] === 'repo' && (
+                <RepositoryPage
+                  key={repo}
+                  repo={repo}
+                  revision={repoRevision}
+                  returnTo={repoReturnTo}
+                  jobs={jobs}
+                  onJobFinished={onRepoJobFinished}
+                />
+              )}
+              {page === 'models' && route[1] !== 'repo' && (
                 <>
                   <Tabs
                     items={['Installed', 'Discover', 'Downloads']}

@@ -11,6 +11,7 @@ import type { api as request } from './ui';
 import { readApi } from './ui';
 import { array } from './decode';
 import { catalogModel } from './contracts';
+import { go, repoPath } from '@/navigation';
 type Props = {
   api: typeof request;
   queued: () => void;
@@ -102,13 +103,24 @@ export function ModelCatalog({ api, queued }: Props) {
               ]}
               footer={`${(row.downloads || 0).toLocaleString()} downloads`}
             >
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => setModel(name)}
-              >
-                Choose variant
-              </Button>
+              <div className="actions">
+                <Button
+                  variant="ghost"
+                  type="button"
+                  onClick={() =>
+                    go(repoPath(name, { returnTo: 'models/discover' }))
+                  }
+                >
+                  Explore model
+                </Button>
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => setModel(name)}
+                >
+                  Choose variant
+                </Button>
+              </div>
             </ModelCard>
           );
         })}

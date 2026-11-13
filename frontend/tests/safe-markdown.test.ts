@@ -96,20 +96,30 @@ test('parseSafeMarkdown strips frontmatter, sets hf ids, and resolves URLs', () 
   assert.equal(doc.children[0].type, 'heading');
   assert.equal(doc.frontmatter, 'name: test\nlicense: MIT');
   assert.equal(doc.children[0].id, 'hf-0-model-card');
-  // Relative image resolved against the repo raw base (first link in the paragraph).
-  const link = doc.children[1].children.find((c) => c.type === 'link');
+  // Relative image resolved against the repo raw base (first link in the
+  // paragraph). Only container nodes expose `children` in the TanStack Markdown
+  // AST type, so narrow to the structural shape being read.
+  const link = (
+    doc.children[1] as unknown as {
+      children: { type: string; href?: string }[];
+    }
+  ).children.find((c) => c.type === 'link');
   assert.ok(
     link && link.type === 'link',
     'expected a link node in the paragraph',
   );
   assert.equal(
-    link.href,
+    link?.href,
     'https://huggingface.co/org/model/raw/abc/images/c.png',
   );
   // In-page anchor href preserved (starts with '#') for the anchor handler.
   assert.ok(
     doc.children.some((c) =>
-      c.children?.some(
+      (
+        c as unknown as {
+          children?: { type: string; href?: string }[];
+        }
+      ).children?.some(
         (i) =>
           i.type === 'link' &&
           typeof i.href === 'string' &&

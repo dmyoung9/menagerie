@@ -73,7 +73,7 @@ import type {
   TemplateSource,
 } from './types';
 
-import { go } from './navigation';
+import { go, repoPath } from './navigation';
 import { readApi } from './ui';
 import * as contracts from './contracts';
 function InspectModel({ id }: { id: string }) {
@@ -246,6 +246,8 @@ export function DeploymentDetail({
   saved: () => void;
 }) {
   const profile = d.profile_snapshot;
+  const modelArtifact =
+    data.models?.find((m) => m.id === profile?.artifact_id) || undefined;
   const [logs, setLogs] = useState(''),
     [error, setError] = useState('');
   const logRun = new URLSearchParams(window.location.hash.split('?')[1]).get(
@@ -383,6 +385,31 @@ export function DeploymentDetail({
                   <dd>{visible(d) ? 'Available' : 'Not listed'}</dd>
                   <dt>Mode</dt>
                   <dd>{mode(d)}</dd>
+                  {modelArtifact?.repo ? (
+                    <>
+                      <dt>Model</dt>
+                      <dd className="copy-value">
+                        <code>{modelArtifact.repo || modelArtifact.name}</code>
+                        <button
+                          type="button"
+                          className="view-model"
+                          onClick={() =>
+                            go(
+                              repoPath(modelArtifact.repo || '', {
+                                revision:
+                                  modelArtifact.source_revision || undefined,
+                                returnTo:
+                                  window.location.hash.slice(2) ||
+                                  'deployments',
+                              }),
+                            )
+                          }
+                        >
+                          View model
+                        </button>
+                      </dd>
+                    </>
+                  ) : null}
                   {d.residency === 'on-demand' && (
                     <>
                       <dt>Unload after idle</dt>
@@ -718,6 +745,22 @@ export function ModelLibrary({
                 >
                   Details
                 </Button>
+                {m.repo ? (
+                  <Button
+                    variant="ghost"
+                    type="button"
+                    onClick={() =>
+                      go(
+                        repoPath(m.repo || m.name, {
+                          revision: m.source_revision || undefined,
+                          returnTo: 'models/installed',
+                        }),
+                      )
+                    }
+                  >
+                    Browse repository files
+                  </Button>
+                ) : null}
               </div>
             </ModelCard>
           );

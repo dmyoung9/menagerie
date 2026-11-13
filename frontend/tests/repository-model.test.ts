@@ -344,8 +344,8 @@ test('sortGroupRows orders deterministically by file, size, status, quantization
     ),
   );
   // The two groups with unknown byte counts are the last two.
-  assert.strictEqual(bySize.at(-1).size, null);
-  assert.strictEqual(bySize.at(-2).size, null);
+  assert.strictEqual(bySize.at(-1)!.size, null);
+  assert.strictEqual(bySize.at(-2)!.size, null);
   const nullIds = new Set(
     bySize.filter((r) => r.size === null).map((r) => r.id),
   );

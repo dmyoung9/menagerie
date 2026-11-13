@@ -331,6 +331,20 @@ meter::-moz-meter-bar {
 .copy-value code {
   overflow-wrap: anywhere;
 }
+.view-model {
+  margin-left: auto;
+  color: var(--primary);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.view-model:hover {
+  text-decoration: underline;
+}
 .update-notice {
   display: flex;
   gap: 12px;

@@ -47,7 +47,7 @@ import { ResourceHistory } from '@/components/resource-history';
 import { EmbeddedEditor } from '@/components/embedded-editor';
 import { RequestHistory } from '@/components/request-history';
 import { DeploymentPerformance } from '@/components/deployment-performance';
-import { go } from './navigation';
+import { go, repoPath } from './navigation';
 import { ConfigurationFields } from './Editors';
 import { DraftFormProvider, useDraftForm } from './use-draft-form';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
@@ -1201,41 +1201,75 @@ export function MultiDeploymentDetail({
             </Card>
           </div>
           <div className="model-grid">
-            {d.members.map((m) => (
-              <Card className="mb-5 min-w-0 gap-0 p-0 library-card" key={m.id}>
-                <CardContent className="p-0">
-                  <Status value={state(m)} />
-                  <h2>{m.name}</h2>
-                  <dl className="properties">
-                    <dt>API model</dt>
-                    <dd>
-                      <code>{m.alias}</code>
-                    </dd>
-                    <dt>Context / request</dt>
-                    <dd>
-                      {number(
-                        m.profile_snapshot?.catalog?.model?.limit?.context,
-                        0,
-                      )}
-                    </dd>
-                    <dt>VRAM (GiB)</dt>
-                    <dd>{gib(host.deployments?.[m.id]?.gpu_mib)}</dd>
-                  </dl>
-                  <div className="card-actions">
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={() => {
-                        setLogMember(m.id);
-                        go(`deployments/${d.id}/logs`);
-                      }}
-                    >
-                      Logs
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+            {d.members.map((m) => {
+              const artifact =
+                data.models?.find(
+                  (a) => a.id === m.profile_snapshot?.artifact_id,
+                ) || undefined;
+              return (
+                <Card
+                  className="mb-5 min-w-0 gap-0 p-0 library-card"
+                  key={m.id}
+                >
+                  <CardContent className="p-0">
+                    <Status value={state(m)} />
+                    <h2>{m.name}</h2>
+                    <dl className="properties">
+                      <dt>API model</dt>
+                      <dd>
+                        <code>{m.alias}</code>
+                      </dd>
+                      {artifact?.repo ? (
+                        <>
+                          <dt>Model</dt>
+                          <dd className="copy-value">
+                            <code>{artifact.repo || artifact.name}</code>
+                            <button
+                              type="button"
+                              className="view-model"
+                              onClick={() =>
+                                go(
+                                  repoPath(artifact.repo || '', {
+                                    revision:
+                                      artifact.source_revision || undefined,
+                                    returnTo:
+                                      window.location.hash.slice(2) ||
+                                      'deployments',
+                                  }),
+                                )
+                              }
+                            >
+                              View model
+                            </button>
+                          </dd>
+                        </>
+                      ) : null}
+                      <dt>Context / request</dt>
+                      <dd>
+                        {number(
+                          m.profile_snapshot?.catalog?.model?.limit?.context,
+                          0,
+                        )}
+                      </dd>
+                      <dt>VRAM (GiB)</dt>
+                      <dd>{gib(host.deployments?.[m.id]?.gpu_mib)}</dd>
+                    </dl>
+                    <div className="card-actions">
+                      <Button
+                        variant="outline"
+                        type="button"
+                        onClick={() => {
+                          setLogMember(m.id);
+                          go(`deployments/${d.id}/logs`);
+                        }}
+                      >
+                        Logs
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </>
       )}
