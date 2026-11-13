@@ -19,7 +19,9 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-from . import adapters, deployment_sets, host, lifecycle, runtime_protocol, templates
+from . import adapters, deployment_sets, host, lifecycle, pool_edit, runtime_protocol, templates
+from . import apply_ops as aops
+from . import queued_apply as qa
 from .catalog import apply_reasoning, export_config, normalize
 from .jobs import Jobs
 from .manager import ACTIVE, Conflict, Manager, redact
@@ -887,6 +889,14 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             previous["state"] in ACTIVE or manager.inflight.get(previous["id"], 0)
         ):
             raise Conflict("Stop this deployment before changing its configuration")
+        # Identifier mode: in "generated" the API ID follows the display name and
+        # is regenerated outright (no compatibility alias) when the name changes;
+        # in "custom" the ID is user-controlled and stable across renames.
+        if data.get("identifier_mode") == "generated" and previous is not None and (
+            previous.get("name") != data.get("name")
+        ):
+            taken = {d["alias"] for d in all_d if d.get("id") != data.get("id")}
+            data["alias"] = resolve_alias(data["name"], taken)
         if data["port"] in {8001, 8017}:
             raise ValueError("Ports 8001 and 8017 are reserved for Menagerie")
         if any(
@@ -997,6 +1007,178 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     "deployment", {"alias": d["alias"], "enabled": enabled}, ident
                 )
             return store.get("deployment", ident)
+
+    # ---- Stage 4: desired/applied split + explicit queued-apply ----
+
+    @app.get("/api/deployments/{ident}/pending")
+    async def pending_status(ident: str):
+        """Desired-vs-applied status for a deployment (and its pool). A unit is
+        pending only once it has been activated and the saved configuration
+        differs from what the runtime last loaded."""
+        unit = manager.unit(ident)
+        status = aops.pending(store, unit)
+        return {
+            "unit_id": unit["id"],
+            "unit_name": unit.get("name"),
+            "multi_model": bool(unit.get("multi_model")),
+            "op": aops.op_public(status["op"]) if status["op"] is not None else None,
+            "desired_rev": status["desired_rev"],
+            "applied_rev": status["applied_rev"],
+            "pending": status["pending"],
+            "scope_fingerprint": aops.scope_fingerprint(unit),
+            "affected_ids": list(unit.get("member_ids", [])),
+            "affected": [m.get("name") for m in unit.get("members", [])],
+        }
+
+    @app.get("/api/deployments/{ident}/action-scope")
+    async def action_scope_view(ident: str, action: str, member_id: str | None = None):
+        """The honest scope of an action on this deployment's pool: does it act
+        on just this model or on the whole pool? The UI labels the action with
+        the returned ``scope_label`` so a pool stop is never presented as a
+        per-model unload."""
+        unit = manager.unit(ident)
+        return pool_edit.action_scope(action, unit, store, member_id)
+
+    @app.get("/api/deployments/{ident}/eligibility")
+    async def pool_eligibility(ident: str):
+        """Can this deployment's configuration join its pool? Returns the hard
+        errors only; the UI must present them and let the user choose a
+        compatible pool or reconfigure. Nothing is auto-changed to fit."""
+        unit = manager.unit(ident)
+        if not unit.get("multi_model"):
+            return {"eligible": True, "errors": []}
+        d = store.get("deployment", ident)
+        errors = sorted(pool_edit.eligible_for_pool(d, unit, store))
+        return {"eligible": not errors, "errors": errors}
+
+    @app.get("/api/deployments/{ident}/eviction-candidates")
+    async def eviction_candidates_view(ident: str):
+        """Idle models that may be unloaded so *this* model can load. Policy-
+        gated (consent + non-pinned + priority) and always ``requires_consent``;
+        the unit being loaded is never a candidate."""
+        unit = manager.unit(ident)
+        units = deployment_sets.units(store)
+        candidates = pool_edit.eviction_candidates(
+            units,
+            selected_ids=[unit["id"]],
+            inflight=manager.inflight,
+            last_use=manager.last_use,
+            now=time.monotonic(),
+        )
+        return {"candidates": candidates, "count": len(candidates)}
+
+    @app.post("/api/deployments/{ident}/save-desired")
+    async def save_desired_endpoint(ident: str):
+        """Record the unit's current stored configuration as the *desired*
+        revision. Never restarts the runtime; the change is pending until an
+        explicit, reviewed apply."""
+        unit = manager.unit(ident)
+        op = aops.save_desired(store, unit)
+        return {"op": aops.op_public(op)}
+
+    @app.post("/api/deployments/{ident}/request-apply")
+    async def request_apply_endpoint(ident: str, body: dict):
+        """Queue a *reviewed* apply. The UI sends the ``token`` and the
+        ``scope_fingerprint`` it captured when reviewing. The job revalidates
+        (scope + launch plan) immediately before applying, so stale consent is
+        never used. Returns the queued op plus a job id for progress polling."""
+        token = body.get("token")
+        scope = body.get("scope_fingerprint")
+        if not token or not scope:
+            raise ValueError(
+                "Queuing an apply requires a reviewed token and scope fingerprint."
+            )
+        unit = manager.unit(ident)
+        if not aops.pending(store, unit)["pending"]:
+            raise Conflict("Nothing pending to apply for this deployment")
+        if scope != aops.scope_fingerprint(unit):
+            raise Conflict(
+                "The affected pool changed since the review; review it again."
+            )
+        op = aops.request_apply(store, unit, token, scope)
+        job = jobs.submit(
+            "Apply changes when idle",
+            _apply_unit_job,
+            deployment_id=unit["id"],
+            unit_id=unit["id"],
+            operation="apply",
+        )
+        return {"op": aops.op_public(op), "job_id": job["id"]}
+
+    @app.post("/api/deployments/{ident}/cancel")
+    async def cancel_apply_endpoint(ident: str):
+        """Cancel the queued apply before it begins. The saved change remains
+        pending for a fresh review."""
+        unit = manager.unit(ident)
+        op = aops.cancel(store, unit["id"])
+        return {"op": aops.op_public(op)}
+
+    @app.post("/api/deployments/{ident}/discard")
+    async def discard_endpoint(ident: str):
+        """Discard pending changes: restore the last *applied* configuration and
+        clear the operation. Returns the restored applied revision, or null when
+        the unit was never activated (nothing to restore)."""
+        unit = manager.unit(ident)
+        restored = aops.discard(store, unit)
+        return {"restored": restored, "scope_fingerprint": aops.scope_fingerprint(unit)}
+
+    async def _apply_unit_job(job_id):
+        """Drain the unit, revalidate, restart with the desired configuration,
+        then record the outcome. A failed or timed-out apply retains the saved
+        change (still pending) and reports rollback status; it never rolls the
+        user back to an older configuration."""
+        job = store.get("job", job_id)
+        unit_id = job["deployment_id"]
+        unit = manager.unit(unit_id)
+        op = aops.find_op(store, unit_id)
+        if op is None or op.state is not qa.ApplyState.QUEUED:
+            raise Conflict("No queued apply to run for this deployment")
+
+        # Revalidate immediately before application: scope and launch plan must
+        # still match the reviewed consent, otherwise it is stale.
+        if aops.scope_fingerprint(unit) != op.scope_fingerprint:
+            aops.complete_apply(
+                store,
+                unit,
+                error="The affected configuration changed before application; review again.",
+            )
+            return
+        plan = manager.plan([unit_id])
+        if plan.get("errors"):
+            aops.complete_apply(
+                store,
+                unit,
+                error=(
+                    "The launch plan changed or still has errors; review again. "
+                    + "; ".join(plan.get("errors", []))
+                ),
+            )
+            return
+
+        # Apply: mark in-flight, then drain (graceful stop) and restart (activate).
+        jobs.progress(job_id, "Applying changes…")
+        aops.save_op(store, op._move_to(qa.ApplyState.APPLYING))
+        try:
+            await manager.stop(
+                unit_id,
+                cancel_requests=False,
+                progress=lambda t: jobs.progress(job_id, t),
+            )
+            await manager.activate([unit_id], token=plan["plan_token"])
+            unit = manager.unit(unit_id)
+            if not all(m["state"] == "READY" for m in unit["members"]):
+                raise Conflict("Runtime did not come up ready after the restart")
+            aops.complete_apply(store, unit)  # success -> applied
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if isinstance(exc, Conflict) and manager.unit_busy(unit):
+                # Bounded idle-wait exceeded: the change stays pending (expired).
+                aops.expire(store, unit_id)
+            else:
+                aops.complete_apply(store, unit, error=redact(str(exc)))
+        op = aops.find_op(store, unit_id) or op
+        return aops.op_public(op)
 
     @app.get("/api/deployments/{ident}/logs")
     async def logs(ident: str, session_id: str | None = None):
@@ -1490,12 +1672,16 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 d | {"state": deployment_sets.state(unit)}, settings
             ):
                 continue
-            catalog = normalize(d["profile_snapshot"], d["alias"])
-            catalog["catalog_id"] = d["alias"]
+            # While a rename (or other change) is pending the runtime still
+            # executes the applied configuration; advertise the served ID, not
+            # the desired one, so no client ever requests an unserved ID.
+            served_alias = aops.effective_alias(store, unit, d["id"])
+            catalog = normalize(d["profile_snapshot"], served_alias)
+            catalog["catalog_id"] = served_alias
             catalog["model"]["name"] = d["name"]
             rows.append(
                 {
-                    "id": d["alias"],
+                    "id": served_alias,
                     "object": "model",
                     "created": 0,
                     "owned_by": "menagerie",
@@ -1567,11 +1753,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         started = time.monotonic()
         # Validate explicit modes and deployment-default effects before any load.
         if isinstance(body, dict):
+            model = body.get("model")
             candidate = next(
                 (
                     d
                     for d in store.list("deployment")
-                    if d.get("alias") == body.get("model") and d.get("enabled")
+                    if d.get("enabled")
+                    and aops.effective_alias(store, manager.unit(d["id"]), d["id"]) == model
                 ),
                 None,
             )

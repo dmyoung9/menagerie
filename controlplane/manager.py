@@ -231,6 +231,18 @@ class Manager:
                 ident,
                 c,
             )
+        if state == "READY":
+            # The runtime has now picked up the stored configuration. Record
+            # it as the *applied* reference so any pending desired/applied
+            # delta is resolved (the running process matches the current
+            # config). Best-effort: it must never block a lifecycle transition.
+            try:
+                from .apply_ops import record_applied
+
+                unit = deployment_sets.unit_for(self.store, ident)
+                record_applied(self.store, unit)
+            except Exception:
+                pass
         return d
 
     def owned(self, d):
@@ -239,6 +251,11 @@ class Manager:
     async def start(self):
         self.file_lock = host.lock_file(self.store.root / "daemon.lock")
         self.host = await asyncio.to_thread(telemetry.sample)
+        # Recover from an interrupted previous run: every in-flight queued
+        # apply becomes FAILED (never Applied) and must be re-reviewed.
+        from .apply_ops import reconcile_all
+
+        reconcile_all(self.store)
         for d in self.store.list("deployment"):
             if d["state"] in ACTIVE | {"VALIDATING"}:
                 if self.owned(d) and d["state"] in {"READY", "DEGRADED"}:
@@ -1069,6 +1086,19 @@ class Manager:
                     self.draining.pop(key, None)
                 self.request_changed.set()
 
+    def _applied_alias(self, deployment: dict) -> str | None:
+        """The alias the unit's applied snapshot is serving for this deployment,
+        or ``None`` when there is no applied snapshot. Used so a gateway request
+        carries the ID the client learned before a pending rename is applied."""
+        try:
+            snapshot = self.store.get("applied", self.unit(deployment["id"])["id"])
+        except (KeyError, TypeError):
+            return None
+        for r in (snapshot or {}).get("rows", []):
+            if r.get("id") == deployment["id"]:
+                return r["data"].get("alias")
+        return None
+
     async def acquire(self, alias):
         if self.waiting >= self.settings()["max_queue"]:
             raise Conflict("Gateway queue is full")
@@ -1076,7 +1106,8 @@ class Manager:
             (
                 d
                 for d in self.store.list("deployment")
-                if d["alias"] == alias and d["enabled"]
+                if d["enabled"]
+                and (d["alias"] == alias or self._applied_alias(d) == alias)
             ),
             None,
         )

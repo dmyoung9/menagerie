@@ -162,6 +162,15 @@ class Store:
             )
         return data
 
+    def delete(self, kind, ident, c=None):
+        if c is None:
+            with self.connect() as c:
+                return self.delete(kind, ident, c)
+        cur = c.execute(
+            "DELETE FROM objects WHERE kind=? AND id=?", (kind, ident)
+        )
+        return cur.rowcount
+
     def event(self, kind, data, deployment=None, c=None):
         if c is None:
             with self.connect() as c:
