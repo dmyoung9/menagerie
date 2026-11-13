@@ -9,9 +9,16 @@ The copy contract below is the shipped UI copy, not a proposal.
 Date: 2026-11-11. Baseline: Menagerie 3.0.0, commit `6182e7e45`.
 Working branch: `feat/model-first-ui`.
 
-This is a contributor design document, not documentation of currently supported
-behavior. Copy below is the proposed UI copy contract. Conditional copy must not
-ship before its underlying behavior exists.
+This is the contributor design and acceptance reference. User-facing supported
+workflows and recovery are documented in `docs/forms.md`; conditional design copy
+must only be used where its underlying behavior exists.
+
+Implementation follow-through adds automatic compatible pool assignment, separate
+desired snapshots, reviewed bounded application and recovery, selected-model load
+completion, model-level availability, retained setup detours, companion inventory
+selection, and Stepperize transitions. Behavioral evidence includes isolated API
+tests, a synthetic runtime process flow, and fixture-based desktop/mobile browser
+checks. This does not establish acceptance against real runtime builds or hardware.
 
 ## 1. Motivation and outcome
 

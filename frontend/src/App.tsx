@@ -51,6 +51,7 @@ import {
   DeploymentSetEditor,
   MultiDeploymentDetail,
   ServingTable,
+  ConfiguredModelsTable,
 } from './ServingDeployments';
 import {
   ActivityFeed,
@@ -495,8 +496,14 @@ export default function App() {
       member_ids: [d.id],
       inflight: status?.deployments.find((m) => m.id === d.id)?.inflight || 0,
     }));
-  const enabled = serving.filter((d) => d.enabled),
-    inactive = serving.filter((d) => !d.enabled),
+  const configured = deployments.map((d) => ({
+    ...d,
+    multi_model: false as const,
+    members: [d],
+    member_ids: [d.id],
+  }));
+  const enabled = configured.filter((d) => d.enabled),
+    inactive = configured.filter((d) => !d.enabled),
     running = deployments.filter((d) => d.state === 'READY');
   // A slice is only "pending" before its first successful answer; once a slice
   // has responded, refreshes keep its last-good data and must not re-gate the
@@ -626,11 +633,9 @@ export default function App() {
       open({
         type: 'launch',
         kind:
-          kind === 'deployments' && data.serving
-            ? 'serving-deployments'
-            : kind === 'serving-deployments' && !data.serving
-              ? 'deployments'
-              : kind,
+          kind === 'serving-deployments' && !data.serving
+            ? 'deployments'
+            : kind,
         row,
       }),
     stop: (
@@ -640,36 +645,27 @@ export default function App() {
       open({
         type: 'stop',
         kind:
-          kind === 'deployments' && data.serving
-            ? 'serving-deployments'
-            : kind === 'serving-deployments' && !data.serving
-              ? 'deployments'
-              : kind,
+          kind === 'serving-deployments' && !data.serving
+            ? 'deployments'
+            : kind,
         row,
       }),
     enable: (row: import('./types').LaunchTarget, enabled: boolean) =>
       open({ type: 'enable', row, enabled }),
   };
+  const [suspendedWizard, setSuspendedWizard] = useState<{
+    type: 'wizard';
+    modelId?: string;
+  } | null>(null);
   const newDeployment = (modelId?: string) => {
-    if (!data.models?.length) {
-      go('models');
-      return;
-    }
-    if (modelId) {
-      // Entry from an installed model goes straight to the single-model wizard,
-      // preselecting the chosen artifact.
-      open({ type: 'wizard', modelId });
-      return;
-    }
-    // Generic entry (Deployments page) opens the unified creation options:
-    // single-model wizard or multi-model deployment set.
-    open({ type: 'new-deployment' });
+    open({ type: 'wizard', modelId });
   };
   const depView = route[1] === 'disabled' ? 'inactive' : route[1] || 'enabled',
     detail =
       page === 'deployments' && !['enabled', 'inactive'].includes(depView);
   const selected = detail
-    ? serving.find((d) => d.id === depView || d.member_ids?.includes(depView))
+    ? configured.find((d) => d.id === depView) ||
+      serving.find((d) => d.id === depView)
     : undefined;
   const modelTab =
     route[1] === 'discover'
@@ -813,8 +809,27 @@ export default function App() {
                     onClick={() => newDeployment()}
                   >
                     <Plus size={16} />
-                    New deployment
+                    Set up model
                   </Button>
+                )}
+                {suspendedWizard && modal?.type !== 'wizard' && (
+                  <Button
+                    variant="outline"
+                    onClick={() => open(suspendedWizard)}
+                  >
+                    Return to setup
+                  </Button>
+                )}
+                {page === 'deployments' && (
+                  <details>
+                    <summary>Advanced</summary>
+                    <Button
+                      variant="outline"
+                      onClick={() => open({ type: 'deployment-set' })}
+                    >
+                      Create supervised group or runtime pool
+                    </Button>
+                  </details>
                 )}
               </div>
             </div>
@@ -1123,7 +1138,7 @@ export default function App() {
                       <CardContent className="p-0">
                         {(depView === 'inactive' ? inactive : enabled)
                           .length ? (
-                          <ServingTable
+                          <ConfiguredModelsTable
                             rows={(depView === 'inactive'
                               ? inactive
                               : enabled
@@ -1138,7 +1153,6 @@ export default function App() {
                                 .toLowerCase()
                                 .includes(query.toLowerCase()),
                             )}
-                            host={host}
                             actions={actions}
                           />
                         ) : (
@@ -1215,14 +1229,27 @@ export default function App() {
           )}
         </div>
       </SidebarInset>
-      {modal?.type === 'wizard' && (
+      {(modal?.type === 'wizard' || suspendedWizard) && (
         <DeploymentWizard
           data={data}
-          modelId={modal.modelId}
-          close={close}
+          modelId={
+            modal?.type === 'wizard' ? modal.modelId : suspendedWizard?.modelId
+          }
+          suspended={modal?.type !== 'wizard'}
+          close={() => {
+            setSuspendedWizard(null);
+            close();
+          }}
           setupEngine={() => {
+            if (modal?.type === 'wizard') setSuspendedWizard(modal);
             close();
             go('settings/engines');
+          }}
+          acquireModel={(local) => {
+            if (modal?.type === 'wizard') setSuspendedWizard(modal);
+            close();
+            go('models');
+            if (local) open({ type: 'local-model', path: '' });
           }}
           created={(row) => {
             void refreshSlices(affectedSlices('deployments'));
@@ -1267,43 +1294,36 @@ export default function App() {
         ) && (
           <Dialog
             title={
-              modal.type === 'new-deployment'
-                ? 'New deployment'
-                : modal.type === 'edit'
-                  ? modal.memberOnly
-                    ? 'Edit model'
-                    : (modal.value.id
-                        ? 'Edit '
-                        : modal.pull
-                          ? 'Pull '
-                          : 'New ') +
-                      (
-                        {
-                          runtimes: 'engine',
-                          profiles: 'profile',
-                          deployments: 'deployment',
-                        } as Record<string, string>
-                      )[modal.kind]
-                  : modal.type === 'stop'
-                    ? 'Unload ' + modal.row.name + '?'
-                    : modal.type === 'enable'
-                      ? (modal.enabled ? 'Enable ' : 'Disable ') +
-                        modal.row.name +
-                        '?'
-                      : modal.type === 'delete'
-                        ? 'Remove ' + modal.value.name + '?'
-                        : modal.type === 'local-model'
-                          ? 'Add from File'
-                          : modal.type === 'policy'
-                            ? 'Host policy'
-                            : modal.type === 'purge'
-                              ? 'Purge telemetry'
-                              : modal.type === 'backup'
-                                ? 'Registry backup'
-                                : modal.type === 'restore'
-                                  ? 'Restore configuration?'
-                                  : ('title' in modal && modal.title) ||
-                                    'Details'
+              modal.type === 'edit'
+                ? modal.memberOnly
+                  ? 'Edit model'
+                  : (modal.value.id ? 'Edit ' : modal.pull ? 'Pull ' : 'New ') +
+                    (
+                      {
+                        runtimes: 'engine',
+                        profiles: 'profile',
+                        deployments: 'deployment',
+                      } as Record<string, string>
+                    )[modal.kind]
+                : modal.type === 'stop'
+                  ? 'Unload ' + modal.row.name + '?'
+                  : modal.type === 'enable'
+                    ? (modal.enabled ? 'Enable ' : 'Disable ') +
+                      modal.row.name +
+                      '?'
+                    : modal.type === 'delete'
+                      ? 'Remove ' + modal.value.name + '?'
+                      : modal.type === 'local-model'
+                        ? 'Add from File'
+                        : modal.type === 'policy'
+                          ? 'Host policy'
+                          : modal.type === 'purge'
+                            ? 'Purge telemetry'
+                            : modal.type === 'backup'
+                              ? 'Registry backup'
+                              : modal.type === 'restore'
+                                ? 'Restore configuration?'
+                                : ('title' in modal && modal.title) || 'Details'
             }
             close={close}
             busy={busy}
@@ -1316,24 +1336,6 @@ export default function App() {
                   {modalError}
                 </AlertDescription>
               </Alert>
-            )}
-            {modal.type === 'new-deployment' && (
-              <div className="creation-options">
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() => open({ type: 'wizard' })}
-                >
-                  Single model
-                </Button>
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() => open({ type: 'deployment-set' })}
-                >
-                  Multiple models
-                </Button>
-              </div>
             )}
             {modal.type === 'edit' && (
               <Editor
@@ -1357,7 +1359,9 @@ export default function App() {
                         modal.pull
                           ? '/api/runtimes/pull'
                           : '/api/' +
-                              editor.kind +
+                              (editor.kind === 'deployments'
+                                ? 'model-setups'
+                                : editor.kind) +
                               (modal.expected
                                 ? '?expected=' + modal.expected
                                 : ''),
@@ -1499,7 +1503,7 @@ export default function App() {
                       void perform(
                         () =>
                           api(
-                            `/api/${data.serving ? 'serving-deployments' : 'deployments'}/${modal.row.id}/enabled`,
+                            `/api/${'multi_model' in modal.row && modal.row.multi_model ? 'serving-deployments' : 'deployments'}/${modal.row.id}/enabled`,
                             { enabled: modal.enabled },
                           ),
                         modal.enabled

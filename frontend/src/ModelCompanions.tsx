@@ -4,6 +4,7 @@ import {
   NativeSelectOption,
 } from '@/components/ui/native-select';
 import { Field } from './ui';
+import { CompanionFiles } from '@/components/companion-files';
 import { DraftTokenRange } from './DraftTokenRange';
 import {
   companionOptions,
@@ -68,6 +69,12 @@ export function ModelCompanions({
               ))}
             </NativeSelect>
           </Field>
+          <CompanionFiles
+            model={model}
+            selected={(path) =>
+              change({ ...value, config: { ...config, mmproj: path } })
+            }
+          />
         </FieldSet>
       )}
       {schema['spec-type'] && (
@@ -112,6 +119,12 @@ export function ModelCompanions({
                 ))}
             </NativeSelect>
           </Field>
+          <CompanionFiles
+            model={model}
+            selected={(path) =>
+              change({ ...value, config: selectMtp(config, path, draftKey) })
+            }
+          />
         </FieldSet>
       )}
     </>

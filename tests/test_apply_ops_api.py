@@ -211,11 +211,11 @@ async def test_save_apply_cycle_and_concurrent_conflict(tmp_path, monkeypatch):
         fp = aops.scope_fingerprint(manager.unit(DEPLOY_ID))
         r = await client.post(
             f"{base}/request-apply",
-            json={"token": "tok-user", "scope_fingerprint": fp},
+            json={"token": "tok-1", "scope_fingerprint": fp},
         )
         assert r.status_code == 200
         assert r.json()["op"]["state"] == "queued"
-        assert r.json()["op"]["token"] == "tok-user"
+        assert r.json()["op"]["token"] == "tok-1"
         assert r.json()["op"]["scope_fingerprint"] == fp
         job_id = r.json()["job_id"]
 
@@ -282,7 +282,7 @@ async def test_cancel_keeps_change_pending_and_discard_restores(tmp_path, monkey
         assert s.status_code == 200
         fp = aops.scope_fingerprint(manager.unit(DEPLOY_ID))
         r = await client.post(
-            f"{base}/request-apply", json={"token": "tok-user", "scope_fingerprint": fp}
+            f"{base}/request-apply", json={"token": "tok-1", "scope_fingerprint": fp}
         )
         assert r.status_code == 200
         job_id = r.json()["job_id"]

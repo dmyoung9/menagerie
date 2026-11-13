@@ -12,6 +12,12 @@ test("revision conflict merges fresh server fields with the user's edits and re-
   await page.getByLabel('Display name', { exact: true }).fill('Merged name');
   fixture.conflictSave = true;
   await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page
+    .getByRole('button', {
+      name: 'Rename and update API model ID',
+      exact: true,
+    })
+    .click();
   await expect(page.getByText(conflictText, { exact: false })).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Review changes', exact: true }),
@@ -21,13 +27,19 @@ test("revision conflict merges fresh server fields with the user's edits and re-
     .click();
   await expect(page.getByText(conflictText, { exact: false })).toBeHidden();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page
+    .getByRole('button', {
+      name: 'Rename and update API model ID',
+      exact: true,
+    })
+    .click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
     )
     .toBe(3);
   const written = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=2')?.body,
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=2')?.body,
   );
   expect(written.name).toBe('Merged name');
   expect(written.idle_timeout).toBe(600);

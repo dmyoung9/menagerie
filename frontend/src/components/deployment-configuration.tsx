@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Editor } from '@/Editors';
 import { editable } from '@/editor-state';
-import { active, api, message } from '@/ui';
+import { readApi, message } from '@/ui';
+import { deployment as deploymentDecoder } from '@/contracts';
+import { PendingChanges } from './pending-changes';
 import type { Deployment, Registry } from '@/types';
 
 export function DeploymentConfiguration({
@@ -17,27 +19,23 @@ export function DeploymentConfiguration({
     [error, setError] = useState(''),
     [pendingRevision, setPendingRevision] = useState<number | null>(null),
     [revisionConflict, setRevisionConflict] = useState(false);
+  const [baseline, setBaseline] = useState(deployment);
   return (
     <>
-      {active(deployment) && (
-        <p role="status">
-          Unload this deployment before changing its configuration.
-        </p>
-      )}
+      <PendingChanges deploymentId={deployment.id} changed={saved} />
       {error && (
         <p className="error-text" role="alert">
           {error}
         </p>
       )}
       <Editor
-        key={`${deployment.id}-${deployment.revision}`}
+        key={`${baseline.id}-${baseline.revision}`}
         initial={{
           kind: 'deployments',
-          value: editable('deployments', deployment),
+          value: editable('deployments', baseline),
         }}
         data={data}
         busy={busy}
-        disabled={active(deployment)}
         embedded
         revisionConflict={revisionConflict}
         onReconciled={(fresh) => {
@@ -49,12 +47,14 @@ export function DeploymentConfiguration({
           setBusy(true);
           setError('');
           try {
-            await api(
-              `/api/deployments?expected=${
-                pendingRevision ?? deployment.revision
+            const updated = await readApi(
+              `/api/model-setups?expected=${
+                pendingRevision ?? baseline.revision
               }`,
+              deploymentDecoder,
               editor.value,
             );
+            setBaseline(updated);
             saved();
             setPendingRevision(null);
           } catch (e) {

@@ -49,9 +49,12 @@ function formatApiError(detail: unknown): string {
 
 export async function fetchSuggestedAlias(
   name: string,
+  exclude?: string,
 ): Promise<AliasSuggestion> {
   const path =
-    '/api/deployments/alias/suggest?name=' + encodeURIComponent(name);
+    '/api/deployments/alias/suggest?name=' +
+    encodeURIComponent(name) +
+    (exclude ? '&exclude=' + encodeURIComponent(exclude) : '');
   const response = await fetch(path, {});
   const data: unknown = await response.json();
   if (!response.ok) {

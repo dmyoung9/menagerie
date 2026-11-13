@@ -24,6 +24,7 @@ export type SuggestedAlias = {
 export function useSuggestedAlias(
   name: string,
   enabled = true,
+  exclude?: string,
 ): SuggestedAlias {
   const [state, setState] = useState<AliasSuggestion | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,7 +38,7 @@ export function useSuggestedAlias(
     let cancelled = false;
     setBusy(true);
     const timer = setTimeout(() => {
-      void fetchSuggestedAlias(name).then(
+      void fetchSuggestedAlias(name, exclude).then(
         (suggestion) => {
           if (!cancelled) {
             setState(suggestion);
@@ -61,7 +62,7 @@ export function useSuggestedAlias(
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [name, enabled]);
+  }, [name, enabled, exclude]);
 
   return {
     alias: state?.alias ?? (name ? localAliasFallback(name) : ''),

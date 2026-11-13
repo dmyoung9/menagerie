@@ -199,6 +199,8 @@ export type ProfileDraft = Omit<Profile, 'id' | 'revision'> & {
   id?: string;
 };
 export type DeploymentDraft = {
+  identifier_mode?: 'generated' | 'custom';
+  runtime_assignment?: 'automatic' | 'dedicated';
   id?: string;
   name: string;
   profile_id?: string;
@@ -235,6 +237,12 @@ export type DeploymentLifecycle = {
   last_stop_reason?: string | null;
 };
 export type Deployment = {
+  unit_name?: string;
+  member_availability?: boolean;
+  changes_pending?: boolean;
+  runtime_assignment?: 'automatic' | 'dedicated';
+  identifier_mode?: 'generated' | 'custom';
+  active_alias?: string;
   draining?: boolean;
   id: string;
   name: string;
@@ -565,7 +573,6 @@ export type LaunchModal = {
 };
 export type ModalState =
   | { type: 'wizard'; modelId?: string }
-  | { type: 'new-deployment' }
   | {
       type: 'deployment-set';
       row?: DeploymentSet;

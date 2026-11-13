@@ -100,7 +100,7 @@ test('projectors and MTP heads use matching inventory and None clears both draft
     )
     .toBe(2);
   const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
   ).configuration!.config;
   expect(saved).toMatchObject({ 'spec-type': 'none', extension: 'keep' });
   for (const key of [
@@ -241,7 +241,7 @@ test('numeric flags are absent until added and seed engine rather than policy de
     )
     .toBe(2);
   const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
   ).configuration!.config;
   expect(saved).toMatchObject({
     temp: 0.81,
@@ -363,11 +363,11 @@ for (const width of [1440, 576, 320]) {
     await expect(minInput).toBeVisible();
     await expect(maxInput).toBeVisible();
     const writesBefore = fixture.writes.filter(
-      (w) => w.path === '/api/deployments?expected=1',
+      (w) => w.path === '/api/model-setups?expected=1',
     ).length;
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     expect(
-      fixture.writes.filter((w) => w.path === '/api/deployments?expected=1'),
+      fixture.writes.filter((w) => w.path === '/api/model-setups?expected=1'),
     ).toHaveLength(writesBefore);
     await minInput.fill('1');
     await maxInput.fill('8');
@@ -404,7 +404,7 @@ for (const width of [1440, 576, 320]) {
       )
       .toBe(2);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     ).configuration!.config;
     expect(saved).toMatchObject({ [keys[0]]: 1, [keys[1]]: 8 });

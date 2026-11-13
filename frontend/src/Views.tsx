@@ -290,37 +290,50 @@ export function DeploymentDetail({
           <Status value={state(d)} />
         </div>
         <div className="actions">
-          {d.enabled && !active(d) && (
-            <Button
-              variant="default"
-              type="button"
-              onClick={() => actions.load('deployments', d)}
-            >
-              Load now
-            </Button>
-          )}
-          {['READY', 'DEGRADED', 'LOADING', 'STARTING', 'QUEUED'].includes(
-            d.state,
-          ) && (
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() => actions.stop('deployments', d)}
-            >
-              Unload
-            </Button>
-          )}
-          {!d.enabled && (
-            <Button
-              variant="default"
-              type="button"
-              onClick={() => actions.enable(d, true)}
-            >
-              Enable for clients
-            </Button>
-          )}
+          {d.enabled &&
+            !d.changes_pending &&
+            d.member_availability !== false &&
+            (!active(d) || Boolean(d.unit_id && d.unit_id !== d.id)) && (
+              <Button
+                variant="default"
+                type="button"
+                onClick={() => actions.load('deployments', d)}
+              >
+                Review and load
+              </Button>
+            )}
+          {(!d.unit_id || d.unit_id === d.id) &&
+            ['READY', 'DEGRADED', 'LOADING', 'STARTING', 'QUEUED'].includes(
+              d.state,
+            ) && (
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => actions.stop('deployments', d)}
+              >
+                Unload
+              </Button>
+            )}
+          {!d.enabled &&
+            !d.changes_pending &&
+            d.member_availability !== false && (
+              <Button
+                variant="default"
+                type="button"
+                onClick={() => actions.enable(d, true)}
+              >
+                Enable for clients
+              </Button>
+            )}
         </div>
       </div>
+      {d.unit_id && d.unit_id !== d.id && (
+        <p>
+          Shared runtime ·{' '}
+          <a href={`#/deployments/${d.unit_id}`}>Advanced runtime controls</a>.
+          Stopping the runtime affects all its models.
+        </p>
+      )}
       {d.lifecycle?.failure && (
         <Alert variant="destructive" className="mb-5" role="alert">
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3 whitespace-pre-line">

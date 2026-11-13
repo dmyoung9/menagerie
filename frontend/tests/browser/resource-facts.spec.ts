@@ -5,11 +5,12 @@ test('resource preview pairs stacked capacity and allocation selection without p
   page,
 }, testInfo) => {
   await page.goto('/#/deployments');
+  await page.getByText('Advanced', { exact: true }).click();
   await page
-    .getByRole('button', { name: 'New deployment', exact: true })
-    .click();
-  await page
-    .getByRole('button', { name: 'Multiple models', exact: true })
+    .getByRole('button', {
+      name: 'Create supervised group or runtime pool',
+      exact: true,
+    })
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
@@ -46,7 +47,9 @@ test('over-budget launch facts have no acknowledgment gate', async ({
   page,
 }) => {
   await page.goto('/#/deployments/idle');
-  await page.getByRole('button', { name: 'Load now', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Review and load', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await expect(
     dialog.getByText('1.0 GiB over budget', { exact: true }),

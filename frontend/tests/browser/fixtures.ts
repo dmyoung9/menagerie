@@ -356,7 +356,11 @@ export const test = base.extend<{ fixture: Fixture }>({
             note: 'Preview only; launch rechecks capacity.',
           });
         }
-        if (path === '/api/deployments' || path === '/api/deployment-sets') {
+        if (
+          path === '/api/deployments' ||
+          path === '/api/model-setups' ||
+          path === '/api/deployment-sets'
+        ) {
           if (fixture.holdSave)
             await new Promise<void>((resolve) => {
               fixture.releaseSave = resolve;
@@ -549,6 +553,18 @@ export const test = base.extend<{ fixture: Fixture }>({
             stops: [],
             plan_token: 'review-token',
           });
+        if (path.endsWith('/load-model')) {
+          const job = {
+            id: `job-${++fixture.jobCounter}`,
+            revision: 1,
+            name: 'Load model',
+            state: 'RUNNING',
+            deployment_id: path.split('/').at(-2),
+            created_at: fixture.host.ts,
+          };
+          fixture.registry.jobs.push(job);
+          return send(job);
+        }
         if (path.endsWith('/start')) {
           fixture.registry.jobs.push({
             id: `job-${++fixture.jobCounter}`,

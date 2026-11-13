@@ -183,6 +183,7 @@ class Deployment(DeploymentPolicy):
     # load with this default and keep their stored alias; the identifier is
     # regenerated only when the name actually changes.
     identifier_mode: Literal["generated", "custom"] = "generated"
+    runtime_assignment: Literal["automatic", "dedicated"] = "dedicated"
     port: int = Field(ge=1024, le=65535)
     gpu: int | None = Field(default=None, ge=0, le=31)
     # Per-deployment template override. None means "use model default";

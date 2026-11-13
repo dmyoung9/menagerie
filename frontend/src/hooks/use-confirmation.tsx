@@ -12,6 +12,7 @@ import {
 
 export function useConfirmation() {
   const [description, setDescription] = useState('');
+  const [label, setLabel] = useState('Continue');
   const pending = useRef<((accepted: boolean) => void) | null>(null);
   useEffect(() => () => pending.current?.(false), []);
   const finish = (accepted: boolean) => {
@@ -19,11 +20,12 @@ export function useConfirmation() {
     pending.current = null;
     setDescription('');
   };
-  const confirm = (message: string) =>
+  const confirm = (message: string, actionLabel = 'Continue') =>
     new Promise<boolean>((resolve) => {
       pending.current?.(false);
       pending.current = resolve;
       setDescription(message);
+      setLabel(actionLabel);
     });
   const confirmation = (
     <AlertDialog
@@ -42,7 +44,7 @@ export function useConfirmation() {
             Cancel
           </AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={() => finish(true)}>
-            Continue
+            {label}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

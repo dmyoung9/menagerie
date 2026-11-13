@@ -61,7 +61,7 @@ for (const width of [1440, 576, 320]) {
       )
       .toBe(2);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     );
     expect(saved.configuration!.config['flash-attn']).toBe('auto');
@@ -96,6 +96,12 @@ for (const selected of ['auto', 'on', 'off']) {
     await openIdentity(page);
     await page.getByLabel('Display name', { exact: true }).fill('Renamed');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page
+      .getByRole('button', {
+        name: 'Rename and update API model ID',
+        exact: true,
+      })
+      .click();
     await expect
       .poll(
         () =>
@@ -109,7 +115,7 @@ for (const selected of ['auto', 'on', 'off']) {
   });
 }
 
-test('quantized V cache and attention Off stay mutually exclusive; loaded controls are read-only', async ({
+test('quantized V cache and attention Off stay mutually exclusive; loaded controls allow staged editing', async ({
   page,
   fixture,
 }) => {
@@ -142,6 +148,6 @@ test('quantized V cache and attention Off stay mutually exclusive; loaded contro
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
   await page.goto('/#/deployments/ready/configuration');
   await openCard(page, 'memory');
-  await expect(attention).toBeDisabled();
-  await expect(page.getByLabel('V cache', { exact: true })).toBeDisabled();
+  await expect(attention).toBeEnabled();
+  await expect(page.getByLabel('V cache', { exact: true })).toBeEnabled();
 });

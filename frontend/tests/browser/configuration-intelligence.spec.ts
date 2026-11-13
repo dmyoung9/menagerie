@@ -48,7 +48,7 @@ test('curated sections preserve omission and separate explicit automatic context
     .toBe(2);
   const saved = deploymentDraft(
     fixture.writes.find(
-      (entry) => entry.path === '/api/deployments?expected=1',
+      (entry) => entry.path === '/api/model-setups?expected=1',
     )!.body,
   );
   expect(saved.configuration!.config).toEqual({ 'ctx-size': 0 });

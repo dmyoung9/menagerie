@@ -65,15 +65,19 @@ instances have a single lifecycle owner.
 
 - `GET /api/deployments/alias/suggest?name=` returns the deterministic
   `{alias, base, mode: "generated"}` slug preview against current deployment
-  aliases.
+  aliases, including pending aliases. `exclude=ID` excludes the edited model.
 - `GET /api/deployments/{ident}/pending` reports desired-vs-applied status for
   a unit (and its pool): `op`, `desired_rev`, `applied_rev`, `pending`,
-  `scope_fingerprint`, `affected_ids`, `affected`. A unit is pending only once
-  it is activated and the stored configuration differs from what the runtime
-  last loaded.
-- `POST /api/deployments/{ident}/save-desired` records the unit's stored
-  configuration as the desired revision. It never restarts the runtime; the
-  change stays pending until an explicit, reviewed apply.
+  `scope_fingerprint`, `affected_ids`, `affected`. Model setup stages separate
+  desired rows while the live registry continues routing the applied configuration.
+- `POST /api/model-setups?expected=REV` creates or updates a model setup. New
+  automatic assignments join compatible automatically managed pools; legacy
+  assignments remain explicit. Active edits and additions to active pools stage
+  snapshots without mutating live membership or process ownership.
+- `POST /api/deployments/{ident}/review-apply` validates the desired overlay and
+  binds consent to configuration, dependencies, affected scope and unload consequences.
+- `POST /api/deployments/{ident}/save-desired` is the legacy unloaded-edit path;
+  it cannot authorize a restart of an active unit.
 - `POST /api/deployments/{ident}/request-apply` queues a reviewed apply,
   taking the `token` and `scope_fingerprint` captured during review. It
   revalidates scope and the launch plan immediately before applying, so stale
@@ -93,8 +97,10 @@ instances have a single lifecycle owner.
   policy-eligible unload candidates for this unit; candidates are always
   consent-gated and never include the unit being loaded.
 
-Member lifecycle actions expand to complete membership. Policy/enablement changes
-on owned members are rejected; settings edits require the whole unit unloaded.
+Member stop actions expand to complete membership. Native-pool members can change
+client availability independently without stopping the process. Shared policy edits
+require the whole unit unloaded. `/api/deployments/{ident}/load-model` requires a
+reviewed launch token and observes selected native-pool residency before completion.
 Review tokens include membership and policy revisions. Preserve atomic rollback,
 independent aliases/ports for reused weights, and inactive history restoration.
 See `tests/test_deployment_sets.py` and `tests/test_multi_configuration.py` for

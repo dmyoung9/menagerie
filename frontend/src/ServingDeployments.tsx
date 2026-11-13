@@ -83,6 +83,131 @@ import type {
   ServingDeployment,
 } from './types';
 
+export function ConfiguredModelsTable({
+  rows,
+  actions,
+}: {
+  rows: Deployment[];
+  actions: DeploymentActions;
+}) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead>API model ID</TableHead>
+          <TableHead>Availability</TableHead>
+          <TableHead>Residency</TableHead>
+          <TableHead>Active requests</TableHead>
+          <TableHead>Total requests</TableHead>
+          <TableHead>Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((model) => (
+          <TableRow key={model.id}>
+            <TableCell>
+              <a href={`#/deployments/${model.id}`}>{model.name}</a>
+              {model.state === 'FAILED' && (
+                <p>
+                  <a href={`#/deployments/${model.id}/logs`}>View logs</a>
+                </p>
+              )}
+              {model.changes_pending && <p>Changes pending</p>}
+            </TableCell>
+            <TableCell>
+              <code>{model.alias}</code>
+              {model.active_alias && model.active_alias !== model.alias && (
+                <p>Currently serving: {model.active_alias}</p>
+              )}
+            </TableCell>
+            <TableCell>
+              {model.changes_pending
+                ? 'Changes pending'
+                : model.enabled
+                  ? 'Available'
+                  : 'Disabled'}
+            </TableCell>
+            <TableCell>
+              {model.state === 'FAILED'
+                ? 'Failed'
+                : model.runtime_observation?.residency === 'resident' ||
+                    (!model.engine_pool &&
+                      model.state === 'READY' &&
+                      !model.runtime_observation)
+                  ? 'Loaded'
+                  : model.runtime_observation?.residency === 'loading' ||
+                      ['STARTING', 'LOADING'].includes(model.state)
+                    ? 'Loading'
+                    : model.state === 'STOPPING'
+                      ? 'Unloading'
+                      : 'Not loaded'}
+            </TableCell>
+            <TableCell>{model.inflight || 0}</TableCell>
+            <TableCell>{model.historical_requests || 0}</TableCell>
+            <TableCell>
+              {model.member_availability !== false && (
+                <Button
+                  variant="outline"
+                  disabled={model.changes_pending}
+                  onClick={() =>
+                    model.enabled
+                      ? actions.load('deployments', model)
+                      : actions.enable(model, true)
+                  }
+                >
+                  {model.enabled ? 'Review and load' : 'Make available'}
+                </Button>
+              )}
+              <Menu label={'Actions for ' + model.name}>
+                <DropdownMenuItem
+                  render={
+                    <a href={`#/deployments/${model.id}/configuration`} />
+                  }
+                >
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => actions.edit('deployments', model, true)}
+                >
+                  Duplicate
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  render={<a href={`#/deployments/${model.id}/logs`} />}
+                >
+                  Logs
+                </DropdownMenuItem>
+                {model.member_availability !== false && model.enabled && (
+                  <DropdownMenuItem
+                    disabled={model.changes_pending}
+                    onClick={() => actions.enable(model, false)}
+                  >
+                    Disable
+                  </DropdownMenuItem>
+                )}
+              </Menu>
+              {model.unit_id && model.unit_id !== model.id ? (
+                <a href={`#/deployments/${model.unit_id}`}>
+                  Advanced runtime controls
+                </a>
+              ) : (
+                active(model) && (
+                  <Button
+                    variant="outline"
+                    onClick={() => actions.stop('deployments', model)}
+                  >
+                    Unload model
+                  </Button>
+                )
+              )}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
 function unitVram(
   d: ServingDeployment,
   host: HostSnapshot,

@@ -213,7 +213,9 @@ def action_scope(action, unit, store, member_id=None):
             f"Member {member_id!r} is not part of unit {resolved.get('id')!r}."
         )
 
-    if multi:
+    if multi and not (
+        resolved.get("engine_pool") and member_id and action in {"enable", "disable"}
+    ):
         # The runtime cannot unload one member independently of the pool.
         affects = list(member_ids)
         is_whole_unit = True

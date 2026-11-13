@@ -299,6 +299,12 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     profile_id: maybeString,
     profile_snapshot: opt(profile),
     alias: d.string,
+    unit_name: opt(d.string),
+    member_availability: opt(d.boolean),
+    changes_pending: opt(d.boolean),
+    runtime_assignment: opt(d.oneOf('automatic', 'dedicated')),
+    identifier_mode: opt(d.oneOf('generated', 'custom')),
+    active_alias: opt(d.string),
     port: opt(d.number),
     residency: opt(d.string),
     priority: opt(d.number),
@@ -375,6 +381,8 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
   return { ...common, multi_model: true, members, member_ids };
 };
 export const deploymentDraft = d.object<T.DeploymentDraft>({
+  identifier_mode: opt(d.oneOf('generated', 'custom')),
+  runtime_assignment: opt(d.oneOf('automatic', 'dedicated')),
   id: opt(d.string),
   name: d.string,
   profile_id: opt(d.string),

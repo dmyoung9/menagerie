@@ -24,6 +24,7 @@ from . import (
     deployment_sets,
     host,
     lifecycle,
+    model_setup,
     pool_edit,
     runtime_protocol,
     templates,
@@ -111,17 +112,28 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
 
     def deployment_rows():
         settings = manager.settings()
+        totals = store.request_totals()
         result = []
         for unit in deployment_sets.units(store):
             for d in unit["members"]:
                 published = lifecycle.visible(
-                    d | {"state": deployment_sets.state(unit)}, settings
+                    d
+                    | {
+                        "state": deployment_sets.state(unit),
+                        "enabled": d["enabled"] and unit["enabled"],
+                    },
+                    settings,
                 )
                 result.append(
-                    d
+                    model_setup.projection(store, d)
                     | {
                         "unit_id": unit["id"],
                         "unit_name": unit["name"],
+                        "engine_pool": bool(unit.get("engine_pool")),
+                        "inflight": manager.inflight.get(d["id"], 0),
+                        "historical_requests": totals.get(d["id"], 0),
+                        "member_availability": not unit["multi_model"]
+                        or bool(unit.get("engine_pool")),
                         "draining": bool(manager.draining.get(unit["id"])),
                         "lifecycle": lifecycle.describe(d, settings)
                         | {"serving": published},
@@ -138,6 +150,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         ]
 
     def save_set(data, expected=None, c=None):
+        if data.get("id") and model_setup.desired(store, data["id"]):
+            raise Conflict(
+                "Apply or discard pending model changes before editing the shared runtime"
+            )
         # Caller owns the admission lock and the registry transaction.
         previous = next(
             (u for u in store.list("deployment_set", c) if u["id"] == data.get("id")),
@@ -177,7 +193,12 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             d = store.get("deployment", i, c)
             store.put(
                 "deployment",
-                d | {k: saved[k] for k in deployment_sets.POLICY_KEYS},
+                d
+                | {
+                    k: saved[k]
+                    for k in deployment_sets.POLICY_KEYS
+                    if k != "enabled" or not saved.get("engine_pool")
+                },
                 c=c,
             )
         store.event(
@@ -606,14 +627,22 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         return deployment_rows()
 
     @app.get("/api/deployments/alias/suggest")
-    async def suggest_alias(name: str = Query(..., min_length=1)):
+    async def suggest_alias(
+        name: str = Query(..., min_length=1), exclude: str | None = None
+    ):
         """Deterministic API-identifier preview for a display name.
 
         Reads the current deployment aliases server-side so the returned
         value is the one that would be stored. The slug is a pure function
         of the name: same name and registry always yield the same identifier.
         """
-        taken = {d["alias"] for d in store.list("deployment")}
+        rows = store.list("deployment") + [
+            r["data"]
+            for snap in store.list("desired")
+            for r in snap["rows"]
+            if r["kind"] == "deployment"
+        ]
+        taken = {d["alias"] for d in rows if d["id"] != exclude}
         alias = resolve_alias(name, taken)
         return {
             "alias": alias,
@@ -879,13 +908,27 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     )
                 return saved
 
-    def save_member(data, expected=None, c=None, owner_id=None):
+    def save_member(data, expected=None, c=None, owner_id=None, prepare=False):
         data.setdefault("gpu", None)
         all_d = store.list("deployment", c)
+        desired_members = [
+            r["data"]
+            for snap in store.list("desired", c)
+            for r in snap["rows"]
+            if r["kind"] == "deployment"
+        ]
         previous = next((d for d in all_d if d["id"] == data.get("id")), None)
         owner = deployment_sets.unit_for(store, data["id"]) if data.get("id") else None
+        if (
+            not prepare
+            and owner
+            and model_setup.desired(store, model_setup.unit_id(store, data["id"]))
+        ):
+            raise Conflict(
+                "Apply or discard pending changes before using advanced editing"
+            )
         if owner and owner["multi_model"]:
-            if any(m["state"] in ACTIVE for m in owner["members"]):
+            if not prepare and any(m["state"] in ACTIVE for m in owner["members"]):
                 raise Conflict("Unload the whole deployment before editing a model")
             if owner["id"] != owner_id and any(
                 data[k] != owner[k] for k in deployment_sets.POLICY_KEYS
@@ -893,8 +936,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 raise Conflict(
                     "Edit the deployment's shared policy instead of an individual model"
                 )
-        if previous and (
-            previous["state"] in ACTIVE or manager.inflight.get(previous["id"], 0)
+        if (
+            not prepare
+            and previous
+            and (previous["state"] in ACTIVE or manager.inflight.get(previous["id"], 0))
         ):
             raise Conflict("Stop this deployment before changing its configuration")
         # Identifier mode: in "generated" the API ID follows the display name and
@@ -905,14 +950,23 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             and previous is not None
             and (previous.get("name") != data.get("name"))
         ):
-            taken = {d["alias"] for d in all_d if d.get("id") != data.get("id")}
-            data["alias"] = resolve_alias(data["name"], taken)
+            taken = {
+                d["alias"]
+                for d in all_d + desired_members
+                if d.get("id") != data.get("id")
+            }
+            generated = resolve_alias(data["name"], taken)
+            if prepare and data["alias"] != generated:
+                raise Conflict(
+                    "The generated API model ID changed; review the name and identifier again"
+                )
+            data["alias"] = generated
         if data["port"] in {8001, 8017}:
             raise ValueError("Ports 8001 and 8017 are reserved for Menagerie")
         if any(
             d["id"] != data.get("id")
             and (d["alias"] == data["alias"] or d["port"] == data["port"])
-            for d in all_d
+            for d in all_d + desired_members
         ):
             raise Conflict("Alias and port must be unique")
         configuration = data.pop("configuration", None)
@@ -967,7 +1021,118 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     "Template override must belong to the deployment's model"
                 )
         data.update(state="STOPPED", profile_snapshot=snapshot, reservation_active=0)
+        if prepare:
+            data.setdefault("id", uid())
+            data["revision"] = previous["revision"] if previous else 0
+            return data
         return store.put("deployment", data, expected, c=c)
+
+    @app.post("/api/model-setups")
+    async def model_setup_save(body: Deployment, expected: int | None = None):
+        async with manager.lock:
+            data = body.model_dump(exclude_none=True)
+            previous = store.get("deployment", data["id"]) if data.get("id") else None
+            if previous and (expected is None or previous["revision"] != expected):
+                raise Conflict("Revision changed; review changes before saving")
+            owner = (
+                manager.unit(model_setup.unit_id(store, previous["id"]))
+                if previous
+                else None
+            )
+            if owner:
+                op = aops.find_op(store, owner["id"])
+                if op and op.state in qa.ApplyState.IN_FLIGHT:
+                    raise Conflict(
+                        "A change is already being applied; cancel it before editing"
+                    )
+                if not aops.load_applied(store, owner["id"]):
+                    aops.record_applied(store, owner)
+            with store.transaction() as c:
+                prepared = save_member(
+                    data, c=c, owner_id=owner["id"] if owner else None, prepare=True
+                )
+                pool = (
+                    store.get("deployment_set", owner["id"])
+                    if owner and owner["multi_model"]
+                    else model_setup.choose_pool(store, prepared)
+                    if not previous
+                    else None
+                )
+                if pool:
+                    live_pool = next(
+                        (
+                            p
+                            for p in store.list("deployment_set")
+                            if p["id"] == pool["id"]
+                        ),
+                        None,
+                    )
+                    owner = manager.unit(pool["id"]) if live_pool else None
+                    if (
+                        owner
+                        and owner.get("engine_pool")
+                        and pool_edit.eligible_for_pool(prepared, owner, store)
+                    ):
+                        raise Conflict(
+                            "This setup is incompatible with its pool; choose compatible engine, device and settings"
+                        )
+                    if owner and any(
+                        prepared[k] != owner[k]
+                        for k in deployment_sets.POLICY_KEYS
+                        if k != "enabled"
+                    ):
+                        raise Conflict(
+                            "Shared policy belongs to the runtime; edit it in Advanced runtime controls"
+                        )
+                key = pool["id"] if pool else prepared["id"]
+                pending_snapshot = model_setup.desired(store, key)
+                needs_apply = bool(
+                    pending_snapshot
+                    or owner
+                    and any(m["state"] in ACTIVE for m in owner["members"])
+                )
+                if needs_apply:
+                    op = aops.find_op(store, key)
+                    if op and op.state in qa.ApplyState.IN_FLIGHT:
+                        raise Conflict(
+                            "A change is already being applied; cancel it before editing"
+                        )
+                    snap = pending_snapshot or model_setup.snapshot(store, owner)
+                    snap["rows"] = [
+                        r
+                        for r in snap["rows"]
+                        if not (
+                            r["kind"] == "deployment"
+                            and r["data"]["id"] == prepared["id"]
+                        )
+                    ]
+                    snap["rows"].append({"kind": "deployment", "data": prepared})
+                    if pool:
+                        set_entry = next(
+                            r for r in snap["rows"] if r["kind"] == "deployment_set"
+                        )
+                        if prepared["id"] not in set_entry["data"]["member_ids"]:
+                            set_entry["data"]["member_ids"].append(prepared["id"])
+                    model_setup.validate_snapshot(store, snap)
+                    live = previous or (
+                        prepared | {"enabled": False, "pending_unit": key}
+                    )
+                    saved = store.put("deployment", live, expected=expected, c=c)
+                    store.put("desired", snap, c=c)
+                    op = qa.create_op(
+                        key,
+                        model_setup.fingerprint(snap),
+                        aops.current_applied_rev(store, key) or "",
+                        time.time(),
+                    )
+                    aops.save_op(store, op, c=c)
+                else:
+                    saved = store.put("deployment", prepared, expected=expected, c=c)
+                    if pool:
+                        if saved["id"] not in pool["member_ids"]:
+                            pool["member_ids"].append(saved["id"])
+                        store.put("deployment_set", pool, c=c)
+            return model_setup.projection(store, saved)
 
     @app.post("/api/deployments/{ident}/validate")
     async def validate(ident: str):
@@ -981,6 +1146,16 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             lambda job: manager.activate(
                 [ident], body.get("override", False), token=body.get("plan_token")
             ),
+        )
+
+    @app.post("/api/deployments/{ident}/load-model")
+    async def load_model(ident: str, body: dict):
+        if not body.get("plan_token"):
+            raise Conflict("Review the launch plan before loading")
+        return jobs.submit(
+            "Load model",
+            lambda job: manager.load_model(ident, body["plan_token"]),
+            deployment_id=ident,
         )
 
     @app.post("/api/deployments/{ident}/stop")
@@ -1005,12 +1180,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             raise ValueError("enabled must be true or false")
         async with manager.lock:
             d = store.get("deployment", ident)
-            if manager.unit(ident)["multi_model"]:
-                raise Conflict("Change client availability on the whole deployment")
-            if d["state"] in ACTIVE:
+            unit = manager.unit(ident)
+            if model_setup.desired(store, model_setup.unit_id(store, ident)):
                 raise Conflict(
-                    "Stop this deployment before changing whether it is deployed"
+                    "Apply or discard pending changes before changing availability"
                 )
+            if unit["multi_model"] and not unit.get("engine_pool"):
+                raise Conflict("Change client availability on the whole deployment")
             if d["enabled"] != enabled:
                 store.put("deployment", d | {"enabled": enabled}, historical=False)
                 store.event(
@@ -1025,16 +1201,24 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         """Desired-vs-applied status for a deployment (and its pool). A unit is
         pending only once it has been activated and the saved configuration
         differs from what the runtime last loaded."""
-        unit = manager.unit(ident)
+        key = model_setup.unit_id(store, ident)
+        desired = model_setup.desired(store, key)
+        unit = (
+            deployment_sets.unit_for(model_setup.PreviewStore(store, desired), key)
+            if desired
+            else manager.unit(ident)
+        )
         status = aops.pending(store, unit)
         return {
             "unit_id": unit["id"],
             "unit_name": unit.get("name"),
             "multi_model": bool(unit.get("multi_model")),
             "op": aops.op_public(status["op"]) if status["op"] is not None else None,
-            "desired_rev": status["desired_rev"],
+            "desired_rev": model_setup.fingerprint(desired)
+            if desired
+            else status["desired_rev"],
             "applied_rev": status["applied_rev"],
-            "pending": status["pending"],
+            "pending": bool(desired) or status["pending"],
             "scope_fingerprint": aops.scope_fingerprint(unit),
             "affected_ids": list(unit.get("member_ids", [])),
             "affected": [m.get("name") for m in unit.get("members", [])],
@@ -1098,13 +1282,52 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             raise ValueError(
                 "Queuing an apply requires a reviewed token and scope fingerprint."
             )
+        key = model_setup.unit_id(store, ident)
+        if model_setup.desired(store, key):
+            async with manager.lock:
+                reviewed = model_setup.plan(manager, ident)
+                if (
+                    token != reviewed["plan_token"]
+                    or scope != reviewed["scope_fingerprint"]
+                ):
+                    raise Conflict("The affected configuration changed; review again")
+                if reviewed["errors"]:
+                    raise Conflict("; ".join(reviewed["errors"]))
+                op = aops.find_op(store, key)
+                if op.state in qa.ApplyState.IN_FLIGHT:
+                    raise Conflict("An apply is already queued")
+                op = qa.create_op(
+                    key,
+                    model_setup.fingerprint(model_setup.desired(store, key)),
+                    op.applied_rev,
+                    time.time(),
+                )
+                aops.save_op(store, qa.request_apply(op, time.time(), token, scope))
+                job = jobs.submit(
+                    "Apply changes when idle",
+                    lambda job: manager.apply_desired(
+                        key, lambda text: jobs.progress(job, text)
+                    ),
+                    deployment_id=key,
+                    operation="apply",
+                )
+                return {
+                    "op": aops.op_public(aops.find_op(store, key)),
+                    "job_id": job["id"],
+                }
         unit = manager.unit(ident)
+        if any(m["state"] in ACTIVE for m in unit["members"]):
+            raise Conflict(
+                "Save active configuration changes through model setup before requesting apply"
+            )
         if not aops.pending(store, unit)["pending"]:
             raise Conflict("Nothing pending to apply for this deployment")
         if scope != aops.scope_fingerprint(unit):
             raise Conflict(
                 "The affected pool changed since the review; review it again."
             )
+        if token != manager.plan([unit["id"]])["plan_token"]:
+            raise Conflict("Launch plan changed; review again")
         op = aops.request_apply(store, unit, token, scope)
         job = jobs.submit(
             "Apply changes when idle",
@@ -1119,17 +1342,41 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     async def cancel_apply_endpoint(ident: str):
         """Cancel the queued apply before it begins. The saved change remains
         pending for a fresh review."""
-        unit = manager.unit(ident)
-        op = aops.cancel(store, unit["id"])
+        async with manager.lock:
+            op = aops.cancel(store, model_setup.unit_id(store, ident))
+            manager.request_changed.set()
         return {"op": aops.op_public(op)}
+
+    @app.post("/api/deployments/{ident}/review-apply")
+    async def review_apply(ident: str):
+        async with manager.lock:
+            return model_setup.plan(manager, ident)
 
     @app.post("/api/deployments/{ident}/discard")
     async def discard_endpoint(ident: str):
         """Discard pending changes: restore the last *applied* configuration and
         clear the operation. Returns the restored applied revision, or null when
         the unit was never activated (nothing to restore)."""
-        unit = manager.unit(ident)
-        restored = aops.discard(store, unit)
+        async with manager.lock:
+            key = model_setup.unit_id(store, ident)
+            unit = manager.unit(key)
+            op = aops.find_op(store, key)
+            if op and op.state in qa.ApplyState.IN_FLIGHT:
+                raise Conflict("Cancel the scheduled apply before discarding changes")
+            snap = model_setup.desired(store, key)
+            if snap:
+                with store.transaction() as c:
+                    for row in store.list("deployment", c):
+                        if row.get("pending_unit") == key:
+                            row.pop("pending_unit")
+                            store.put("deployment", row | {"enabled": False}, c=c)
+                    store.delete("desired", key, c)
+                    store.delete("queued_apply", key, c)
+                restored = aops.current_applied_rev(store, key)
+            else:
+                if any(m["state"] in ACTIVE for m in unit["members"]):
+                    raise Conflict("Unload before restoring an applied snapshot")
+                restored = aops.discard(store, unit)
         return {"restored": restored, "scope_fingerprint": aops.scope_fingerprint(unit)}
 
     async def _apply_unit_job(job_id):
@@ -1154,7 +1401,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             )
             return
         plan = manager.plan([unit_id])
-        if plan.get("errors"):
+        if plan.get("errors") or plan.get("plan_token") != op.token:
             aops.complete_apply(
                 store,
                 unit,
@@ -1165,16 +1412,17 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             )
             return
 
-        # Apply: mark in-flight, then drain (graceful stop) and restart (activate).
+        # Legacy saves were allowed only while unloaded. Never use this path
+        # to restart a live unit; active edits require a separate desired snapshot.
+        if any(m["state"] in ACTIVE for m in manager.unit(unit_id)["members"]):
+            aops.complete_apply(
+                store, unit, error="Runtime changed; review the saved setup again"
+            )
+            return
         jobs.progress(job_id, "Applying changes…")
         aops.save_op(store, op._move_to(qa.ApplyState.APPLYING))
         try:
-            await manager.stop(
-                unit_id,
-                cancel_requests=False,
-                progress=lambda t: jobs.progress(job_id, t),
-            )
-            await manager.activate([unit_id], token=plan["plan_token"])
+            await manager.activate([unit_id], token=op.token)
             unit = manager.unit(unit_id)
             if not all(m["state"] == "READY" for m in unit["members"]):
                 raise Conflict("Runtime did not come up ready after the restart")
@@ -1455,6 +1703,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             row = store.get(kinds[kind], ident)
             deployments = store.list("deployment")
             if kind == "deployments":
+                if model_setup.desired(store, model_setup.unit_id(store, ident)):
+                    raise Conflict(
+                        "Apply or discard pending changes before removing this model"
+                    )
                 if manager.unit(ident)["multi_model"]:
                     raise Conflict(
                         "Separate this model from its deployment before removing it"
@@ -1684,7 +1936,12 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         for d in store.list("deployment"):
             unit = manager.unit(d["id"])
             if not lifecycle.visible(
-                d | {"state": deployment_sets.state(unit)}, settings
+                d
+                | {
+                    "state": deployment_sets.state(unit),
+                    "enabled": d["enabled"] and unit["enabled"],
+                },
+                settings,
             ):
                 continue
             # While a rename (or other change) is pending the runtime still

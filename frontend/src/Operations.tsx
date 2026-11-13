@@ -195,9 +195,12 @@ export function LaunchReview({
                 setBusy(true);
                 setError('');
                 try {
-                  await api(`/api/${modal.kind}/${modal.row.id}/start`, {
-                    plan_token: plan.plan_token,
-                  });
+                  await api(
+                    `/api/${modal.kind}/${modal.row.id}/${modal.kind === 'deployments' ? 'load-model' : 'start'}`,
+                    {
+                      plan_token: plan.plan_token,
+                    },
+                  );
                   done();
                 } catch (e) {
                   setError(message(e));

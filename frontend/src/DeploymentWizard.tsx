@@ -1,4 +1,7 @@
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { PendingChanges } from '@/components/pending-changes';
+import { ModelCompanions } from './ModelCompanions';
+import { defineStepper } from '@stepperize/react/headless';
 import { FieldSet } from '@/components/ui/field';
 import {
   NativeSelect,
@@ -17,7 +20,8 @@ import {
 } from 'react';
 import { reconcileRuntimeOptions } from './runtime-options';
 import { api, readApi, message } from './ui';
-import { launchPlan } from './contracts';
+import { deployment, job, launchPlan } from './contracts';
+import { array } from './decode';
 import { jsonObject, stringArray } from './contracts';
 import { Dialog, Field, JsonEdit, type Registry } from './ui';
 import { defaults } from './editor-state';
@@ -44,6 +48,12 @@ import { useSuggestedAlias } from './hooks/use-suggested-alias';
 import { localAliasFallback, type IdentifierMode } from './alias-suggestion';
 
 type ContextMode = 'default' | 'automatic' | 'custom';
+const setupSteps = [
+  { id: 'choose', title: 'Choose model' },
+  { id: 'review', title: 'Review setup' },
+  { id: 'available', title: 'Make available' },
+] as const;
+const setupFlow = defineStepper(setupSteps);
 
 type Outcome =
   'launch' | 'loaded' | 'available' | 'disabled' | 'pending' | 'failed';
@@ -79,6 +89,8 @@ export function DeploymentWizard({
   close,
   created,
   setupEngine,
+  acquireModel,
+  suspended = false,
   onConnect,
 }: {
   data: Registry;
@@ -86,10 +98,21 @@ export function DeploymentWizard({
   close: () => void;
   created: (row: Deployment) => void;
   setupEngine: () => void;
+  acquireModel: (local: boolean) => void;
+  suspended?: boolean;
   onConnect: () => void;
 }) {
-  const [step, setStep] = useState(0),
-    [outcome, setOutcome] = useState<Outcome | null>(null),
+  const stepper = setupFlow.useStepper();
+  const step = setupSteps.findIndex((entry) => entry.id === stepper.current.id);
+  const setStep = (update: SetStateAction<number>) => {
+    const index = typeof update === 'function' ? update(step) : update;
+    if (setupSteps[index]) void stepper.goTo(setupSteps[index].id);
+  };
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (!suspended) heading.current?.focus();
+  }, [step, suspended]);
+  const [outcome, setOutcome] = useState<Outcome | null>(null),
     [savedRow, setSavedRow] = useState<Deployment | null>(null),
     [launchPlanState, setLaunchPlan] = useState<LaunchPlan | null>(null),
     [launchError, setLaunchError] = useState(''),
@@ -105,7 +128,7 @@ export function DeploymentWizard({
     modelId || data.models?.[0]?.id || '',
   );
   const [runtimeId, setRuntimeId] = useState('');
-  const [name, setName] = useState(''),
+  const [name, setName] = useState<string | null>(null),
     [alias, setAlias] = useState(''),
     [identifierMode, setIdentifierMode] = useState<IdentifierMode>('generated');
   const [context, setContext] = useState(8192),
@@ -150,8 +173,10 @@ export function DeploymentWizard({
   const [templateOverride, setTemplateOverride] =
     useState<TemplateSelection | null>(null);
   const usedPorts = new Set((data.deployments || []).map((d) => d.port));
-  const [advanced, _setAdvanced] = useState<DeploymentDraft>({
+  const [advanced, setAdvanced] = useState<DeploymentDraft>({
     ...defaults.deployments,
+    allow_eviction: true,
+    runtime_assignment: 'automatic',
     port:
       Array.from({ length: 50000 }, (_, i) => 8120 + i).find(
         (p) => !usedPorts.has(p),
@@ -201,10 +226,25 @@ export function DeploymentWizard({
   const contextKey = runtime?.engine === 'vllm' ? 'max-model-len' : 'ctx-size';
   const hasContext = Boolean(schema[contextKey]),
     hasParallel = Boolean(schema.parallel);
-  const displayName = name || artifact?.name || 'New deployment';
+  const metadataName = artifact?.metadata?.['general.name'];
+  const baseName =
+    typeof metadataName === 'string' && metadataName.trim()
+      ? metadataName
+      : artifact?.name || 'New model';
+  let suggestedName = baseName;
+  for (
+    let suffix = 2;
+    data.deployments?.some(
+      (row) => row.id !== savedRow?.id && row.name === suggestedName,
+    );
+    suffix++
+  )
+    suggestedName = `${baseName} (${suffix})`;
+  const displayName = name ?? suggestedName;
   const suggested = useSuggestedAlias(
     displayName,
     identifierMode === 'generated',
+    savedRow?.id,
   );
   const apiAlias =
     identifierMode === 'custom'
@@ -218,10 +258,9 @@ export function DeploymentWizard({
         : 'Generated from the name and updated when you rename it.';
   const aliasInUse =
     identifierMode === 'custom' &&
-    ((data.deployments || []).some(
+    (data.deployments || []).some(
       (d) => d.alias === alias && d.id !== (savedRow?.id ?? ''),
-    ) ||
-      (data.deployments || []).some((d) => d.alias === alias && d.enabled));
+    );
   const buildConfig = (): Record<string, JsonValue> => {
     const config: Record<string, JsonValue> = { ...extra };
     if (contextMode === 'custom') {
@@ -268,6 +307,10 @@ export function DeploymentWizard({
         );
 
   async function save(mode: 'load' | 'none' | 'disabled') {
+    if (!displayName.trim()) {
+      setError('Enter a name for this model.');
+      return;
+    }
     setBusy(true);
     setError('');
     setOutcome(null);
@@ -283,18 +326,29 @@ export function DeploymentWizard({
         raw_args: args,
         catalog,
       };
-      const saved = (await api('/api/deployments', {
-        ...advanced,
-        name: displayName,
-        configuration,
-        alias: apiAlias,
-        residency,
-        idle_timeout: idle,
-        template_override: templateOverride,
-        enabled: mode !== 'disabled',
-      })) as Deployment;
+      const saved = await readApi(
+        '/api/model-setups' +
+          (savedRow ? `?expected=${savedRow.revision}` : ''),
+        deployment,
+        {
+          ...advanced,
+          ...(savedRow ? { id: savedRow.id } : {}),
+          name: displayName,
+          configuration,
+          alias: apiAlias,
+          identifier_mode: identifierMode,
+          runtime_assignment: advanced.runtime_assignment,
+          residency,
+          idle_timeout: idle,
+          template_override: templateOverride,
+          enabled: mode !== 'disabled',
+        },
+      );
       setSavedRow(saved);
-      if (mode === 'load') {
+      const pendingStatus = await checkPending(saved);
+      if (pendingStatus?.pending) {
+        setOutcome('pending');
+      } else if (mode === 'load') {
         setOutcome('launch');
         setLaunchError('');
         setAccepted(false);
@@ -318,12 +372,33 @@ export function DeploymentWizard({
     }
   }
   const plan = launchPlanState;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   async function launchPlanFor(dep: Deployment): Promise<LaunchPlan> {
-    return readApi(`/api/deployments/${dep.id}/validate`, launchPlan);
+    return readApi(`/api/deployments/${dep.id}/validate`, launchPlan, {});
   }
   async function loadModel(dep: Deployment, token: string): Promise<void> {
-    await api(`/api/deployments/${dep.id}/start`, { plan_token: token });
+    const queued = await readApi(`/api/deployments/${dep.id}/load-model`, job, {
+      plan_token: token,
+    });
+    const deadline = Date.now() + ((dep.queue_timeout || 300) + 30) * 1000;
+    while (mounted.current && Date.now() < deadline) {
+      const jobs = await readApi('/api/registry/jobs', array(job));
+      const current = jobs.find((j) => j.id === queued.id);
+      if (current?.state === 'SUCCEEDED') return;
+      if (current?.state === 'FAILED')
+        throw new Error(current.error || 'Model could not load');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new Error(
+      'Loading has not completed. Check the operation in Activity before retrying.',
+    );
   }
   async function checkPending(dep: Deployment) {
     try {
@@ -331,8 +406,18 @@ export function DeploymentWizard({
         `/api/deployments/${dep.id}/pending`,
       )) as PendingStatus;
       setPending(status);
+      if (!status.pending)
+        setOutcome((current) =>
+          current === 'pending'
+            ? dep.enabled
+              ? 'available'
+              : 'disabled'
+            : current,
+        );
+      return status;
     } catch {
       setPending(null);
+      return null;
     }
   }
   async function onLoad(dep: Deployment) {
@@ -419,6 +504,7 @@ export function DeploymentWizard({
         ? 'Pinned: never automatically unloaded to make room.'
         : 'Evictable: loads manually; can make room when idle and authorized.';
 
+  if (suspended) return null;
   return (
     <Dialog
       title={'Set up model'}
@@ -438,6 +524,9 @@ export function DeploymentWizard({
           </li>
         ))}
       </ol>
+      <h3 ref={heading} tabIndex={-1}>
+        {stepper.current.title}
+      </h3>
       {error && (
         <Alert variant="destructive" className="mb-5" role="alert">
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3 whitespace-pre-line">
@@ -455,6 +544,25 @@ export function DeploymentWizard({
           <FieldSet disabled={busy || launchBusy}>
             {step === 0 && (
               <>
+                {!data.models?.length && (
+                  <section>
+                    <h3>Add your first model</h3>
+                    <p>
+                      Download a model or add files you already have, then
+                      continue setup.
+                    </p>
+                    <Button type="button" onClick={() => acquireModel(false)}>
+                      Discover models
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => acquireModel(true)}
+                    >
+                      Add from file
+                    </Button>
+                  </section>
+                )}
                 <Field label="Model">
                   <NativeSelect
                     required
@@ -749,23 +857,39 @@ export function DeploymentWizard({
                   />
                 </SettingsSection>
                 <Variants catalog={catalog} change={setCatalog} />
-                {artifact?.metadata?.projector && schema.mmproj && (
-                  <Button
-                    variant="outline"
-                    type="button"
-                    onClick={() =>
-                      setExtra({
-                        ...extra,
-                        mmproj: artifact.metadata?.projector?.path || '',
-                      })
-                    }
-                  >
-                    Use downloaded projector:{' '}
-                    {artifact.metadata?.projector?.name}
-                  </Button>
-                )}
+                <ModelCompanions
+                  model={artifact}
+                  models={data.models || []}
+                  value={{ ...extraDraft, config: extra }}
+                  schema={schema}
+                  change={(value) => setExtra(value.config)}
+                />
                 <details>
                   <summary>Advanced</summary>
+                  <Field
+                    label="Runtime pool"
+                    hint="Uses a compatible shared runtime when available."
+                  >
+                    <NativeSelect
+                      value={advanced.runtime_assignment}
+                      onChange={(e) =>
+                        setAdvanced((value) => ({
+                          ...value,
+                          runtime_assignment:
+                            e.target.value === 'dedicated'
+                              ? 'dedicated'
+                              : 'automatic',
+                        }))
+                      }
+                    >
+                      <NativeSelectOption value="automatic">
+                        Automatic assignment
+                      </NativeSelectOption>
+                      <NativeSelectOption value="dedicated">
+                        Dedicated runtime
+                      </NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
                   <RuntimeSettings
                     engineSelected={Boolean(runtime)}
                     formPath="config"
@@ -808,8 +932,8 @@ export function DeploymentWizard({
             {step === 2 && showCompletion && (
               <Completion
                 outcome={outcome}
-                name={displayName}
-                alias={apiAlias}
+                name={savedRow?.name || displayName}
+                alias={savedRow?.alias || apiAlias}
                 savedRow={savedRow}
                 launchError={launchError}
                 onTest={onTest}
@@ -847,6 +971,7 @@ export function DeploymentWizard({
             )}
             {step === 2 && outcome === null && (
               <MakeAvailableForm
+                onNameChange={setName}
                 displayName={displayName}
                 apiAlias={apiAlias}
                 behaviorSummary={behaviorSummary}
@@ -898,6 +1023,7 @@ export function DeploymentWizard({
 }
 
 function MakeAvailableForm({
+  onNameChange,
   displayName,
   apiAlias,
   behaviorSummary,
@@ -905,6 +1031,7 @@ function MakeAvailableForm({
   onMakeAvailableWithoutLoad,
   onSaveDisabled,
 }: {
+  onNameChange: (name: string) => void;
   displayName: string;
   apiAlias: string;
   behaviorSummary: string;
@@ -914,7 +1041,16 @@ function MakeAvailableForm({
 }) {
   return (
     <>
-      <h3>{displayName}</h3>
+      <Field
+        label="Name"
+        hint="Used throughout Menagerie and in connected clients."
+      >
+        <Input
+          required
+          value={displayName}
+          onChange={(event) => onNameChange(event.target.value)}
+        />
+      </Field>
       <dl className="properties">
         <dt>API model</dt>
         <dd>
@@ -1098,29 +1234,6 @@ function Completion({
   };
   const titleText = title[outcome];
   const descText = desc[outcome];
-  const applyWhenIdle = async (): Promise<void> => {
-    if (!savedRow || !pending || !pending.op || !pending.op.token) return;
-    setPendingError('');
-    try {
-      await api(`/api/deployments/${savedRow.id}/request-apply`, {
-        token: pending.op.token,
-        scope_fingerprint: pending.scope_fingerprint,
-      });
-      refetchPending();
-    } catch (e) {
-      setPendingError(message(e));
-    }
-  };
-  const cancelApply = async (): Promise<void> => {
-    if (!savedRow) return;
-    setPendingError('');
-    try {
-      await api(`/api/deployments/${savedRow.id}/cancel`);
-      refetchPending();
-    } catch (e) {
-      setPendingError(message(e));
-    }
-  };
   const copyAlias = (): void => {
     void navigator.clipboard
       .writeText(alias)
@@ -1134,21 +1247,19 @@ function Completion({
     <>
       <h3>{titleText}</h3>
       <p className="muted">{descText}</p>
-      {pending?.pending && (
-        <div className="warning">
-          <p>A configuration change is queued on this shared runtime.</p>
-          {pending.affected.length > 0 && (
-            <p>Affected models: {pending.affected.join(', ')}.</p>
-          )}
-          <div className="dialog-actions">
-            <Button variant="default" type="button" onClick={applyWhenIdle}>
-              Apply when idle
-            </Button>
-            <Button variant="outline" type="button" onClick={cancelApply}>
-              Cancel
-            </Button>
-          </div>
-        </div>
+      {outcome === 'available' && (
+        <Button type="button" onClick={onRetry}>
+          Review and load
+        </Button>
+      )}
+      {savedRow && (
+        <PendingChanges
+          deploymentId={savedRow.id}
+          changed={() => {
+            setPendingError('');
+            refetchPending();
+          }}
+        />
       )}
       {pendingError && (
         <Alert variant="destructive" role="alert">
@@ -1188,7 +1299,7 @@ function Completion({
         <Button
           variant="outline"
           type="button"
-          disabled={testBusy}
+          disabled={testBusy || pending?.pending || outcome === 'disabled'}
           onClick={() => {
             if (savedRow) void onTest(savedRow);
           }}

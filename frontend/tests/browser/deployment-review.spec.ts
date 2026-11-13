@@ -151,7 +151,12 @@ for (const width of [1440, 576, 320]) {
     await expect(
       mtp.getByLabel('Multimodal projector path', { exact: true }),
     ).toHaveCount(0);
-    await expect(multimodal.getByRole('button')).toHaveCount(0);
+    await expect(
+      multimodal.getByRole('button', {
+        name: 'Choose another file',
+        exact: true,
+      }),
+    ).toBeVisible();
     await multimodal
       .getByRole('combobox', { name: 'Projector', exact: true })
       .selectOption('/models/example-mmproj.gguf');
@@ -334,12 +339,13 @@ for (const width of [1440, 576, 320]) {
     await expect
       .poll(
         () =>
-          fixture.writes.filter((w) => w.path === '/api/deployments?expected=1')
-            .length,
+          fixture.writes.filter(
+            (w) => w.path === '/api/model-setups?expected=1',
+          ).length,
       )
       .toBe(1);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     );
     expect(saved.configuration!.config).toMatchObject({
@@ -412,7 +418,7 @@ test('discard resets typed controls, invalid raw edits and the navigation guard'
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
 });
 
-test('resource tooltips use allocation names and loaded configuration remains read-only', async ({
+test('resource tooltips use allocation names and loaded configuration accepts staged edits', async ({
   page,
 }) => {
   await page.goto('/#/deployments/idle/configuration');
@@ -427,10 +433,10 @@ test('resource tooltips use allocation names and loaded configuration remains re
   await expect(tooltip).toContainText('GiB');
   await expect(tooltip).not.toContainText(/\bs\d+\b/);
   await page.goto('/#/deployments/ready/configuration');
-  await expect(page.getByLabel('Display name', { exact: true })).toBeDisabled();
+  await expect(page.getByLabel('Display name', { exact: true })).toBeEnabled();
   await expect(
     page.getByRole('button', { name: 'Save', exact: true }),
-  ).toBeDisabled();
+  ).toBeEnabled();
 });
 
 test('deployment rows separate request counts, move failure links and remove duplicate actions', async ({
@@ -445,13 +451,14 @@ test('deployment rows separate request counts, move failure links and remove dup
   const row = page.getByRole('row').filter({
     has: page.getByRole('link', { name: 'Example idle', exact: true }),
   });
-  await expect(page.getByRole('columnheader').first()).toHaveText('Status');
+  await expect(page.getByRole('columnheader').first()).toHaveText('Name');
   await expect(
     page.getByRole('columnheader', { name: 'Active requests', exact: true }),
   ).toBeVisible();
-  await expect(
-    row.getByRole('cell').nth(1).getByRole('link', { name: 'View logs' }),
-  ).toHaveAttribute('href', '#/deployments/idle/logs');
+  await expect(row.getByRole('link', { name: 'View logs' })).toHaveAttribute(
+    'href',
+    '#/deployments/idle/logs',
+  );
   await expect(row.getByRole('cell').nth(4)).toHaveText('2');
   await expect(row.getByRole('cell').nth(5)).toHaveText('17');
   await row.getByRole('button', { name: 'Actions for Example idle' }).click();
@@ -469,6 +476,6 @@ test('deployment rows separate request counts, move failure links and remove dup
   await expect(
     page.getByRole('button', { name: 'Disabled (1)', exact: true }),
   ).toBeVisible();
-  await row.getByRole('cell').nth(2).click();
+  await row.getByRole('link', { name: 'Example idle', exact: true }).click();
   await expect(page).toHaveURL(/\/deployments\/idle$/);
 });

@@ -83,6 +83,12 @@ for (const width of [1440, 576, 320]) {
       .getByLabel('Display name', { exact: true })
       .fill('Capability review');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page
+      .getByRole('button', {
+        name: 'Rename and update API model ID',
+        exact: true,
+      })
+      .click();
     await expect
       .poll(
         () =>
@@ -90,7 +96,7 @@ for (const width of [1440, 576, 320]) {
       )
       .toBe(2);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     ).configuration!.catalog;
     expect(saved.reasoning).toEqual(original);
@@ -164,7 +170,7 @@ test('variants can be edited, enabled and selected as default while Reasoning st
     )
     .toBe(2);
   const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
   ).configuration!.catalog;
   expect(saved.model?.capabilities?.reasoning).toBe(false);
   expect(saved.reasoning?.default_mode).toBe('ultra');

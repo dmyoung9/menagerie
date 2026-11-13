@@ -6,10 +6,9 @@ The Stage 1 state machine (``queued_apply``) is a pure contract over the
 
 - It persists one queued-apply operation per unit (kind ``queued_apply``),
   keyed by unit id, and one applied snapshot per unit (kind ``applied``).
-- ``desired`` is always the unit's *current* stored configuration — there is no
-  separate desired row. ``applied`` is a self-contained snapshot of the
-  configuration the runtime last loaded, stored so "discard pending changes"
-  can restore it without reading store history.
+- Model setup stages a separate ``desired`` snapshot (see ``model_setup``),
+  leaving the live registry and routing unchanged. The older unloaded-edit
+  API derives pending status from the current registry and applied snapshot.
 - "Applied" is recorded whenever a unit is (re)activated: that is the moment the
   running process picks up the current configuration. A brand-new unit is never
   pending, because its first activation sets applied == desired.
@@ -116,6 +115,13 @@ _VOLATILE = (
     "inflight",
     "historical_requests",
     "revision",
+    "state_since",
+    "failure_reason",
+    "operation_id",
+    "session_id",
+    "log_path",
+    "pid_started",
+    "pending_unit",
 )
 
 
@@ -187,7 +193,7 @@ def find_op(store, unit_id: str):
     return op
 
 
-def save_op(store, op: qa.QueuedApplyOp) -> qa.QueuedApplyOp:
+def save_op(store, op: qa.QueuedApplyOp, c=None) -> qa.QueuedApplyOp:
     """Persist an operation, bumping the row revision. Returns the op that
     was written, so callers can inspect its state and revision fields."""
     store.put(
@@ -207,6 +213,7 @@ def save_op(store, op: qa.QueuedApplyOp) -> qa.QueuedApplyOp:
             "rolled_back": op.rolled_back,
             "needs_revalidation": op.needs_revalidation,
         },
+        c=c,
     )
     return op
 
@@ -239,7 +246,7 @@ def current_applied_rev(store, unit_id: str) -> str | None:
     return snap.get("fingerprint") if snap else None
 
 
-def record_applied(store, unit: dict) -> dict:
+def record_applied(store, unit: dict, c=None) -> dict:
     """Record the current configuration as the *applied* configuration.
 
     Called at activation (first load or apply-restart). It snapshots the current
@@ -247,7 +254,7 @@ def record_applied(store, unit: dict) -> dict:
     running process matches the current config (desired == applied)."""
     now = time.time()
     snapshot = snapshot_unit(store, unit)
-    store.put("applied", snapshot)
+    store.put("applied", snapshot, c=c)
     unit_id = _op_id(unit["id"])
     prior = find_op(store, unit_id)
     created_at = prior.created_at if prior else now
@@ -260,7 +267,7 @@ def record_applied(store, unit: dict) -> dict:
         ended_at=now,
         rolled_back=qa.ApplyState.ROLLODBACK_SUCCEEDED,
     )
-    return save_op(store, resolved)
+    return save_op(store, resolved, c=c)
 
 
 def save_desired(store, unit: dict) -> qa.QueuedApplyOp:
@@ -405,8 +412,7 @@ def discard(store, unit: dict) -> str | None:
             stored = store.get("deployment_set", unit["id"])
             store.put(
                 "deployment_set",
-                {k: v for k, v in stored.items() if k not in _VOLATILE}
-                | set_row["data"],
+                set_row["data"] | {k: v for k, v in stored.items() if k in _VOLATILE},
             )
     for r in rows:
         rid = r.get("id")
@@ -417,7 +423,7 @@ def discard(store, unit: dict) -> str | None:
         existing = store.get("deployment", rid)
         store.put(
             "deployment",
-            {k: v for k, v in existing.items() if k not in _VOLATILE} | r["data"],
+            r["data"] | {k: v for k, v in existing.items() if k in _VOLATILE},
         )
     delete_op(store, unit_id)
     return snapshot.get("fingerprint")
@@ -443,17 +449,10 @@ def applied_alias(store, unit: dict, deployment_id: str) -> str | None:
 def effective_alias(store, unit: dict, deployment_id: str) -> str | None:
     """The alias that is actually *served* for a deployment.
 
-    While a change is pending (desired != applied) the runtime still executes
-    the applied configuration, so the served identifier is the applied one.
-    Only when the applied snapshot exists *and* its alias differs from the live
-    alias do we serve the applied alias; otherwise the live alias stands. This
-    keeps discovery and routing from advertising an ID the applied runtime
-    cannot yet serve."""
+    Pending model-setup edits live separately, so the live row remains the
+    authoritative routing identity until reviewed application."""
     live = store.get("deployment", deployment_id)
     live_alias = live.get("alias")
-    prev_alias = applied_alias(store, unit, deployment_id)
-    if prev_alias is not None and prev_alias != live_alias:
-        return prev_alias
     return live_alias
 
 

@@ -6,11 +6,12 @@ test('new deployments leave tuning and device placement to the engine', async ({
   fixture,
 }) => {
   await page.goto('/#/deployments');
+  await page.getByText('Advanced', { exact: true }).click();
   await page
-    .getByRole('button', { name: 'New deployment', exact: true })
-    .click();
-  await page
-    .getByRole('button', { name: 'Multiple models', exact: true })
+    .getByRole('button', {
+      name: 'Create supervised group or runtime pool',
+      exact: true,
+    })
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Automatic');
@@ -32,11 +33,12 @@ test('a native pool remains a pool even with one model and round-trips its polic
   fixture,
 }) => {
   await page.goto('/#/deployments');
+  await page.getByText('Advanced', { exact: true }).click();
   await page
-    .getByRole('button', { name: 'New deployment', exact: true })
-    .click();
-  await page
-    .getByRole('button', { name: 'Multiple models', exact: true })
+    .getByRole('button', {
+      name: 'Create supervised group or runtime pool',
+      exact: true,
+    })
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Native pool');
@@ -67,11 +69,12 @@ test('native pool device visibility is edited once and saved for all members', a
   fixture,
 }) => {
   await page.goto('/#/deployments');
+  await page.getByText('Advanced', { exact: true }).click();
   await page
-    .getByRole('button', { name: 'New deployment', exact: true })
-    .click();
-  await page
-    .getByRole('button', { name: 'Multiple models', exact: true })
+    .getByRole('button', {
+      name: 'Create supervised group or runtime pool',
+      exact: true,
+    })
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Shared pool');
