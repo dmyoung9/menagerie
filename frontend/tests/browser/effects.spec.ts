@@ -87,7 +87,7 @@ test('wizard preserves explicit edits on polling and schema refresh without seed
     }),
   );
   await page.goto('/tests/effects.html?scenario=wizard');
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByText('Advanced', { exact: true }).click();
   await page.getByText('Runtime options (JSON)', { exact: true }).click();
   const input = page.getByRole('textbox', { name: 'Runtime options (JSON)' });

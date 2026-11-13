@@ -460,6 +460,76 @@ export const test = base.extend<{ fixture: Fixture }>({
           ];
           return send(saved);
         }
+        // Stage 4: desired/applied split + explicit queued-apply. A new unit is
+        // never pending (nothing has been activated to apply against).
+        if (/^\/api\/deployments\/[^/]+\/pending$/.test(path))
+          return send({
+            unit_id: path.split('/').at(2),
+            unit_name: null,
+            multi_model: false,
+            op: null,
+            desired_rev: '',
+            applied_rev: null,
+            pending: false,
+            scope_fingerprint: '',
+            affected_ids: [],
+            affected: [],
+          });
+        if (/^\/api\/deployments\/[^/]+\/save-desired$/.test(path))
+          return send({
+            op: {
+              state: 'PENDING',
+              token: (body as { token?: string })?.token || 'save-token',
+              scope_fingerprint:
+                (body as { scope_fingerprint?: string })?.scope_fingerprint ||
+                '',
+              drain_deadline: null,
+              created_at: fixture.host.ts,
+              ended_at: null,
+              error: null,
+              rolled_back: null,
+              needs_revalidation: false,
+            },
+          });
+        if (/^\/api\/deployments\/[^/]+\/request-apply$/.test(path)) {
+          fixture.registry.jobs.push({
+            id: `job-${++fixture.jobCounter}`,
+            name: 'Apply changes when idle',
+            state: 'QUEUED',
+            revision: 1,
+            created_at: fixture.host.ts,
+          });
+          return send({
+            op: {
+              state: 'QUEUED',
+              token: (body as { token?: string })?.token || 'apply-token',
+              scope_fingerprint:
+                (body as { scope_fingerprint?: string })?.scope_fingerprint ||
+                '',
+              drain_deadline: fixture.host.ts + 30,
+              created_at: fixture.host.ts,
+              ended_at: null,
+              error: null,
+              rolled_back: null,
+              needs_revalidation: false,
+            },
+            job_id: `job-${fixture.jobCounter}`,
+          });
+        }
+        if (/^\/api\/deployments\/[^/]+\/cancel$/.test(path))
+          return send({
+            op: {
+              state: 'CANCELLED',
+              token: (body as { token?: string })?.token || 'apply-token',
+              scope_fingerprint: '',
+              drain_deadline: null,
+              created_at: fixture.host.ts,
+              ended_at: fixture.host.ts,
+              error: null,
+              rolled_back: null,
+              needs_revalidation: false,
+            },
+          });
         if (path.endsWith('/validate'))
           return send({
             errors: [],
@@ -656,6 +726,16 @@ export const test = base.extend<{ fixture: Fixture }>({
           };
           fixture.registry.jobs.push(job);
           return send(job);
+        }
+        if (path === '/api/deployments/alias/suggest') {
+          const params = new URLSearchParams(url.search);
+          const name = params.get('name') || '';
+          const slug = name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 48);
+          return send({ alias: slug, base: slug, mode: 'generated' });
         }
         fixture.unexpected.push(`${request.method()} ${path}`);
         return send({ error: 'Unmocked route: ' + path }, 500);

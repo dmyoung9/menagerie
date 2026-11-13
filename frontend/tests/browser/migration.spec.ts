@@ -121,6 +121,9 @@ test('unsaved editor dismissal is accessible and busy submissions cannot be dism
   await expect(page.getByRole('dialog')).toBeHidden();
   await expect(opener).toBeFocused();
   await opener.click();
+  await page
+    .getByRole('button', { name: 'Multiple models', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Unsaved deployment');
   expect(
@@ -169,6 +172,9 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
   await page.goto('/#/deployments');
   await page
     .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Multiple models', exact: true })
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Pair');
@@ -460,6 +466,9 @@ test('Base UI Select, Switch, outside dismissal and discard actions preserve pol
   await page
     .getByRole('button', { name: 'New deployment', exact: true })
     .click();
+  await page
+    .getByRole('button', { name: 'Multiple models', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   const mode = dialog.getByRole('combobox', { name: 'Mode', exact: true });
@@ -523,6 +532,9 @@ for (const width of [1440, 390])
     await navigate(page, 'Deployments');
     await page
       .getByRole('button', { name: 'New deployment', exact: true })
+      .click();
+    await page
+      .getByRole('button', { name: 'Multiple models', exact: true })
       .click();
     const dialog = page.getByRole('dialog');
     await dialog

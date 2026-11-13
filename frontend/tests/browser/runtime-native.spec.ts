@@ -9,6 +9,9 @@ test('new deployments leave tuning and device placement to the engine', async ({
   await page
     .getByRole('button', { name: 'New deployment', exact: true })
     .click();
+  await page
+    .getByRole('button', { name: 'Multiple models', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Automatic');
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
@@ -31,6 +34,9 @@ test('a native pool remains a pool even with one model and round-trips its polic
   await page.goto('/#/deployments');
   await page
     .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Multiple models', exact: true })
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Native pool');
@@ -63,6 +69,9 @@ test('native pool device visibility is edited once and saved for all members', a
   await page.goto('/#/deployments');
   await page
     .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Multiple models', exact: true })
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Shared pool');

@@ -144,6 +144,7 @@ function WizardHarness() {
         close={() => {}}
         created={() => {}}
         setupEngine={() => {}}
+        onConnect={() => {}}
       />
     </>
   );

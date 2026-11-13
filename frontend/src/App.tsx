@@ -655,7 +655,15 @@ export default function App() {
       go('models');
       return;
     }
-    open({ type: 'deployment-set', modelId });
+    if (modelId) {
+      // Entry from an installed model goes straight to the single-model wizard,
+      // preselecting the chosen artifact.
+      open({ type: 'wizard', modelId });
+      return;
+    }
+    // Generic entry (Deployments page) opens the unified creation options:
+    // single-model wizard or multi-model deployment set.
+    open({ type: 'new-deployment' });
   };
   const depView = route[1] === 'disabled' ? 'inactive' : route[1] || 'enabled',
     detail =
@@ -1216,12 +1224,11 @@ export default function App() {
             close();
             go('settings/engines');
           }}
-          created={(row, load) => {
+          created={(row) => {
             void refreshSlices(affectedSlices('deployments'));
             go('deployments/' + row.id);
-            open(load ? { type: 'launch', kind: 'deployments', row } : null);
-            if (!load) setNotice('Deployment created');
           }}
+          onConnect={() => open({ type: 'connect' })}
         />
       )}
       {modal?.type === 'launch' && (

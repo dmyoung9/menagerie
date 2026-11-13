@@ -71,6 +71,9 @@ test('performance explains why Add is unavailable without an engine', async ({
   await page
     .getByRole('button', { name: 'New deployment', exact: true })
     .click();
+  await page
+    .getByRole('button', { name: 'Multiple models', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
   const card = dialog.locator('[data-settings-section="memory"]');

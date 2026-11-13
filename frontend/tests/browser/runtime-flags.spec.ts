@@ -78,6 +78,9 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
   await page
     .getByRole('button', { name: 'New deployment', exact: true })
     .click();
+  await page
+    .getByRole('button', { name: 'Multiple models', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Buffered pair');
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();

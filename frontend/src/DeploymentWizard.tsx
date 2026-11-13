@@ -1,5 +1,5 @@
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { FieldSet, FieldGroup } from '@/components/ui/field';
+import { FieldSet } from '@/components/ui/field';
 import {
   NativeSelect,
   NativeSelectOption,
@@ -16,14 +16,15 @@ import {
   type SetStateAction,
 } from 'react';
 import { reconcileRuntimeOptions } from './runtime-options';
-import { readApi } from './ui';
-import { deployment } from './contracts';
+import { api, readApi, message } from './ui';
+import { launchPlan } from './contracts';
 import { jsonObject, stringArray } from './contracts';
-import { Dialog, Field, JsonEdit, message, type Registry } from './ui';
+import { Dialog, Field, JsonEdit, type Registry } from './ui';
 import { defaults } from './editor-state';
 import { Choices, RuntimeSettings } from './FormControls';
 import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
+import { streamCompletion } from './completionStream';
 import { Capabilities } from './Capabilities';
 import { Variants } from './ReasoningVariants';
 import { defaultReasoningOptions } from './capabilityOptions';
@@ -32,6 +33,7 @@ import type {
   Deployment,
   DeploymentDraft,
   JsonValue,
+  LaunchPlan,
   ModelCatalog,
   ProfileDraft,
   TemplateSelection,
@@ -41,31 +43,74 @@ import { DraftFormProvider, useDraftForm } from './use-draft-form';
 import { useSuggestedAlias } from './hooks/use-suggested-alias';
 import { localAliasFallback, type IdentifierMode } from './alias-suggestion';
 
+type ContextMode = 'default' | 'automatic' | 'custom';
+
+type Outcome =
+  'launch' | 'loaded' | 'available' | 'disabled' | 'pending' | 'failed';
+
+type PendingOp = {
+  state: string;
+  token: string | undefined;
+  scope_fingerprint: string | undefined;
+  drain_deadline: number | null | undefined;
+  created_at: number;
+  ended_at: number | null | undefined;
+  error: string | null | undefined;
+  rolled_back: string | null | undefined;
+  needs_revalidation: boolean | undefined;
+};
+
+interface PendingStatus {
+  unit_id: string;
+  unit_name: string | null | undefined;
+  multi_model: boolean;
+  op: PendingOp | null;
+  desired_rev: string;
+  applied_rev: string | null;
+  pending: boolean;
+  scope_fingerprint: string;
+  affected_ids: string[];
+  affected: string[];
+}
+
 export function DeploymentWizard({
   data,
   modelId,
   close,
   created,
   setupEngine,
+  onConnect,
 }: {
   data: Registry;
   modelId?: string;
   close: () => void;
-  created: (row: Deployment, load: boolean) => void;
+  created: (row: Deployment) => void;
   setupEngine: () => void;
+  onConnect: () => void;
 }) {
   const [step, setStep] = useState(0),
-    [artifactId, setArtifactId] = useState(
-      modelId || data.models?.[0]?.id || '',
-    );
+    [outcome, setOutcome] = useState<Outcome | null>(null),
+    [savedRow, setSavedRow] = useState<Deployment | null>(null),
+    [launchPlanState, setLaunchPlan] = useState<LaunchPlan | null>(null),
+    [launchError, setLaunchError] = useState(''),
+    [accepted, setAccepted] = useState(false),
+    [launchBusy, setLaunchBusy] = useState(false),
+    [pending, setPending] = useState<PendingStatus | null>(null),
+    [pendingError, setPendingError] = useState(''),
+    [testOutput, setTestOutput] = useState(''),
+    [testError, setTestError] = useState(''),
+    [testBusy, setTestBusy] = useState(false),
+    [testReceived, setTestReceived] = useState(false);
+  const [artifactId, setArtifactId] = useState(
+    modelId || data.models?.[0]?.id || '',
+  );
   const [runtimeId, setRuntimeId] = useState('');
   const [name, setName] = useState(''),
     [alias, setAlias] = useState(''),
     [identifierMode, setIdentifierMode] = useState<IdentifierMode>('generated');
   const [context, setContext] = useState(8192),
-    [parallel, setParallel] = useState(1),
-    [custom, setCustom] = useState(false);
-  const [automatic, setAutomatic] = useState(true);
+    [parallel, setParallel] = useState(1);
+  const [contextMode, setContextMode] = useState<ContextMode>('default');
   const [residency, setResidency] = useState('on-demand'),
     [idle, setIdle] = useState(300);
   const [catalog, setCatalog] = useState<ModelCatalog>({
@@ -88,7 +133,7 @@ export function DeploymentWizard({
     { ...defaults.profiles, config: {} },
     (draft) => {
       setExtraDraft(draft);
-      advance();
+      if (step < 2) advance();
     },
   );
   const extra = extraDraft.config;
@@ -105,7 +150,7 @@ export function DeploymentWizard({
   const [templateOverride, setTemplateOverride] =
     useState<TemplateSelection | null>(null);
   const usedPorts = new Set((data.deployments || []).map((d) => d.port));
-  const [advanced, setAdvanced] = useState<DeploymentDraft>({
+  const [advanced, _setAdvanced] = useState<DeploymentDraft>({
     ...defaults.deployments,
     port:
       Array.from({ length: 50000 }, (_, i) => 8120 + i).find(
@@ -126,7 +171,6 @@ export function DeploymentWizard({
   const previousRuntime = useRef<{ id?: string; keys: string[] } | undefined>(
     undefined,
   );
-  // Depend on supported defaults, not polling-created schema object identities.
   const extraDefaults = JSON.stringify(
     Object.fromEntries(
       Object.entries(defaults.profiles.config || {}).filter(
@@ -172,12 +216,28 @@ export function DeploymentWizard({
       : suggested.busy
         ? 'Generating ID from the name…'
         : 'Generated from the name and updated when you rename it.';
-  const draftConfig = {
-    ...extra,
-    ...(!automatic && hasContext
-      ? { [contextKey]: context * (hasParallel ? parallel : 1) }
-      : {}),
-    ...(!automatic && hasParallel ? { parallel } : {}),
+  const aliasInUse =
+    identifierMode === 'custom' &&
+    ((data.deployments || []).some(
+      (d) => d.alias === alias && d.id !== (savedRow?.id ?? ''),
+    ) ||
+      (data.deployments || []).some((d) => d.alias === alias && d.enabled));
+  const buildConfig = (): Record<string, JsonValue> => {
+    const config: Record<string, JsonValue> = { ...extra };
+    if (contextMode === 'custom') {
+      if (hasContext)
+        config[contextKey] = context * (hasParallel ? parallel : 1);
+      if (hasParallel) config.parallel = parallel;
+    } else if (contextMode === 'automatic' && runtime?.engine === 'llama.cpp') {
+      // Explicit engine sentinels: automatic context and parallel selection.
+      if (hasContext) config[contextKey] = 0;
+      if (hasParallel) config.parallel = -1;
+    } else {
+      // Engine default: no override saved; the engine chooses per load.
+      if (hasContext) delete config[contextKey];
+      if (hasParallel) delete config.parallel;
+    }
+    return config;
   };
   const preview = useResourcePreview(
     runtime
@@ -189,7 +249,7 @@ export function DeploymentWizard({
               name: displayName,
               artifact_id: artifactId,
               runtime_id: runtime.id,
-              config: draftConfig,
+              config: buildConfig(),
               raw_args: args,
               catalog: {},
             },
@@ -206,23 +266,24 @@ export function DeploymentWizard({
       : Math.floor(
           recommendation.context_recommended_max / (hasParallel ? parallel : 1),
         );
-  async function submit(load: boolean) {
+
+  async function save(mode: 'load' | 'none' | 'disabled') {
     setBusy(true);
     setError('');
+    setOutcome(null);
+    setLaunchPlan(null);
+    setLaunchError('');
+    setAccepted(false);
     try {
-      const config: Record<string, JsonValue> = { ...extra };
-      if (hasContext)
-        config[contextKey] = context * (hasParallel ? parallel : 1);
-      if (hasParallel) config.parallel = parallel;
       const configuration = {
         name: displayName,
         artifact_id: artifactId,
         runtime_id: runtime.id,
-        config,
+        config: buildConfig(),
         raw_args: args,
         catalog,
       };
-      const saved = await readApi('/api/deployments', deployment, {
+      const saved = (await api('/api/deployments', {
         ...advanced,
         name: displayName,
         configuration,
@@ -230,18 +291,109 @@ export function DeploymentWizard({
         residency,
         idle_timeout: idle,
         template_override: templateOverride,
-        enabled: true,
-      });
-      created(saved, load);
+        enabled: mode !== 'disabled',
+      })) as Deployment;
+      setSavedRow(saved);
+      if (mode === 'load') {
+        setOutcome('launch');
+        setLaunchError('');
+        setAccepted(false);
+        try {
+          setLaunchPlan(await launchPlanFor(saved));
+        } catch (e) {
+          setOutcome('failed');
+          setLaunchError(message(e));
+        }
+      } else if (mode === 'none') {
+        setOutcome('available');
+        void checkPending(saved);
+      } else {
+        setOutcome('disabled');
+        void checkPending(saved);
+      }
     } catch (e) {
       setError(message(e));
     } finally {
       setBusy(false);
     }
   }
+  const plan = launchPlanState;
+
+  async function launchPlanFor(dep: Deployment): Promise<LaunchPlan> {
+    return readApi(`/api/deployments/${dep.id}/validate`, launchPlan);
+  }
+  async function loadModel(dep: Deployment, token: string): Promise<void> {
+    await api(`/api/deployments/${dep.id}/start`, { plan_token: token });
+  }
+  async function checkPending(dep: Deployment) {
+    try {
+      const status = (await api(
+        `/api/deployments/${dep.id}/pending`,
+      )) as PendingStatus;
+      setPending(status);
+    } catch {
+      setPending(null);
+    }
+  }
+  async function onLoad(dep: Deployment) {
+    if (!plan) return;
+    setLaunchBusy(true);
+    setLaunchError('');
+    try {
+      await loadModel(dep, plan.plan_token);
+      setOutcome('loaded');
+    } catch (e) {
+      setOutcome('failed');
+      setLaunchError(message(e));
+    } finally {
+      setLaunchBusy(false);
+      void checkPending(dep);
+    }
+  }
+  async function retryLaunch(dep: Deployment) {
+    setOutcome('launch');
+    setLaunchError('');
+    setAccepted(false);
+    try {
+      setLaunchPlan(await launchPlanFor(dep));
+    } catch (e) {
+      setOutcome('failed');
+      setLaunchError(message(e));
+    }
+  }
+  async function onTest(dep: Deployment): Promise<void> {
+    setTestOutput('');
+    setTestError('');
+    setTestReceived(false);
+    setTestBusy(true);
+    const controller = new AbortController();
+    try {
+      await streamCompletion(
+        dep.alias,
+        'Say hello in one sentence.',
+        controller.signal,
+        (text) => setTestOutput((old) => old + text),
+      );
+      setTestReceived(true);
+    } catch (e) {
+      setTestError(
+        controller.signal.aborted
+          ? 'Request cancelled. Any partial response is kept below.'
+          : message(e),
+      );
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
   const advance = () => {
+    if (!displayName) {
+      setError('Enter a name for this model.');
+      return;
+    }
     if (
       step === 1 &&
+      contextMode === 'custom' &&
       hasContext &&
       (context * (hasParallel ? parallel : 1) >
         (schema[contextKey].max || 1048576) ||
@@ -255,15 +407,27 @@ export function DeploymentWizard({
     setError('');
     setStep((s) => s + 1);
   };
+
+  const showCompletion = outcome !== null && outcome !== 'launch';
+  const needsAcceptance = Boolean(plan?.stops?.length);
+  const behaviorSummary =
+    residency === 'on-demand'
+      ? idle
+        ? `Available to clients. Loads when requested and unloads after ${idle / 60} minutes without requests.`
+        : 'Available to clients. Loads when requested; idle unloading is off.'
+      : residency === 'pinned'
+        ? 'Pinned: never automatically unloaded to make room.'
+        : 'Evictable: loads manually; can make room when idle and authorized.';
+
   return (
     <Dialog
-      title={['New deployment', 'Configuration', 'Review deployment'][step]}
+      title={'Set up model'}
       close={close}
-      busy={busy}
+      busy={busy || launchBusy || testBusy}
       wide
     >
-      <ol className="steps" aria-label="Deployment setup">
-        {['Model & engine', 'Configuration', 'Review'].map((s, i) => (
+      <ol className="steps" aria-label="Set up model">
+        {['Choose model', 'Review setup', 'Make available'].map((s, i) => (
           <li
             key={s}
             aria-current={i === step ? 'step' : undefined}
@@ -288,73 +452,81 @@ export function DeploymentWizard({
             if (step < 2) void form.handleSubmit();
           }}
         >
-          <FieldSet disabled={busy}>
+          <FieldSet disabled={busy || launchBusy}>
             {step === 0 && (
               <>
-                <>
-                  <Field label="Model">
+                <Field label="Model">
+                  <NativeSelect
+                    required
+                    value={artifactId}
+                    onChange={(e) => {
+                      setArtifactId(e.target.value);
+                      setRuntimeId('');
+                      setExtra({});
+                      setTemplateOverride(null);
+                    }}
+                  >
+                    <NativeSelectOption value="" disabled>
+                      Select model…
+                    </NativeSelectOption>
+                    {(data.models || []).map((m) => (
+                      <NativeSelectOption key={m.id} value={m.id}>
+                        {m.name}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </Field>
+                {engines.length ? (
+                  <Field label="Engine">
                     <NativeSelect
-                      required
-                      value={artifactId}
+                      value={runtime?.id}
                       onChange={(e) => {
-                        setArtifactId(e.target.value);
-                        setRuntimeId('');
+                        setRuntimeId(e.target.value);
                         setExtra({});
-                        setTemplateOverride(null);
                       }}
                     >
-                      <NativeSelectOption value="" disabled>
-                        Select model…
-                      </NativeSelectOption>
-                      {(data.models || []).map((m) => (
-                        <NativeSelectOption key={m.id} value={m.id}>
-                          {m.name}
+                      {engines.map((r) => (
+                        <NativeSelectOption key={r.id} value={r.id}>
+                          {r.name}
                         </NativeSelectOption>
                       ))}
                     </NativeSelect>
                   </Field>
-                  {engines.length ? (
-                    <Field label="Engine">
-                      <NativeSelect
-                        value={runtime?.id}
-                        onChange={(e) => {
-                          setRuntimeId(e.target.value);
-                          setExtra({});
-                        }}
-                      >
-                        {engines.map((r) => (
-                          <NativeSelectOption key={r.id} value={r.id}>
-                            {r.name}
-                          </NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                  ) : (
-                    <div className="empty">
-                      <h3>No compatible engine</h3>
-                      <Button
-                        variant="outline"
-                        type="button"
-                        onClick={setupEngine}
-                      >
-                        Set up engine
-                      </Button>
-                    </div>
-                  )}
-                  {artifact && (
-                    <ChatTemplateSettings
-                      label="Chat template"
-                      model={artifact}
-                      override={templateOverride}
-                      onChange={setTemplateOverride}
-                    />
-                  )}
-                </>
+                ) : (
+                  <div className="empty">
+                    <h3>An engine is needed for this model</h3>
+                    <p className="muted">
+                      Choose a compatible engine to continue. Your setup will be
+                      kept.
+                    </p>
+                    <Button
+                      variant="outline"
+                      type="button"
+                      onClick={setupEngine}
+                    >
+                      Choose engine
+                    </Button>
+                  </div>
+                )}
+                {artifact && (
+                  <ChatTemplateSettings
+                    label="Chat template"
+                    model={artifact}
+                    override={templateOverride}
+                    onChange={setTemplateOverride}
+                  />
+                )}
+                <p className="muted">
+                  Engine settings will be used unless you customize them.
+                </p>
               </>
             )}
             {step === 1 && (
               <>
-                <Field label="Name">
+                <Field
+                  label="Name"
+                  hint="Used throughout Menagerie and in connected clients."
+                >
                   <Input
                     required
                     value={displayName}
@@ -405,6 +577,11 @@ export function DeploymentWizard({
                       onChange={(e) => setAlias(e.target.value)}
                       aria-label="API model ID"
                     />
+                    {aliasInUse && (
+                      <p className="error-text">
+                        This API model ID is already in use. Choose another.
+                      </p>
+                    )}
                     <div className="pt-2 flex items-center gap-2">
                       <button
                         type="button"
@@ -422,107 +599,111 @@ export function DeploymentWizard({
                     </div>
                   </Field>
                 )}
-                <>
-                  <Field label="Configuration">
-                    <NativeSelect
-                      value={automatic ? 'automatic' : 'explicit'}
-                      onChange={(e) =>
-                        setAutomatic(e.target.value === 'automatic')
-                      }
-                    >
+                <Field
+                  label="Context capacity"
+                  hint="More context → more memory"
+                >
+                  <NativeSelect
+                    value={contextMode}
+                    onChange={(e) =>
+                      setContextMode(e.target.value as ContextMode)
+                    }
+                  >
+                    <NativeSelectOption value="default">
+                      Engine default
+                    </NativeSelectOption>
+                    {runtime?.engine === 'llama.cpp' && (
                       <NativeSelectOption value="automatic">
-                        Engine defaults and automatic fit
+                        Automatic
                       </NativeSelectOption>
-                      <NativeSelectOption value="explicit">
-                        Explicit context and concurrency
-                      </NativeSelectOption>
-                    </NativeSelect>
-                  </Field>
-                  {!automatic && hasContext && (
-                    <Field
-                      label="Context / request"
-                      hint={
-                        suggestedContext
-                          ? `Suggested ceiling: ${suggestedContext.toLocaleString()} tokens per request (estimated)`
-                          : 'Capacity recommendation unavailable or minimum context does not fit'
-                      }
-                    >
-                      <Choices
-                        label="Context size"
-                        value={custom ? 'custom' : String(context)}
-                        options={[
-                          ...[8192, 16384, 32768].map((n) => ({
-                            value: String(n),
-                            label: `${n / 1024}K${suggestedContext && n > suggestedContext ? ' ⚠' : ''}`,
-                            disabled:
-                              n * (hasParallel ? parallel : 1) >
-                              (schema[contextKey].max || 1048576),
-                          })),
-                          { value: 'custom', label: 'Custom' },
-                        ]}
-                        change={(next) => {
-                          setCustom(next === 'custom');
-                          if (next !== 'custom') setContext(Number(next));
-                        }}
-                      />
-                      {typeof recommendedContext === 'number' && (
-                        <Button
-                          variant="outline"
-                          type="button"
-                          onClick={() => {
-                            setContext(
-                              Math.max(
-                                schema[contextKey].min || 512,
-                                Math.floor(
-                                  recommendedContext /
-                                    (hasParallel ? parallel : 1),
-                                ),
+                    )}
+                    <NativeSelectOption value="custom">
+                      Custom
+                    </NativeSelectOption>
+                  </NativeSelect>
+                  <p className="muted">
+                    {contextMode === 'default'
+                      ? 'The engine chooses the value. No override is saved; the value may differ between loads.'
+                      : contextMode === 'automatic'
+                        ? 'Uses this engine’s automatic mode. This is an explicit setting, not the same as leaving the option unset.'
+                        : 'Set a context limit.'}
+                  </p>
+                </Field>
+                {contextMode === 'custom' && hasContext && (
+                  <Field
+                    label="Context / request"
+                    hint={
+                      suggestedContext
+                        ? `Suggested ceiling: ${suggestedContext.toLocaleString()} tokens per request (estimated)`
+                        : 'Capacity recommendation unavailable or minimum context does not fit'
+                    }
+                  >
+                    <Choices
+                      label="Context size"
+                      value={String(context)}
+                      options={[
+                        ...[8192, 16384, 32768].map((n) => ({
+                          value: String(n),
+                          label: `${n / 1024}K${
+                            suggestedContext && n > suggestedContext ? ' ⚠' : ''
+                          }`,
+                          disabled:
+                            n * (hasParallel ? parallel : 1) >
+                            (schema[contextKey].max || 1048576),
+                        })),
+                        { value: 'custom', label: 'Custom' },
+                      ]}
+                      change={(next) => {
+                        setContext(Number(next) || context);
+                      }}
+                    />
+                    {typeof recommendedContext === 'number' && (
+                      <Button
+                        variant="outline"
+                        type="button"
+                        onClick={() => {
+                          setContext(
+                            Math.max(
+                              schema[contextKey].min || 512,
+                              Math.floor(
+                                recommendedContext /
+                                  (hasParallel ? parallel : 1),
                               ),
-                            );
-                            setCustom(true);
-                          }}
-                        >
-                          Use suggested default
-                        </Button>
-                      )}
-                      {custom && (
-                        <Input
-                          aria-label="Custom context / request"
-                          type="number"
-                          required
-                          min={schema[contextKey].min || 512}
-                          max={
-                            (schema[contextKey].max || 1048576) /
-                            (hasParallel ? parallel : 1)
-                          }
-                          value={context}
-                          onChange={(e) => setContext(Number(e.target.value))}
-                        />
-                      )}
-                    </Field>
-                  )}
-                  {!automatic && hasParallel && (
-                    <Field
-                      label="Concurrent requests"
-                      hint={`Shared context pool: ${(context * parallel).toLocaleString()} tokens`}
-                    >
-                      <Input
-                        type="number"
-                        min={1}
-                        max={schema.parallel.max || 64}
-                        required
-                        value={parallel}
-                        onChange={(e) => setParallel(Number(e.target.value))}
-                      />
-                    </Field>
-                  )}
-                  {!hasContext && (
-                    <p className="muted">
-                      This engine requires manual context configuration in
-                      Advanced.
-                    </p>
-                  )}
-                </>
+                            ),
+                          );
+                        }}
+                      >
+                        Use suggested default
+                      </Button>
+                    )}
+                    <Input
+                      aria-label="Custom context / request"
+                      type="number"
+                      min={schema[contextKey].min || 512}
+                      max={
+                        (schema[contextKey].max || 1048576) /
+                        (hasParallel ? parallel : 1)
+                      }
+                      value={context}
+                      onChange={(e) => setContext(Number(e.target.value))}
+                    />
+                  </Field>
+                )}
+                {contextMode === 'custom' && hasParallel && (
+                  <Field
+                    label="Concurrent requests"
+                    hint="More simultaneous requests → more resource demand"
+                  >
+                    <Input
+                      type="number"
+                      min={1}
+                      max={schema.parallel.max || 64}
+                      required
+                      value={parallel}
+                      onChange={(e) => setParallel(Number(e.target.value))}
+                    />
+                  </Field>
+                )}
                 <Field label="Mode">
                   <NativeSelect
                     value={residency}
@@ -538,13 +719,7 @@ export function DeploymentWizard({
                       Evictable
                     </NativeSelectOption>
                   </NativeSelect>
-                  <small>
-                    {residency === 'on-demand'
-                      ? 'Loads when a client sends a request.'
-                      : residency === 'pinned'
-                        ? 'Never automatically unloaded to make room.'
-                        : 'Loads manually; can make room when idle and authorized.'}
-                  </small>
+                  <small>{behaviorSummary}</small>
                 </Field>
                 {residency === 'on-demand' && (
                   <Field label="Unload after idle">
@@ -591,137 +766,101 @@ export function DeploymentWizard({
                 )}
                 <details>
                   <summary>Advanced</summary>
-                  <>
-                    <RuntimeSettings
-                      engineSelected={Boolean(runtime)}
-                      formPath="config"
-                      schema={Object.fromEntries(
-                        Object.entries(schema).filter(
-                          ([key]) =>
-                            !['ctx-size', 'max-model-len', 'parallel'].includes(
-                              key,
-                            ),
-                        ),
-                      )}
-                      value={extra}
-                      change={setExtra}
-                      host={data.host?.[0]}
-                      recommendation={recommendation}
-                    />
-                    {!hasContext && (
-                      <JsonEdit
-                        label="Runtime options (JSON)"
-                        decode={jsonObject}
-                        value={extra}
-                        onChange={setExtra}
-                        onValid={(valid) =>
-                          setInvalid((v) => ({ ...v, config: !valid }))
-                        }
-                      />
+                  <RuntimeSettings
+                    engineSelected={Boolean(runtime)}
+                    formPath="config"
+                    schema={Object.fromEntries(
+                      Object.entries(schema).filter(
+                        ([key]) =>
+                          !['ctx-size', 'max-model-len', 'parallel'].includes(
+                            key,
+                          ),
+                      ),
                     )}
+                    value={extra}
+                    change={setExtra}
+                    host={data.host?.[0]}
+                    recommendation={recommendation}
+                  />
+                  {!hasContext && (
                     <JsonEdit
-                      label="Additional engine arguments"
-                      decode={stringArray}
-                      value={args}
-                      onChange={setArgs}
+                      label="Runtime options (JSON)"
+                      decode={jsonObject}
+                      value={extra}
+                      onChange={setExtra}
                       onValid={(valid) =>
-                        setInvalid((v) => ({ ...v, args: !valid }))
+                        setInvalid((v) => ({ ...v, config: !valid }))
                       }
                     />
-                  </>
-                  <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-                    {(
-                      [
-                        ['port', 'Private port', 1024, 65535],
-                        ['gpu', 'GPU index', 0, 31],
-                        ['priority', 'Priority', 0, 100],
-                        ['queue_timeout', 'Queue timeout (seconds)', 1, 1800],
-                      ] as const
-                    ).map(([key, label, min, max]) => (
-                      <Field key={String(key)} label={String(label)}>
-                        <Input
-                          required={key !== 'gpu'}
-                          type="number"
-                          min={min}
-                          max={max}
-                          placeholder={
-                            key === 'gpu' ? 'Engine selected' : undefined
-                          }
-                          value={advanced[key] ?? ''}
-                          onChange={(e) =>
-                            setAdvanced({
-                              ...advanced,
-                              [key]:
-                                key === 'gpu' && e.target.value === ''
-                                  ? null
-                                  : Number(e.target.value),
-                            })
-                          }
-                        />
-                      </Field>
-                    ))}
-                  </FieldGroup>
-                  {residency !== 'pinned' && (
-                    <label className="check">
-                      <Checkbox
-                        checked={advanced.allow_eviction}
-                        onCheckedChange={(checked) =>
-                          setAdvanced({ ...advanced, allow_eviction: checked })
-                        }
-                      />
-                      Allow automatic unloading when idle
-                    </label>
                   )}
+                  <JsonEdit
+                    label="Additional engine arguments"
+                    decode={stringArray}
+                    value={args}
+                    onChange={setArgs}
+                    onValid={(valid) =>
+                      setInvalid((v) => ({ ...v, args: !valid }))
+                    }
+                  />
                 </details>
               </>
             )}
-            {step === 2 && (
-              <>
-                <h3>{displayName}</h3>
-                <dl className="properties">
-                  <dt>API model</dt>
-                  <dd>
-                    <code>{apiAlias}</code>
-                  </dd>
-                  <dt>Engine</dt>
-                  <dd>{runtime?.name}</dd>
-                  {hasContext && (
-                    <>
-                      <dt>Context / request</dt>
-                      <dd>{context.toLocaleString()}</dd>
-                    </>
-                  )}
-                  <dt>Mode</dt>
-                  <dd>
-                    {residency === 'on-demand'
-                      ? 'On demand'
-                      : residency === 'pinned'
-                        ? 'Pinned'
-                        : 'Evictable'}
-                  </dd>
-                  {residency === 'on-demand' && (
-                    <>
-                      <dt>Unload after idle</dt>
-                      <dd>{idle ? idle / 60 + ' minutes' : 'Never'}</dd>
-                    </>
-                  )}
-                </dl>
-                <p className="muted">
-                  Loading requires a capacity review. Creating without loading
-                  leaves this enabled for clients
-                  {residency === 'on-demand'
-                    ? '; the first request can trigger loading'
-                    : ''}
-                  .
-                </p>
-              </>
+            {step === 2 && showCompletion && (
+              <Completion
+                outcome={outcome}
+                name={displayName}
+                alias={apiAlias}
+                savedRow={savedRow}
+                launchError={launchError}
+                onTest={onTest}
+                testOutput={testOutput}
+                testError={testError}
+                testBusy={testBusy}
+                testReceived={testReceived}
+                onConnect={onConnect}
+                pending={pending}
+                pendingError={pendingError}
+                setPendingError={setPendingError}
+                refetchPending={() => savedRow && void checkPending(savedRow)}
+                onRetry={() => savedRow && void retryLaunch(savedRow)}
+                onEditSetup={() => {
+                  setOutcome(null);
+                  setStep(1);
+                }}
+              />
+            )}
+            {step === 2 && outcome === 'launch' && (
+              <LaunchReviewInline
+                plan={plan}
+                name={displayName}
+                needsAcceptance={needsAcceptance}
+                accepted={accepted}
+                setAccepted={setAccepted}
+                launchError={launchError}
+                launchBusy={launchBusy}
+                onBack={() => {
+                  setOutcome(null);
+                  setStep(1);
+                }}
+                onLoad={() => (savedRow ? onLoad(savedRow) : void 0)}
+              />
+            )}
+            {step === 2 && outcome === null && (
+              <MakeAvailableForm
+                displayName={displayName}
+                apiAlias={apiAlias}
+                behaviorSummary={behaviorSummary}
+                onMakeAvailableAndLoad={() => save('load')}
+                onMakeAvailableWithoutLoad={() => save('none')}
+                onSaveDisabled={() => save('disabled')}
+              />
             )}
           </FieldSet>
           {step > 0 && (
             <DraftResources preview={preview.data} error={preview.error} />
           )}
           <div className="dialog-actions">
-            {step > 0 && (
+            {step > 0 && !showCompletion && (
               <Button
                 variant="outline"
                 type="button"
@@ -737,31 +876,344 @@ export function DeploymentWizard({
                 type="submit"
                 disabled={Object.values(invalid).some(Boolean) || !runtime}
               >
-                Next
+                Continue
               </Button>
             ) : (
-              <>
-                <Button
-                  variant="outline"
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void submit(false)}
-                >
-                  Create without loading
-                </Button>
-                <Button
-                  variant="default"
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void submit(true)}
-                >
-                  {busy ? 'Creating…' : 'Create & review launch'}
-                </Button>
-              </>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => {
+                  close();
+                  if (savedRow) created(savedRow);
+                }}
+              >
+                Open deployment
+              </Button>
             )}
           </div>
         </form>
       </DraftFormProvider>
     </Dialog>
+  );
+}
+
+function MakeAvailableForm({
+  displayName,
+  apiAlias,
+  behaviorSummary,
+  onMakeAvailableAndLoad,
+  onMakeAvailableWithoutLoad,
+  onSaveDisabled,
+}: {
+  displayName: string;
+  apiAlias: string;
+  behaviorSummary: string;
+  onMakeAvailableAndLoad: () => void;
+  onMakeAvailableWithoutLoad: () => void;
+  onSaveDisabled: () => void;
+}) {
+  return (
+    <>
+      <h3>{displayName}</h3>
+      <dl className="properties">
+        <dt>API model</dt>
+        <dd>
+          <code>{apiAlias}</code>
+        </dd>
+        <dt>Behavior</dt>
+        <dd>{behaviorSummary}</dd>
+      </dl>
+      <p className="muted">
+        Make available and load saves, enables, and proceeds through the
+        required launch review to load the model. It does not send an inference
+        test.
+      </p>
+      <div className="dialog-actions">
+        <Button
+          variant="default"
+          type="button"
+          onClick={onMakeAvailableAndLoad}
+        >
+          Make available and load
+        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            type="button"
+            onClick={onMakeAvailableWithoutLoad}
+          >
+            Make available without loading
+          </Button>
+          <Button variant="outline" type="button" onClick={onSaveDisabled}>
+            Save disabled
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function LaunchReviewInline({
+  plan,
+  name,
+  needsAcceptance,
+  accepted,
+  setAccepted,
+  launchError,
+  launchBusy,
+  onBack,
+  onLoad,
+}: {
+  plan: LaunchPlan | null;
+  name: string;
+  needsAcceptance: boolean;
+  accepted: boolean;
+  setAccepted: (value: boolean) => void;
+  launchError: string;
+  launchBusy: boolean;
+  onBack: () => void;
+  onLoad: () => void;
+}) {
+  const stops = plan?.stops || [];
+  const names = stops;
+  const canLoad =
+    plan && plan.errors.length === 0 && (!needsAcceptance || accepted);
+  return (
+    <>
+      <h3>{name}</h3>
+      <p className="muted">Loading {name}…</p>
+      {launchError && (
+        <Alert variant="destructive" className="mb-5" role="alert">
+          <AlertDescription>{launchError}</AlertDescription>
+        </Alert>
+      )}
+      {!plan && !launchError && <p className="muted">Checking capacity…</p>}
+      {plan && (
+        <>
+          {plan.stops.length > 0 && (
+            <div className="warning">
+              <h3>Will unload</h3>
+              <ul>
+                {names.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+              <p>
+                KV caches will be lost. Failed launches attempt to restore these
+                deployments.
+              </p>
+              <label className="check">
+                <Checkbox checked={accepted} onCheckedChange={setAccepted} />I
+                understand the listed models will be unloaded and their KV
+                caches lost.
+              </label>
+            </div>
+          )}
+          {plan.errors.length > 0 &&
+            plan.errors.map((e, i) => (
+              <Alert
+                variant="destructive"
+                className="mb-5"
+                role="alert"
+                key={e + i}
+              >
+                <AlertDescription>{e}</AlertDescription>
+              </Alert>
+            ))}
+          <div className="dialog-actions">
+            <Button variant="outline" type="button" onClick={onBack}>
+              Back
+            </Button>
+            <Button
+              variant="default"
+              type="button"
+              disabled={!canLoad || launchBusy}
+              onClick={onLoad}
+            >
+              {launchBusy ? 'Loading…' : 'Load'}
+            </Button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function Completion({
+  outcome,
+  name,
+  alias,
+  savedRow,
+  launchError,
+  onTest,
+  testOutput,
+  testError,
+  testBusy,
+  testReceived,
+  onConnect,
+  pending,
+  pendingError,
+  setPendingError,
+  refetchPending,
+  onRetry,
+  onEditSetup,
+}: {
+  outcome: Outcome;
+  name: string;
+  alias: string;
+  savedRow: Deployment | null;
+  launchError: string;
+  onTest: (dep: Deployment) => Promise<void>;
+  testOutput: string;
+  testError: string;
+  testBusy: boolean;
+  testReceived: boolean;
+  onConnect: () => void;
+  pending: PendingStatus | null;
+  pendingError: string;
+  setPendingError: (value: string) => void;
+  refetchPending: () => void;
+  onRetry: () => void;
+  onEditSetup: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [showError, setShowError] = useState(false);
+  const title: Record<Outcome, string> = {
+    loaded: `${name} is loaded and available`,
+    available: `${name} is available`,
+    disabled: `${name} is saved and disabled`,
+    pending: 'Setup saved. Changes are waiting to be applied.',
+    failed: 'Setup saved, but the model could not load.',
+    launch: '',
+  };
+  const desc: Record<Outcome, string> = {
+    loaded:
+      'The model is running and routable to clients on the local gateway.',
+    available: 'Loads on the first request.',
+    disabled: 'Not advertised to clients.',
+    pending:
+      'Apply the queued change when the runtime is idle to avoid an immediate unload.',
+    failed: 'Your configuration is preserved; review it below.',
+    launch: '',
+  };
+  const titleText = title[outcome];
+  const descText = desc[outcome];
+  const applyWhenIdle = async (): Promise<void> => {
+    if (!savedRow || !pending || !pending.op || !pending.op.token) return;
+    setPendingError('');
+    try {
+      await api(`/api/deployments/${savedRow.id}/request-apply`, {
+        token: pending.op.token,
+        scope_fingerprint: pending.scope_fingerprint,
+      });
+      refetchPending();
+    } catch (e) {
+      setPendingError(message(e));
+    }
+  };
+  const cancelApply = async (): Promise<void> => {
+    if (!savedRow) return;
+    setPendingError('');
+    try {
+      await api(`/api/deployments/${savedRow.id}/cancel`);
+      refetchPending();
+    } catch (e) {
+      setPendingError(message(e));
+    }
+  };
+  const copyAlias = (): void => {
+    void navigator.clipboard
+      .writeText(alias)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => void 0);
+  };
+  return (
+    <>
+      <h3>{titleText}</h3>
+      <p className="muted">{descText}</p>
+      {pending?.pending && (
+        <div className="warning">
+          <p>A configuration change is queued on this shared runtime.</p>
+          {pending.affected.length > 0 && (
+            <p>Affected models: {pending.affected.join(', ')}.</p>
+          )}
+          <div className="dialog-actions">
+            <Button variant="default" type="button" onClick={applyWhenIdle}>
+              Apply when idle
+            </Button>
+            <Button variant="outline" type="button" onClick={cancelApply}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {pendingError && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription>{pendingError}</AlertDescription>
+        </Alert>
+      )}
+      {outcome === 'failed' && (
+        <>
+          <div className="dialog-actions">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setShowError((v) => !v)}
+            >
+              View error
+            </Button>
+            <Button variant="outline" type="button" onClick={onEditSetup}>
+              Edit setup
+            </Button>
+            <Button variant="outline" type="button" onClick={onRetry}>
+              Try again
+            </Button>
+          </div>
+          {showError && launchError && (
+            <Alert variant="destructive" role="alert">
+              <AlertDescription>{launchError}</AlertDescription>
+            </Alert>
+          )}
+        </>
+      )}
+      <div className="dialog-actions">
+        <Button variant="outline" type="button" onClick={onConnect}>
+          Connect a client
+        </Button>
+      </div>
+      <Field label="Test model" hint="Sends a request and may load this model.">
+        <Button
+          variant="outline"
+          type="button"
+          disabled={testBusy}
+          onClick={() => {
+            if (savedRow) void onTest(savedRow);
+          }}
+        >
+          {testBusy ? 'Sending…' : 'Test model'}
+        </Button>
+      </Field>
+      {testOutput && (
+        <pre className="whitespace-pre-wrap break-words">{testOutput}</pre>
+      )}
+      {testReceived && <p className="muted">Test response received</p>}
+      {testError && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription>{testError}</AlertDescription>
+        </Alert>
+      )}
+      <div className="dialog-actions">
+        <Button variant="outline" type="button" onClick={copyAlias}>
+          {copied ? 'Copied' : 'Copy API model ID'}
+        </Button>
+      </div>
+      <p className="muted">
+        Uses the local gateway. This test is not saved as a conversation. Normal
+        gateway request accounting still applies.
+      </p>
+    </>
   );
 }

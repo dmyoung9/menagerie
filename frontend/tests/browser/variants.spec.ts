@@ -236,6 +236,9 @@ test('new deployment members get common defaults and a nested Drawer without sub
     .getByRole('button', { name: 'New deployment', exact: true })
     .click();
   await page
+    .getByRole('button', { name: 'Multiple models', exact: true })
+    .click();
+  await page
     .getByRole('dialog')
     .getByRole('button', { name: 'Add model', exact: true })
     .click();

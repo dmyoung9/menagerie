@@ -61,6 +61,38 @@ instances have a single lifecycle owner.
   operate on complete serving units. User starts require the reviewed `plan_token`.
 - `/api/deployment-sets/{id}/dissolve?expected=REV` separates unloaded members.
 
+### Desired changes and queued application
+
+- `GET /api/deployments/alias/suggest?name=` returns the deterministic
+  `{alias, base, mode: "generated"}` slug preview against current deployment
+  aliases.
+- `GET /api/deployments/{ident}/pending` reports desired-vs-applied status for
+  a unit (and its pool): `op`, `desired_rev`, `applied_rev`, `pending`,
+  `scope_fingerprint`, `affected_ids`, `affected`. A unit is pending only once
+  it is activated and the stored configuration differs from what the runtime
+  last loaded.
+- `POST /api/deployments/{ident}/save-desired` records the unit's stored
+  configuration as the desired revision. It never restarts the runtime; the
+  change stays pending until an explicit, reviewed apply.
+- `POST /api/deployments/{ident}/request-apply` queues a reviewed apply,
+  taking the `token` and `scope_fingerprint` captured during review. It
+  revalidates scope and the launch plan immediately before applying, so stale
+  consent is never used, and returns the queued `op` plus a `job_id` for
+  progress polling.
+- `POST /api/deployments/{ident}/cancel` cancels a queued apply before it
+  begins; the saved change remains pending for a fresh review.
+- `POST /api/deployments/{ident}/discard` restores the last *applied*
+  configuration (or `null` when the unit was never activated) and clears the
+  operation.
+- `GET /api/deployments/{ident}/action-scope` returns
+  `{is_whole_unit, multi_model, member_level, scope_label}` so a pool-level
+  action is never labeled as a per-model action.
+- `GET /api/deployments/{ident}/eligibility` returns the hard errors that
+  block pool membership; nothing is auto-changed to fit.
+- `GET /api/deployments/{ident}/eviction-candidates` lists idle,
+  policy-eligible unload candidates for this unit; candidates are always
+  consent-gated and never include the unit being loaded.
+
 Member lifecycle actions expand to complete membership. Policy/enablement changes
 on owned members are rejected; settings edits require the whole unit unloaded.
 Review tokens include membership and policy revisions. Preserve atomic rollback,

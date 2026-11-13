@@ -1,7 +1,10 @@
 # Model-first UI: design and implementation plan
 
-Status: product decisions resolved with the owner; implementation and technical
-validation remain pending. No product changes implemented.
+Status: Stages 1–5 implemented and Stage 6 consolidated on `feat/model-first-ui`;
+verification is the fixture-based repository check contract. No live inference,
+downloads, or hardware acceptance was performed, so no model-fit, quantization,
+image-compatibility, or hardware claims are made in this document or the guides.
+The copy contract below is the shipped UI copy, not a proposal.
 
 Date: 2026-11-11. Baseline: Menagerie 3.0.0, commit `6182e7e45`.
 Working branch: `feat/model-first-ui`.
