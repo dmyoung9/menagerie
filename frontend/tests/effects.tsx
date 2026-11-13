@@ -105,6 +105,7 @@ function WizardHarness() {
     <>
       <output aria-label="Registry snapshot">{snapshot}</output>
       <DeploymentWizard
+        acquireModel={() => undefined}
         data={{
           models: [
             { id: 'model', revision: 1, name: 'Example', format: 'gguf' },
@@ -144,6 +145,7 @@ function WizardHarness() {
         close={() => {}}
         created={() => {}}
         setupEngine={() => {}}
+        onConnect={() => {}}
       />
     </>
   );

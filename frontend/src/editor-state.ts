@@ -22,6 +22,8 @@ export const defaults: EditorDraftMap = {
     },
   },
   deployments: {
+    identifier_mode: 'generated',
+    runtime_assignment: 'dedicated',
     name: 'New deployment',
     profile_id: '',
     alias: 'local-model',

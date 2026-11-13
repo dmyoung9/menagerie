@@ -62,7 +62,7 @@ visible. Group membership does not bypass these safeguards.
 
 ## Creation
 
-**New deployment → Multiple models** adds models from the installed weights library.
+**Advanced → Create supervised group or runtime pool** adds models from the installed weights library.
 Name the deployment, add models, configure each engine and its inference settings,
 and choose the shared loading policy. No profile or standalone deployment is needed
 first. This works even when there are no existing deployments.

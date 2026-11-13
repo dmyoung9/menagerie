@@ -615,4 +615,6 @@ async def test_lifecycle_separates_deployed_serving_and_running(tmp_path):
         )
         assert (
             await client.post("/api/deployments/a/enabled", json={"enabled": False})
-        ).status_code == 409
+        ).status_code == 200
+        assert store.get("deployment", "a")["state"] == "READY"
+        assert not store.get("deployment", "a")["enabled"]

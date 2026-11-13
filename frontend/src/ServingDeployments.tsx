@@ -1,4 +1,4 @@
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -22,7 +22,7 @@ import {
   CardDescription,
   CardContent,
 } from '@/components/ui/card';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   active,
@@ -47,7 +47,7 @@ import { ResourceHistory } from '@/components/resource-history';
 import { EmbeddedEditor } from '@/components/embedded-editor';
 import { RequestHistory } from '@/components/request-history';
 import { DeploymentPerformance } from '@/components/deployment-performance';
-import { go } from './navigation';
+import { go, repoPath } from './navigation';
 import { ConfigurationFields } from './Editors';
 import { DraftFormProvider, useDraftForm } from './use-draft-form';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
@@ -71,6 +71,7 @@ import { SettingsSection } from '@/components/settings-section';
 import { CardAdvanced } from '@/components/card-advanced';
 import { readApi } from './ui';
 import * as contracts from './contracts';
+import { reconcileDeep, deploymentSetToDraft } from './reconcile';
 import type {
   Deployment,
   DeploymentActions,
@@ -81,6 +82,131 @@ import type {
   OperationEvent,
   ServingDeployment,
 } from './types';
+
+export function ConfiguredModelsTable({
+  rows,
+  actions,
+}: {
+  rows: Deployment[];
+  actions: DeploymentActions;
+}) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead>API model ID</TableHead>
+          <TableHead>Availability</TableHead>
+          <TableHead>Residency</TableHead>
+          <TableHead>Active requests</TableHead>
+          <TableHead>Total requests</TableHead>
+          <TableHead>Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((model) => (
+          <TableRow key={model.id}>
+            <TableCell>
+              <a href={`#/deployments/${model.id}`}>{model.name}</a>
+              {model.state === 'FAILED' && (
+                <p>
+                  <a href={`#/deployments/${model.id}/logs`}>View logs</a>
+                </p>
+              )}
+              {model.changes_pending && <p>Changes pending</p>}
+            </TableCell>
+            <TableCell>
+              <code>{model.alias}</code>
+              {model.active_alias && model.active_alias !== model.alias && (
+                <p>Currently serving: {model.active_alias}</p>
+              )}
+            </TableCell>
+            <TableCell>
+              {model.changes_pending
+                ? 'Changes pending'
+                : model.enabled
+                  ? 'Available'
+                  : 'Disabled'}
+            </TableCell>
+            <TableCell>
+              {model.state === 'FAILED'
+                ? 'Failed'
+                : model.runtime_observation?.residency === 'resident' ||
+                    (!model.engine_pool &&
+                      model.state === 'READY' &&
+                      !model.runtime_observation)
+                  ? 'Loaded'
+                  : model.runtime_observation?.residency === 'loading' ||
+                      ['STARTING', 'LOADING'].includes(model.state)
+                    ? 'Loading'
+                    : model.state === 'STOPPING'
+                      ? 'Unloading'
+                      : 'Not loaded'}
+            </TableCell>
+            <TableCell>{model.inflight || 0}</TableCell>
+            <TableCell>{model.historical_requests || 0}</TableCell>
+            <TableCell>
+              {model.member_availability !== false && (
+                <Button
+                  variant="outline"
+                  disabled={model.changes_pending}
+                  onClick={() =>
+                    model.enabled
+                      ? actions.load('deployments', model)
+                      : actions.enable(model, true)
+                  }
+                >
+                  {model.enabled ? 'Review and load' : 'Make available'}
+                </Button>
+              )}
+              <Menu label={'Actions for ' + model.name}>
+                <DropdownMenuItem
+                  render={
+                    <a href={`#/deployments/${model.id}/configuration`} />
+                  }
+                >
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => actions.edit('deployments', model, true)}
+                >
+                  Duplicate
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  render={<a href={`#/deployments/${model.id}/logs`} />}
+                >
+                  Logs
+                </DropdownMenuItem>
+                {model.member_availability !== false && model.enabled && (
+                  <DropdownMenuItem
+                    disabled={model.changes_pending}
+                    onClick={() => actions.enable(model, false)}
+                  >
+                    Disable
+                  </DropdownMenuItem>
+                )}
+              </Menu>
+              {model.unit_id && model.unit_id !== model.id ? (
+                <a href={`#/deployments/${model.unit_id}`}>
+                  Advanced runtime controls
+                </a>
+              ) : (
+                active(model) && (
+                  <Button
+                    variant="outline"
+                    onClick={() => actions.stop('deployments', model)}
+                  >
+                    Unload model
+                  </Button>
+                )
+              )}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
 
 function unitVram(
   d: ServingDeployment,
@@ -352,7 +478,9 @@ export function DeploymentSetEditor({
   );
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [separate, setSeparate] = useState(false);
+    [separate, setSeparate] = useState(false),
+    [pendingRevision, setPendingRevision] = useState<number | null>(null),
+    [revisionConflict, setRevisionConflict] = useState(false);
   const [artifactId, setArtifactId] = useState(
       modelId || data.models?.[0]?.id || '',
     ),
@@ -360,6 +488,12 @@ export function DeploymentSetEditor({
   const [selected, setSelected] = useState(0);
   const preview = useResourcePreview(value.members, data.host?.[0]?.ts);
   const [epoch, setEpoch] = useState(0);
+  // Mount-time set draft, the reference for touched-vs-adopted fields. It must
+  // not follow the live initial, or untouched fields would adopt stale server
+  // values during a conflict review.
+  const mountSetRef = useRef<DeploymentSetDraft | null>(null);
+  if (mountSetRef.current === null)
+    mountSetRef.current = deploymentSetToDraft(initial);
   const changed = draftChanged || Object.values(invalid).some(Boolean);
   const aliasError = (m: DeploymentDraft) =>
     value.members.some((other) => other !== m && other.alias === m.alias) ||
@@ -481,7 +615,7 @@ export function DeploymentSetEditor({
         !initial && value.members.length === 1 && !value.engine_pool;
       const path =
         (single ? '/api/deployments' : '/api/deployment-sets') +
-        (initial ? '?expected=' + initial.revision : '');
+        (initial ? '?expected=' + (pendingRevision ?? initial.revision) : '');
       const shared = {
         residency: value.residency,
         priority: value.priority,
@@ -500,11 +634,42 @@ export function DeploymentSetEditor({
       const result = await readApi(path, contracts.identity, payload);
       saved(result.id);
     } catch (e) {
-      setError(message(e));
+      const detail = message(e);
+      if (detail.includes('Revision changed')) {
+        // Concurrent change: surface it for review; do NOT call saved() so the
+        // form is not reset and the user's edits are kept for the re-write.
+        setRevisionConflict(true);
+      } else {
+        setError(detail);
+      }
     } finally {
       setBusy(false);
     }
   };
+  async function reviewRevision() {
+    if (busy || !initial) return;
+    try {
+      const status = (await readApi('/api/status', contracts.status)) as {
+        serving_deployments?: ServingDeployment[];
+      };
+      const freshSet = (status.serving_deployments || []).find(
+        (d): d is DeploymentSet => d.id === initial.id && d.multi_model,
+      );
+      if (!freshSet) return;
+      setValue(
+        reconcileDeep(
+          mountSetRef.current!,
+          deploymentSetToDraft(freshSet),
+          value,
+        ) as DeploymentSetDraft,
+      );
+      setPendingRevision(freshSet.revision);
+      setRevisionConflict(false);
+      setError('');
+    } catch {
+      /* Ignore: the user can review again. */
+    }
+  }
   const Shell = embedded ? EmbeddedEditor : Dialog;
   return (
     <Shell
@@ -916,6 +1081,24 @@ export function DeploymentSetEditor({
               <Json value={value} />
             </div>
           </details>
+          {revisionConflict && (
+            <Alert variant="default" className="mb-5" role="alert">
+              <AlertDescription className="whitespace-pre-line">
+                This configuration changed elsewhere. Your edits have been kept.
+              </AlertDescription>
+              <AlertAction>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void reviewRevision()}
+                >
+                  Review changes
+                </Button>
+              </AlertAction>
+            </Alert>
+          )}
           <div className="dialog-actions configuration-save-bar">
             <span className="muted" role="status">
               {changed ? 'Unsaved changes' : 'All changes saved'}
@@ -1143,41 +1326,75 @@ export function MultiDeploymentDetail({
             </Card>
           </div>
           <div className="model-grid">
-            {d.members.map((m) => (
-              <Card className="mb-5 min-w-0 gap-0 p-0 library-card" key={m.id}>
-                <CardContent className="p-0">
-                  <Status value={state(m)} />
-                  <h2>{m.name}</h2>
-                  <dl className="properties">
-                    <dt>API model</dt>
-                    <dd>
-                      <code>{m.alias}</code>
-                    </dd>
-                    <dt>Context / request</dt>
-                    <dd>
-                      {number(
-                        m.profile_snapshot?.catalog?.model?.limit?.context,
-                        0,
-                      )}
-                    </dd>
-                    <dt>VRAM (GiB)</dt>
-                    <dd>{gib(host.deployments?.[m.id]?.gpu_mib)}</dd>
-                  </dl>
-                  <div className="card-actions">
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={() => {
-                        setLogMember(m.id);
-                        go(`deployments/${d.id}/logs`);
-                      }}
-                    >
-                      Logs
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+            {d.members.map((m) => {
+              const artifact =
+                data.models?.find(
+                  (a) => a.id === m.profile_snapshot?.artifact_id,
+                ) || undefined;
+              return (
+                <Card
+                  className="mb-5 min-w-0 gap-0 p-0 library-card"
+                  key={m.id}
+                >
+                  <CardContent className="p-0">
+                    <Status value={state(m)} />
+                    <h2>{m.name}</h2>
+                    <dl className="properties">
+                      <dt>API model</dt>
+                      <dd>
+                        <code>{m.alias}</code>
+                      </dd>
+                      {artifact?.repo ? (
+                        <>
+                          <dt>Model</dt>
+                          <dd className="copy-value">
+                            <code>{artifact.repo || artifact.name}</code>
+                            <button
+                              type="button"
+                              className="view-model"
+                              onClick={() =>
+                                go(
+                                  repoPath(artifact.repo || '', {
+                                    revision:
+                                      artifact.source_revision || undefined,
+                                    returnTo:
+                                      window.location.hash.slice(2) ||
+                                      'deployments',
+                                  }),
+                                )
+                              }
+                            >
+                              View model
+                            </button>
+                          </dd>
+                        </>
+                      ) : null}
+                      <dt>Context / request</dt>
+                      <dd>
+                        {number(
+                          m.profile_snapshot?.catalog?.model?.limit?.context,
+                          0,
+                        )}
+                      </dd>
+                      <dt>VRAM (GiB)</dt>
+                      <dd>{gib(host.deployments?.[m.id]?.gpu_mib)}</dd>
+                    </dl>
+                    <div className="card-actions">
+                      <Button
+                        variant="outline"
+                        type="button"
+                        onClick={() => {
+                          setLogMember(m.id);
+                          go(`deployments/${d.id}/logs`);
+                        }}
+                      >
+                        Logs
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </>
       )}

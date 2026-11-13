@@ -70,7 +70,9 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
     dialog.getByRole('button', { name: 'Save', exact: true }),
   ).toBeDisabled();
   expect(
-    fixture.writes.filter((write) => write.path.startsWith('/api/deployments')),
+    fixture.writes.filter((write) =>
+      write.path.startsWith('/api/model-setups'),
+    ),
   ).toEqual([]);
   await args.fill('["--fixture-control"]');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
@@ -80,7 +82,7 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
     )
     .toBe(2);
   const write = fixture.writes.find((entry) =>
-    entry.path.startsWith('/api/deployments'),
+    entry.path.startsWith('/api/model-setups'),
   );
   const saved = contracts.deploymentDraft(write?.body);
   expect(saved.configuration?.raw_args).toEqual(['--fixture-control']);

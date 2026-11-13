@@ -48,7 +48,7 @@ test('curated sections preserve omission and separate explicit automatic context
     .toBe(2);
   const saved = deploymentDraft(
     fixture.writes.find(
-      (entry) => entry.path === '/api/deployments?expected=1',
+      (entry) => entry.path === '/api/model-setups?expected=1',
     )!.body,
   );
   expect(saved.configuration!.config).toEqual({ 'ctx-size': 0 });
@@ -306,13 +306,10 @@ for (const { width, components } of [1440, 576, 320].flatMap((width) =>
     const memoryBox = (await grid
       .locator('[data-settings-section="memory"]')
       .boundingBox())!;
-    if (width >= 1200) {
-      expect(memoryBox.x).toBeGreaterThan(modelBox.x);
-      expect(memoryBox.y).toBeCloseTo(modelBox.y, 0);
-    } else {
-      expect(memoryBox.x).toBeCloseTo(modelBox.x, 0);
-      expect(memoryBox.y).toBeGreaterThan(modelBox.y + modelBox.height);
-    }
+    // Sections stack in one column at every width: the memory card sits
+    // directly below the model card, never beside it.
+    expect(memoryBox.x).toBeCloseTo(modelBox.x, 0);
+    expect(memoryBox.y).toBeGreaterThan(modelBox.y + modelBox.height);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,

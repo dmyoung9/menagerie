@@ -56,6 +56,27 @@ class Record(BaseModel):
         return value
 
 
+# Acquisition status for a single file in a downloaded repository snapshot.
+AcquisitionStatus = Literal[
+    "not_downloaded", "downloading", "downloaded", "failed", "missing"
+]
+# Structural kind of an expandable download bundle.
+FileGroupKind = Literal["gguf_split", "safetensors", "companion", "standalone"]
+
+
+class FileGroup(Record):
+    """An expandable bundle of files acquired as one unit. The bundle's main row
+    carries the selection checkbox and selects every member in ``required``; expanded
+    members are inspectable and are never independently selectable. A group is
+    usable (selectable) only while ``complete`` — every required file is present at
+    the selected revision. Incomplete groups stay visible to explain missing bytes."""
+
+    name: str
+    kind: FileGroupKind
+    required: list[str] = Field(default_factory=list)
+    complete: bool = True
+
+
 class Artifact(Record):
     name: str
     local_path: str
@@ -72,6 +93,28 @@ class Artifact(Record):
     # is the backwards-compatible initial default); asset_id identifies which
     # template asset satisfies the source when source != "automatic".
     template_default: dict | None = None
+
+
+class DownloadedFile(Record):
+    """A single file acquired from a repository snapshot.
+
+    The acquired-file record, kept distinct from the deployable :class:`Artifact`
+    and from deployment configuration: acquiring a file neither creates nor
+    enables a model. One record per repository file path; the same file may be
+    shared across many deployments without copying bytes. Revision identity is
+    part of the key, so changing revisions never silently applies old selection
+    to new bytes. (The store-injected row ``revision`` is a separate integer and
+    is not a field here, matching every other record.)"""
+
+    repo: str
+    source_revision: str
+    name: str
+    group_id: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+    status: AcquisitionStatus = "not_downloaded"
+    local_path: str | None = None
+    error: str | None = None
 
 
 class TemplateAsset(Record):
@@ -134,6 +177,13 @@ class Deployment(DeploymentPolicy):
     profile_id: str | None = None
     configuration: Profile | None = None
     alias: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,159}$")
+    # How the API identifier (alias) is derived. In "generated" mode the
+    # identifier follows the display name (deterministic slug); in "custom"
+    # mode it is user-controlled and stable across renames. Existing deployments
+    # load with this default and keep their stored alias; the identifier is
+    # regenerated only when the name actually changes.
+    identifier_mode: Literal["generated", "custom"] = "generated"
+    runtime_assignment: Literal["automatic", "dedicated"] = "dedicated"
     port: int = Field(ge=1024, le=65535)
     gpu: int | None = Field(default=None, ge=0, le=31)
     # Per-deployment template override. None means "use model default";

@@ -112,8 +112,9 @@ test('unsaved editor dismissal is accessible and busy submissions cannot be dism
   fixture,
 }) => {
   await page.goto('/#/deployments');
+  await page.getByText('Advanced', { exact: true }).click();
   const opener = page.getByRole('button', {
-    name: 'New deployment',
+    name: 'Create supervised group or runtime pool',
     exact: true,
   });
   await opener.click();
@@ -167,8 +168,12 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
   fixture,
 }) => {
   await page.goto('/#/deployments');
+  await page.getByText('Advanced', { exact: true }).click();
   await page
-    .getByRole('button', { name: 'New deployment', exact: true })
+    .getByRole('button', {
+      name: 'Create supervised group or runtime pool',
+      exact: true,
+    })
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Pair');
@@ -240,7 +245,9 @@ test('launch warnings remain advisory and submit the plan token; local files use
   fixture,
 }) => {
   await page.goto('/#/deployments/idle');
-  await page.getByRole('button', { name: 'Load now', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Review and load', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await expect(
     dialog.getByRole('button', { name: 'Load', exact: true }),
@@ -248,7 +255,9 @@ test('launch warnings remain advisory and submit the plan token; local files use
   await expect(dialog.getByRole('checkbox')).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Load', exact: true }).click();
   await expect(dialog).toBeHidden();
-  expect(fixture.writes.find((w) => w.path.endsWith('/start'))!.body).toEqual({
+  expect(
+    fixture.writes.find((w) => w.path.endsWith('/load-model'))!.body,
+  ).toEqual({
     plan_token: 'review-token',
   });
   await navigate(page, 'Models');
@@ -334,7 +343,9 @@ for (const width of [1440, 390])
       filename: 'model-7B-Q4_K_M.gguf',
     });
     await expect(
-      page.getByText('Download queued', { exact: true }),
+      page
+        .locator('.operation-notifications')
+        .getByText(/Download fixture\/model/),
     ).toBeVisible();
   });
 
@@ -394,7 +405,7 @@ test('engine-reset confirmation is cancellable and recovery retains its existing
     .toBe(2);
   expect(
     contracts.deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     ).configuration?.runtime_id,
   ).toBe('engine-two');
@@ -455,8 +466,12 @@ test('Base UI Select, Switch, outside dismissal and discard actions preserve pol
   await page.mouse.click(1, 1);
   await expect(page.getByRole('dialog')).toBeHidden();
   await navigate(page, 'Deployments');
+  await page.getByText('Advanced', { exact: true }).click();
   await page
-    .getByRole('button', { name: 'New deployment', exact: true })
+    .getByRole('button', {
+      name: 'Create supervised group or runtime pool',
+      exact: true,
+    })
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
@@ -519,8 +534,12 @@ for (const width of [1440, 390])
       });
     }
     await navigate(page, 'Deployments');
+    await page.getByText('Advanced', { exact: true }).click();
     await page
-      .getByRole('button', { name: 'New deployment', exact: true })
+      .getByRole('button', {
+        name: 'Create supervised group or runtime pool',
+        exact: true,
+      })
       .click();
     const dialog = page.getByRole('dialog');
     await dialog

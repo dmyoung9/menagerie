@@ -79,7 +79,9 @@ test('unloading another deployment still requires consent', async ({
     }),
   );
   await page.goto('/#/deployments/idle');
-  await page.getByRole('button', { name: 'Load now', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Review and load', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await expect(
     dialog.getByRole('button', { name: 'Load', exact: true }),

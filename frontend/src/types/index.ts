@@ -199,6 +199,8 @@ export type ProfileDraft = Omit<Profile, 'id' | 'revision'> & {
   id?: string;
 };
 export type DeploymentDraft = {
+  identifier_mode?: 'generated' | 'custom';
+  runtime_assignment?: 'automatic' | 'dedicated';
   id?: string;
   name: string;
   profile_id?: string;
@@ -235,6 +237,12 @@ export type DeploymentLifecycle = {
   last_stop_reason?: string | null;
 };
 export type Deployment = {
+  unit_name?: string;
+  member_availability?: boolean;
+  changes_pending?: boolean;
+  runtime_assignment?: 'automatic' | 'dedicated';
+  identifier_mode?: 'generated' | 'custom';
+  active_alias?: string;
   draining?: boolean;
   id: string;
   name: string;
@@ -565,7 +573,6 @@ export type LaunchModal = {
 };
 export type ModalState =
   | { type: 'wizard'; modelId?: string }
-  | { type: 'new-deployment' }
   | {
       type: 'deployment-set';
       row?: DeploymentSet;
@@ -614,6 +621,51 @@ export type CatalogFiles = {
   };
 };
 export type CatalogRevision = { name: string; kind: string };
+
+export type AcquisitionStatus =
+  'not_downloaded' | 'downloading' | 'downloaded' | 'failed' | 'missing';
+
+export type ManifestFile = {
+  name: string;
+  size: number | null;
+  sha256?: string | null;
+  status: AcquisitionStatus;
+  local_path?: string | null;
+  error?: string | null;
+};
+
+export type ManifestGroupKind =
+  'gguf_split' | 'safetensors' | 'companion' | 'standalone';
+
+export type ManifestGroup = {
+  id: string;
+  name: string;
+  kind: ManifestGroupKind;
+  required: string[];
+  complete: boolean;
+  local_status: Record<string, AcquisitionStatus>;
+  downloaded_count: number;
+  failed_count: number;
+  downloading_count: number;
+};
+
+export type RepositoryManifest = {
+  repo: string;
+  revision: string;
+  files: ManifestFile[];
+  groups: ManifestGroup[];
+  selected?: string[];
+  required_files?: string[];
+  pending?: string[];
+  retry_targets?: string[];
+};
+
+export type RepositoryReadme = {
+  repo: string;
+  revision: string;
+  content: string;
+};
+
 export type DeploymentActions = {
   enable: (row: LaunchTarget, enabled: boolean) => void;
   stop: (kind: LaunchKind, row: LaunchTarget) => void;

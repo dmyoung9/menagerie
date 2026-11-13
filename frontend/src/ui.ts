@@ -25,6 +25,28 @@ export {
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 let token = '';
+// `waitForToken` lets auto-POSTing views (e.g. the repository page, which
+// fetches a manifest on mount) block the very first request until the
+// dashboard token is established, rather than racing the initial /api/status
+// that carries it.
+const tokenSettlers = new Set<() => void>();
+let tokenPromise: Promise<void> | null = null;
+function setToken(value: string): void {
+  if (token === value) return;
+  token = value;
+  tokenPromise = null;
+  tokenSettlers.forEach((resolve) => resolve());
+  tokenSettlers.clear();
+}
+export function waitForToken(): Promise<void> {
+  if (token) return Promise.resolve();
+  if (!tokenPromise) {
+    tokenPromise = new Promise((resolve) => {
+      tokenSettlers.add(resolve);
+    });
+  }
+  return tokenPromise;
+}
 export async function api(path: string, body?: unknown): Promise<unknown> {
   const response = await fetch(
     path,
@@ -57,7 +79,7 @@ export async function api(path: string, body?: unknown): Promise<unknown> {
     );
   }
   if (isRecord(data) && typeof data.csrf_token === 'string')
-    token = data.csrf_token;
+    setToken(data.csrf_token);
   return data;
 }
 export async function readApi<T>(

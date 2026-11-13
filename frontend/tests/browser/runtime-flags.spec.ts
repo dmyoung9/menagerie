@@ -20,7 +20,7 @@ test('standalone NumberControl also preserves clearing and commits before Enter 
     .toBe(2);
   expect(
     deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     ).priority,
   ).toBe(15);
@@ -75,8 +75,12 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
     default: 0,
   };
   await page.goto('/#/deployments');
+  await page.getByText('Advanced', { exact: true }).click();
   await page
-    .getByRole('button', { name: 'New deployment', exact: true })
+    .getByRole('button', {
+      name: 'Create supervised group or runtime pool',
+      exact: true,
+    })
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name', { exact: true }).fill('Buffered pair');
@@ -160,7 +164,7 @@ test('clearing is an editing buffer; blur validates without substituting zero an
     .toBe(2);
   expect(
     deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     ).configuration!.config['top-k'],
   ).toBe(12);
@@ -191,7 +195,7 @@ test('automatic thread input stays blank through validation and Discard restores
   await expect(input).toHaveValue('');
   await expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(
-    fixture.writes.filter((w) => w.path.startsWith('/api/deployments?')),
+    fixture.writes.filter((w) => w.path.startsWith('/api/model-setups?')),
   ).toHaveLength(0);
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
   await openCard(page, 'memory');
@@ -239,7 +243,7 @@ test('removing an invalid flag clears its errors and unrelated omitted batch def
     )
     .toBe(2);
   const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
   ).configuration!.config;
   expect(saved).not.toHaveProperty('top-k');
   expect(saved).not.toHaveProperty('batch-size');
@@ -323,7 +327,7 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
   ).toBeEnabled();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   expect(
-    fixture.writes.filter((w) => w.path.startsWith('/api/deployments?')),
+    fixture.writes.filter((w) => w.path.startsWith('/api/model-setups?')),
   ).toHaveLength(0);
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
   await openCard(page, 'generation');
@@ -333,13 +337,19 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
     .getByLabel('Display name', { exact: true })
     .fill('Renamed fixture');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page
+    .getByRole('button', {
+      name: 'Rename and update API model ID',
+      exact: true,
+    })
+    .click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
     )
     .toBe(2);
   const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
   ).configuration!.config;
   expect(saved['top-k']).toBe(0);
   expect(saved['top-p']).toBe(0.955);
@@ -365,6 +375,12 @@ test('saved thread counts above host concurrency remain editable and save unchan
     .getByLabel('Display name', { exact: true })
     .fill('Oversubscribed fixture');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page
+    .getByRole('button', {
+      name: 'Rename and update API model ID',
+      exact: true,
+    })
+    .click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -372,7 +388,7 @@ test('saved thread counts above host concurrency remain editable and save unchan
     .toBe(2);
   expect(
     deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     ).configuration!.config.threads,
   ).toBe(16);
@@ -589,7 +605,7 @@ for (const width of [1440, 576, 320]) {
     await expect(input).toBeFocused();
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     expect(
-      fixture.writes.filter((w) => w.path.startsWith('/api/deployments?')),
+      fixture.writes.filter((w) => w.path.startsWith('/api/model-setups?')),
     ).toHaveLength(0);
     await input.fill('1.12');
     await page
@@ -632,7 +648,7 @@ for (const width of [1440, 576, 320]) {
       )
       .toBe(2);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     ).configuration!.config;
     expect(saved).toMatchObject({
@@ -659,10 +675,10 @@ for (const width of [1440, 576, 320]) {
     await openCard(page, 'generation');
     await expect(
       page.getByRole('button', { name: 'Add performance flags', exact: true }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     await expect(
       page.getByRole('button', { name: 'Remove Top-p override', exact: true }),
-    ).toBeDisabled();
-    await expect(page.getByLabel('Top-p', { exact: true })).toBeDisabled();
+    ).toBeEnabled();
+    await expect(page.getByLabel('Top-p', { exact: true })).toBeEnabled();
   });
 }

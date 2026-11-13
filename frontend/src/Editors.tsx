@@ -28,7 +28,9 @@ import { useResourcePreview } from './hooks/use-resource-preview';
 import { Capabilities, OutputLimit } from './Capabilities';
 import { DefaultReasoning, Variants } from './ReasoningVariants';
 import { useConfirmation } from '@/hooks/use-confirmation';
-import { readApi } from './ui';
+import { useSuggestedAlias } from '@/hooks/use-suggested-alias';
+import { fetchSuggestedAlias } from './alias-suggestion';
+import { readApi, api } from './ui';
 import {
   engineRecommendation,
   jsonObject,
@@ -41,14 +43,20 @@ import {
   runtimeCapabilities,
 } from './contracts';
 import { recordValue } from './decode';
+import { reconcileDeep } from './reconcile';
+import { editable } from './editor-state';
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { artifactLimits } from './artifact-metadata';
 import type {
   Artifact,
+  Deployment,
   EditorDraft,
   EditorDraftMap,
   EditorState,
   EngineRecommendation,
+  EditableSource,
   JsonValue,
+  Profile,
   ProfileDraft,
   Runtime,
   RuntimeRecommendation,
@@ -1041,13 +1049,17 @@ type EditorProps = {
   memberOnly?: boolean;
   disabled?: boolean;
   embedded?: boolean;
+  /** Show the revision-conflict alert with a Review changes action. */
+  revisionConflict?: boolean;
+  /** Called with the freshly fetched record after the draft is reconciled. */
+  onReconciled?: (fresh: EditableSource) => void;
 };
 type EditorField =
   | keyof EditorDraftMap['profiles']
   | keyof EditorDraftMap['deployments']
   | keyof EditorDraftMap['runtimes'];
 export function Editor(props: EditorProps) {
-  const { initial, data, remove, busy } = props;
+  const { initial, data, remove, busy, onReconciled } = props;
   const kind = initial.kind;
   const owner =
     kind === 'deployments'
@@ -1058,6 +1070,9 @@ export function Editor(props: EditorProps) {
         )
       : undefined;
   const memberOnly = props.memberOnly || Boolean(owner);
+  const { confirm: confirmRename, confirmation: renameConfirmation } =
+    useConfirmation();
+  const [namingError, setNamingError] = useState('');
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState('');
   const [wide, setWide] = useState(
@@ -1085,14 +1100,61 @@ export function Editor(props: EditorProps) {
     setValue,
     changed: draftChanged,
     reset,
-  } = useDraftForm<EditorDraft>(initial.value, (value) => {
+  } = useDraftForm<EditorDraft>(initial.value, async (value) => {
     if (Object.values(invalid).some(Boolean) || busy || props.disabled) return;
     if (kind === 'profiles') props.save({ kind, value: profileDraft(value) });
-    else if (kind === 'deployments')
-      props.save({ kind, value: deploymentDraft(value) });
-    else props.save({ kind, value: runtimeDraft(value) });
+    else if (kind === 'deployments') {
+      const draft = deploymentDraft(value);
+      let alias = draft.alias;
+      setNamingError('');
+      if (generatedRename) {
+        try {
+          alias = (await fetchSuggestedAlias(draft.name, draft.id)).alias;
+        } catch (error) {
+          setNamingError(String(error));
+          return;
+        }
+      }
+      const old = deploymentDraft(initial.value).alias;
+      if (
+        draft.id &&
+        alias !== old &&
+        !(await confirmRename(
+          `Clients using ${old} will need to switch to ${alias}.`,
+          'Rename and update API model ID',
+        ))
+      )
+        return;
+      props.save({ kind, value: { ...draft, alias } });
+    } else props.save({ kind, value: runtimeDraft(value) });
   });
+  // The mount-time draft is the reference for "touched vs adopted" fields.
+  // It must not follow the live initial (which becomes the fresh value after a
+  // conflict review), or untouched fields would keep stale server values.
+  const mountRef = useRef<EditorDraft | null>(null);
+  if (mountRef.current === null) mountRef.current = initial.value;
   const [epoch, setEpoch] = useState(0);
+  const reviewRevision = async () => {
+    if (busy || props.disabled) return;
+    const list = (await api(`/api/registry/${kind}`)) as {
+      id?: string;
+      revision?: number;
+    }[];
+    const fresh = list.find(
+      (r) => r.id === (initial.value.id as string | undefined),
+    );
+    if (!fresh) return;
+    const freshValue =
+      kind === 'profiles'
+        ? editable('profiles', fresh as Profile)
+        : kind === 'deployments'
+          ? editable('deployments', fresh as Deployment)
+          : editable('runtimes', fresh as Runtime);
+    setValue(
+      reconcileDeep(mountRef.current!, freshValue, value) as EditorDraft,
+    );
+    onReconciled?.(fresh as EditableSource);
+  };
   const changed = draftChanged || Object.values(invalid).some(Boolean);
   const navigationGuard = useUnsavedChanges(
     !!props.embedded && changed,
@@ -1100,6 +1162,19 @@ export function Editor(props: EditorProps) {
   );
   const profile = 'artifact_id' in value ? value : undefined;
   const deployment = 'alias' in value ? value : undefined;
+  const originalDeployment =
+    'alias' in initial.value ? initial.value : undefined;
+  const generatedRename = Boolean(
+    deployment &&
+    deployment.identifier_mode !== 'custom' &&
+    (deployment.name !== originalDeployment?.name ||
+      originalDeployment?.identifier_mode === 'custom'),
+  );
+  const aliasSuggestion = useSuggestedAlias(
+    deployment?.name || '',
+    generatedRename,
+    deployment?.id,
+  );
   const runtime = 'engine' in value ? value : undefined;
   const decode = {
     profiles: profileDraft,
@@ -1260,7 +1335,50 @@ export function Editor(props: EditorProps) {
     >
       <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {input('name', 'Display name')}
-        {deployment && input('alias', 'API model ID')}
+        {deployment && (
+          <Field label="API model ID">
+            {deployment.identifier_mode === 'custom' ? (
+              <Input
+                value={deployment.alias}
+                onChange={(e) => set('alias', e.target.value)}
+              />
+            ) : (
+              <code>
+                {generatedRename ? aliasSuggestion.alias : deployment.alias}
+              </code>
+            )}
+            <p>
+              {deployment.identifier_mode === 'custom'
+                ? 'This ID stays the same when you rename the model.'
+                : 'Generated from the name and updated when you rename it.'}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                set(
+                  'identifier_mode',
+                  deployment.identifier_mode === 'custom'
+                    ? 'generated'
+                    : 'custom',
+                )
+              }
+            >
+              {deployment.identifier_mode === 'custom'
+                ? 'Generate from name'
+                : 'Customize API model ID'}
+            </Button>
+            {generatedRename && (
+              <p>
+                API model ID: {originalDeployment?.alias} →{' '}
+                {aliasSuggestion.alias}
+              </p>
+            )}
+            {aliasSuggestion.error && generatedRename && (
+              <p role="alert">{aliasSuggestion.error}</p>
+            )}
+          </Field>
+        )}
       </FieldGroup>
     </SettingsSection>
   );
@@ -1361,6 +1479,8 @@ export function Editor(props: EditorProps) {
   );
   return (
     <DraftFormProvider value={form}>
+      {renameConfirmation}
+      {namingError && <p role="alert">{namingError}</p>}
       <form
         ref={formElement}
         className={
@@ -1569,6 +1689,24 @@ export function Editor(props: EditorProps) {
               </>
             )}
           </FieldSet>
+        )}
+        {props.revisionConflict && (
+          <Alert variant="default" className="mb-5" role="alert">
+            <AlertDescription className="whitespace-pre-line">
+              This configuration changed elsewhere. Your edits have been kept.
+            </AlertDescription>
+            <AlertAction>
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                disabled={busy || props.disabled}
+                onClick={() => void reviewRevision()}
+              >
+                Review changes
+              </Button>
+            </AlertAction>
+          </Alert>
         )}
         <div className="dialog-actions configuration-save-bar">
           {deployment && (

@@ -56,7 +56,7 @@ for (const enabled of [true, false]) {
       )
       .toBe(2);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     ).configuration!.catalog;
     expect(saved.reasoning?.default_mode).toBe('default');
@@ -111,7 +111,7 @@ test('selecting legacy blank Instant as default persists its configured thinking
     )
     .toBe(2);
   const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
   ).configuration!.catalog;
   expect(
     saved.reasoning?.presets?.find((mode) => mode.id === 'instant'),
@@ -232,8 +232,12 @@ test('new deployment members get common defaults and a nested Drawer without sub
   fixture,
 }) => {
   await page.goto('/#/deployments');
+  await page.getByText('Advanced', { exact: true }).click();
   await page
-    .getByRole('button', { name: 'New deployment', exact: true })
+    .getByRole('button', {
+      name: 'Create supervised group or runtime pool',
+      exact: true,
+    })
     .click();
   await page
     .getByRole('dialog')
@@ -337,7 +341,7 @@ test('guided destination changes and JSON preserve additional template controls'
     .toBe(2);
   expect(
     deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     ).configuration!.catalog.reasoning!.presets![0].body,
   ).toEqual({
@@ -536,7 +540,7 @@ for (const width of [1440, 576, 320]) {
       )
       .toBe(2);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     ).configuration!.catalog;
     expect(saved.reasoning?.default_mode).toBe('research');
@@ -655,6 +659,12 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
     .getByLabel('Display name', { exact: true })
     .fill('Preserved variants');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page
+    .getByRole('button', {
+      name: 'Rename and update API model ID',
+      exact: true,
+    })
+    .click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -663,7 +673,7 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
   expect(
     deploymentDraft(
       fixture.writes.find(
-        (write) => write.path === '/api/deployments?expected=1',
+        (write) => write.path === '/api/model-setups?expected=1',
       )!.body,
     ).configuration!.catalog.reasoning,
   ).toEqual(catalog.reasoning);

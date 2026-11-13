@@ -102,8 +102,10 @@ async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
             assert renamed.status_code == 200, renamed.text
             assert store.get("deployment", second["id"]) == second
             rows = (await client.get("/v1/models")).json()["data"]
-            gemma = next(row for row in rows if row["id"] == "gemma4")
-            assert gemma["menagerie"]["catalog"]["catalog_id"] == "gemma4"
+            # generated-mode rename: the API identifier follows the display
+            # name, so "Gemma Renamed" advertises as "gemma-renamed".
+            gemma = next(row for row in rows if row["id"] == "gemma-renamed")
+            assert gemma["menagerie"]["catalog"]["catalog_id"] == "gemma-renamed"
             assert gemma["menagerie"]["catalog"]["model"]["name"] == "Gemma Renamed"
             await client.post(
                 "/api/integration/opencode/export", json={}, headers=headers
@@ -111,8 +113,8 @@ async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
             models = json.loads((tmp_path / "opencode-managed.json").read_text())[
                 "providers"
             ]["menagerie"]["models"]
-            assert models["gemma4"]["name"] == "Gemma Renamed"
-            assert models["gemma4"]["modelID"] == "gemma4"
+            assert models["gemma-renamed"]["name"] == "Gemma Renamed"
+            assert models["gemma-renamed"]["modelID"] == "gemma-renamed"
             store.put(
                 "session",
                 {

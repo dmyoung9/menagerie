@@ -63,6 +63,7 @@ class Manager:
         self.processes = {}
         self.inflight = {}
         self.draining = {}
+        self.apply_holds = set()
         self.waiting = 0
         self.last_use = {}
         self.tasks = set()
@@ -159,6 +160,134 @@ class Manager:
     def plan(self, ids):
         return self.validate(ids, self.automatic_stops(ids))
 
+    async def apply_desired(self, ident, progress):
+        from . import apply_ops, model_setup
+        from . import queued_apply as qa
+
+        held = False
+        rollback = qa.ApplyState.ROLLODBACK_UNKNOWN
+        rollback_note = ""
+        try:
+            while True:
+                async with self.lock:
+                    op = apply_ops.find_op(self.store, ident)
+                    if not op or op.state != qa.ApplyState.QUEUED:
+                        raise Conflict("Scheduled apply was cancelled")
+                    if time.time() >= op.drain_deadline:
+                        apply_ops.expire(self.store, ident)
+                        raise Conflict(
+                            "Timed out waiting for active requests; changes remain pending"
+                        )
+                    plan = model_setup.plan(self, ident)
+                    if (
+                        plan["plan_token"] != op.token
+                        or plan["scope_fingerprint"] != op.scope_fingerprint
+                    ):
+                        raise Conflict(
+                            "The affected configuration changed; review again"
+                        )
+                    if plan["errors"]:
+                        raise Conflict("; ".join(plan["errors"]))
+                    self.apply_holds.add(ident)
+                    held = True
+                    unit = self.unit(ident)
+                    if not self.unit_busy(unit) and not any(
+                        self.inflight.get(i, 0) for i in plan["stops"]
+                    ):
+                        apply_ops.save_op(
+                            self.store, op._move_to(qa.ApplyState.APPLYING)
+                        )
+                        progress("Applying changes…")
+                        snap = model_setup.desired(self.store, ident)
+                        original = model_setup.snapshot(self.store, unit)
+                        original["rows"].extend(
+                            {
+                                "kind": "deployment",
+                                "data": self.store.get("deployment", r["data"]["id"]),
+                            }
+                            for r in snap["rows"]
+                            if r["kind"] == "deployment"
+                            and r["data"]["id"] not in unit["member_ids"]
+                        )
+                        self.store.put("apply_recovery", original)
+                        try:
+                            await self._stop_unit_locked(
+                                ident, "Reviewed configuration update"
+                            )
+                            with self.store.transaction() as c:
+                                model_setup.install(self.store, snap, c)
+                            self.apply_holds.discard(ident)
+                            updated = self.unit(ident)
+                            if updated["enabled"] and any(
+                                m["enabled"] for m in updated["members"]
+                            ):
+                                await self._activate_locked(
+                                    updated["member_ids"],
+                                    authorized_stops=plan["stops"],
+                                )
+                                if not all(
+                                    m["state"] == "READY"
+                                    for m in self.unit(ident)["members"]
+                                ):
+                                    raise Conflict("Runtime did not become ready")
+                        except BaseException:
+                            await self._stop_unit_locked(ident, "Failed apply cleanup")
+                            with self.store.transaction() as c:
+                                model_setup.install(self.store, original, c)
+                            self.store.delete("apply_recovery", ident)
+                            rollback_note = (
+                                " Previous configuration restored; runtime is stopped."
+                            )
+                            if (
+                                any(m["state"] in ACTIVE for m in unit["members"])
+                                and not self.stopping
+                            ):
+                                try:
+                                    self.apply_holds.discard(ident)
+                                    await self._activate_locked(
+                                        unit["member_ids"], authorized_stops=[]
+                                    )
+                                    rollback = qa.ApplyState.ROLLODBACK_SUCCEEDED
+                                    rollback_note = " Previous runtime configuration restored; model caches may need reloading."
+                                except Exception as restore_error:
+                                    rollback_note += (
+                                        " Restoration could not start: "
+                                        + redact(str(restore_error))
+                                    )
+                            raise
+                        with self.store.transaction() as c:
+                            self.store.delete("apply_recovery", ident, c)
+                            self.store.delete("desired", ident, c)
+                            apply_ops.record_applied(self.store, self.unit(ident), c=c)
+                        return {"state": "applied"}
+                    progress("Waiting for active requests to finish…")
+                    self.request_changed.clear()
+                try:
+                    await asyncio.wait_for(
+                        self.request_changed.wait(),
+                        max(0.01, op.drain_deadline - time.time()),
+                    )
+                except TimeoutError:
+                    continue
+        except BaseException as exc:
+            op = apply_ops.find_op(self.store, ident)
+            if op and op.state in qa.ApplyState.IN_FLIGHT:
+                apply_ops.complete_apply(
+                    self.store,
+                    self.unit(ident),
+                    error=(redact(str(exc)) or "Application interrupted")
+                    + rollback_note,
+                )
+                apply_ops.save_op(
+                    self.store,
+                    apply_ops.find_op(self.store, ident)._with(rolled_back=rollback),
+                )
+            raise
+        finally:
+            if held:
+                self.apply_holds.discard(ident)
+                self.request_changed.set()
+
     def unit_last_use(self, unit):
         return max(
             self.last_use.setdefault(i, time.monotonic()) for i in unit["member_ids"]
@@ -231,6 +360,23 @@ class Manager:
                 ident,
                 c,
             )
+        if state == "READY":
+            # The runtime has now picked up the stored configuration. Record
+            # it as the *applied* reference so any pending desired/applied
+            # delta is resolved (the running process matches the current
+            # config). Best-effort: it must never block a lifecycle transition.
+            try:
+                from .apply_ops import record_applied
+
+                unit = deployment_sets.unit_for(self.store, ident)
+                from .model_setup import desired
+
+                if not desired(self.store, unit["id"]) and all(
+                    m["state"] == "READY" for m in unit["members"]
+                ):
+                    record_applied(self.store, unit)
+            except Exception:
+                pass
         return d
 
     def owned(self, d):
@@ -239,6 +385,20 @@ class Manager:
     async def start(self):
         self.file_lock = host.lock_file(self.store.root / "daemon.lock")
         self.host = await asyncio.to_thread(telemetry.sample)
+        # Recover from an interrupted previous run: every in-flight queued
+        # apply becomes FAILED (never Applied) and must be re-reviewed.
+        from .apply_ops import reconcile_all
+
+        reconcile_all(self.store)
+        from . import model_setup
+
+        for recovery in self.store.list("apply_recovery"):
+            await self._stop_unit_locked(
+                recovery["id"], "Interrupted configuration apply", force=True
+            )
+            with self.store.transaction() as c:
+                model_setup.install(self.store, recovery, c)
+                self.store.delete("apply_recovery", recovery["id"], c)
         for d in self.store.list("deployment"):
             if d["state"] in ACTIVE | {"VALIDATING"}:
                 if self.owned(d) and d["state"] in {"READY", "DEGRADED"}:
@@ -383,7 +543,7 @@ class Manager:
         aliases = [d["alias"] for d in all_d]
         ports = [d["port"] for d in all_d]
         for d in selected:
-            if not d["enabled"]:
+            if not d["enabled"] and not self.unit(d["id"]).get("engine_pool"):
                 errors.append(f"{d['alias']} is disabled")
             if aliases.count(d["alias"]) > 1 or ports.count(d["port"]) > 1:
                 errors.append(f"Duplicate alias or port: {d['alias']}")
@@ -554,6 +714,39 @@ class Manager:
                 "Timed out waiting for deployment capacity or active requests"
             ) from exc
 
+    async def load_model(self, ident, token):
+        """Explicit residency request; router readiness alone is not completion."""
+        if not self.store.get("deployment", ident)["enabled"]:
+            raise Conflict("Make this model available before loading")
+        await self.activate([ident], token=token)
+        async with self.lock:
+            unit = self.unit(ident)
+            if unit["id"] in self.apply_holds or self.draining.get(unit["id"]):
+                raise Conflict("Runtime is changing; review again")
+            d = self.store.get("deployment", ident)
+            self.inflight[ident] = self.inflight.get(ident, 0) + 1
+        try:
+            async with asyncio.timeout(unit["queue_timeout"]):
+                if unit.get("engine_pool"):
+                    response = await self.client.post(
+                        f"http://127.0.0.1:{self.runtime_port(d)}/models/load",
+                        json={"model": d["alias"]},
+                        timeout=unit["queue_timeout"],
+                    )
+                    response.raise_for_status()
+                while True:
+                    ready = await self.ready(d)
+                    observation = adapters.runtime_protocol.observation(self.store, d)
+                    if ready and (observation or {}).get("residency") == "resident":
+                        return {"model_id": ident, "residency": "resident"}
+                    if ready and not unit.get("engine_pool") and observation is None:
+                        return {"model_id": ident, "residency": "resident"}
+                    await asyncio.sleep(0.25)
+        finally:
+            async with self.lock:
+                self.inflight[ident] = max(0, self.inflight.get(ident, 1) - 1)
+                self.request_changed.set()
+
     async def _activate_locked(
         self, ids, override=False, authorized_stops=None, token=None
     ):
@@ -561,8 +754,14 @@ class Manager:
         # can slip between selecting victims and reserving its member slot.
         if self.stopping:
             raise Conflict("Daemon is shutting down")
-        if any(self.draining.get(self.unit(ident)["id"]) for ident in ids):
+        if any(
+            self.draining.get(self.unit(ident)["id"])
+            or self.unit(ident)["id"] in self.apply_holds
+            for ident in ids
+        ):
             raise Conflict("Deployment is unloading; retry after it finishes")
+        if any(self.store.get("deployment", i).get("pending_unit") for i in ids):
+            raise Conflict("Apply the saved pool changes before loading this model")
         check = self.validate(ids, authorized_stops)
         if token and token != check["plan_token"]:
             raise Conflict("Launch plan changed; validate again")
@@ -1069,6 +1268,19 @@ class Manager:
                     self.draining.pop(key, None)
                 self.request_changed.set()
 
+    def _applied_alias(self, deployment: dict) -> str | None:
+        """The alias the unit's applied snapshot is serving for this deployment,
+        or ``None`` when there is no applied snapshot. Used so a gateway request
+        carries the ID the client learned before a pending rename is applied."""
+        try:
+            snapshot = self.store.get("applied", self.unit(deployment["id"])["id"])
+        except (KeyError, TypeError):
+            return None
+        for r in (snapshot or {}).get("rows", []):
+            if r.get("id") == deployment["id"]:
+                return r["data"].get("alias")
+        return None
+
     async def acquire(self, alias):
         if self.waiting >= self.settings()["max_queue"]:
             raise Conflict("Gateway queue is full")
@@ -1076,7 +1288,7 @@ class Manager:
             (
                 d
                 for d in self.store.list("deployment")
-                if d["alias"] == alias and d["enabled"]
+                if d["enabled"] and d["alias"] == alias
             ),
             None,
         )
@@ -1089,6 +1301,15 @@ class Manager:
                     async with self.lock:
                         unit = self.unit(d["id"])
                         d = self.store.get("deployment", d["id"])
+                        if not d["enabled"] or d["alias"] != alias:
+                            raise KeyError("Unknown or disabled model alias")
+                        held = unit["id"] in self.apply_holds
+                        if held:
+                            self.request_changed.clear()
+                        if d.get("pending_unit"):
+                            raise Conflict(
+                                "Apply the saved pool changes before using this model"
+                            )
                         # An active member may need a sibling to finish its request.
                         # Without causal request identities, blanket group draining
                         # would deadlock that work. Explicit cancellation stops all.
@@ -1101,7 +1322,9 @@ class Manager:
                             )
                         if not unit["enabled"] or not d["enabled"]:
                             raise KeyError("Unknown or disabled model alias")
-                        if not all(m["state"] == "READY" for m in unit["members"]):
+                        if not held and not all(
+                            m["state"] == "READY" for m in unit["members"]
+                        ):
                             if unit["residency"] != "on-demand":
                                 raise Conflict("Deployment is not ready")
                             victims = self.automatic_stops(unit["member_ids"])
@@ -1112,7 +1335,9 @@ class Manager:
                                     unit["member_ids"], authorized_stops=victims
                                 )
                                 unit = self.unit(d["id"])
-                        if all(m["state"] == "READY" for m in unit["members"]):
+                        if not held and all(
+                            m["state"] == "READY" for m in unit["members"]
+                        ):
                             d = self.store.get("deployment", d["id"])
                             self.inflight[d["id"]] = self.inflight.get(d["id"], 0) + 1
                             self.last_use[d["id"]] = time.monotonic()

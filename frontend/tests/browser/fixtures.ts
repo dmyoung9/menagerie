@@ -23,6 +23,8 @@ export type Fixture = {
   failSave: boolean;
   holdSave: boolean;
   releaseSave: () => void;
+  conflictSave: boolean;
+  jobCounter: number;
 };
 
 export async function openAdvanced(page: Page) {
@@ -180,6 +182,8 @@ export const test = base.extend<{ fixture: Fixture }>({
         failSave: false,
         holdSave: false,
         releaseSave: () => {},
+        conflictSave: false,
+        jobCounter: 0,
       };
       page.on('pageerror', (error) => fixture.errors.push(String(error)));
       const serving = (): ServingDeployment[] => {
@@ -226,6 +230,12 @@ export const test = base.extend<{ fixture: Fixture }>({
           expect(request.headers()['x-menagerie-token']).toBe('fixture-token');
           fixture.writes.push({ path: path + url.search, body });
         }
+        const b = body as {
+          repo?: string;
+          filename?: string;
+          revision?: string;
+          selected?: string[];
+        };
         if (path === '/api/status')
           return send({
             csrf_token: 'fixture-token',
@@ -346,7 +356,11 @@ export const test = base.extend<{ fixture: Fixture }>({
             note: 'Preview only; launch rechecks capacity.',
           });
         }
-        if (path === '/api/deployments' || path === '/api/deployment-sets') {
+        if (
+          path === '/api/deployments' ||
+          path === '/api/model-setups' ||
+          path === '/api/deployment-sets'
+        ) {
           if (fixture.holdSave)
             await new Promise<void>((resolve) => {
               fixture.releaseSave = resolve;
@@ -358,6 +372,45 @@ export const test = base.extend<{ fixture: Fixture }>({
               ? contracts.deploymentSetDraft(body)
               : contracts.deploymentDraft(body);
           const id = input.id || 'created';
+          if (fixture.conflictSave) {
+            // A concurrent change committed behind the user: bump the revision
+            // and move a field the client did not. The client reviews the fresh
+            // value and re-saves; it never overwrites the user's edits.
+            if (path === '/api/deployment-sets') {
+              const idx = fixture.sets.findIndex((group) => group.id === id);
+              if (idx >= 0) {
+                const set = fixture.sets[idx];
+                fixture.sets[idx] = {
+                  ...set,
+                  revision: set.revision + 1,
+                  idle_timeout: 600,
+                };
+                fixture.registry.deployments = fixture.registry.deployments.map(
+                  (d) =>
+                    set.member_ids.includes(d.id)
+                      ? { ...d, revision: d.revision + 1 }
+                      : d,
+                );
+              }
+            } else {
+              const idx = fixture.registry.deployments.findIndex(
+                (d) => d.id === id,
+              );
+              if (idx >= 0) {
+                const d = fixture.registry.deployments[idx];
+                fixture.registry.deployments[idx] = {
+                  ...d,
+                  revision: d.revision + 1,
+                  idle_timeout: 600,
+                };
+              }
+            }
+            fixture.conflictSave = false;
+            return send(
+              { error: 'Revision changed; refresh before saving' },
+              400,
+            );
+          }
           const member = (
             draft: import('../../src/types').DeploymentDraft,
             memberId: string,
@@ -411,6 +464,76 @@ export const test = base.extend<{ fixture: Fixture }>({
           ];
           return send(saved);
         }
+        // Stage 4: desired/applied split + explicit queued-apply. A new unit is
+        // never pending (nothing has been activated to apply against).
+        if (/^\/api\/deployments\/[^/]+\/pending$/.test(path))
+          return send({
+            unit_id: path.split('/').at(2),
+            unit_name: null,
+            multi_model: false,
+            op: null,
+            desired_rev: '',
+            applied_rev: null,
+            pending: false,
+            scope_fingerprint: '',
+            affected_ids: [],
+            affected: [],
+          });
+        if (/^\/api\/deployments\/[^/]+\/save-desired$/.test(path))
+          return send({
+            op: {
+              state: 'PENDING',
+              token: (body as { token?: string })?.token || 'save-token',
+              scope_fingerprint:
+                (body as { scope_fingerprint?: string })?.scope_fingerprint ||
+                '',
+              drain_deadline: null,
+              created_at: fixture.host.ts,
+              ended_at: null,
+              error: null,
+              rolled_back: null,
+              needs_revalidation: false,
+            },
+          });
+        if (/^\/api\/deployments\/[^/]+\/request-apply$/.test(path)) {
+          fixture.registry.jobs.push({
+            id: `job-${++fixture.jobCounter}`,
+            name: 'Apply changes when idle',
+            state: 'QUEUED',
+            revision: 1,
+            created_at: fixture.host.ts,
+          });
+          return send({
+            op: {
+              state: 'QUEUED',
+              token: (body as { token?: string })?.token || 'apply-token',
+              scope_fingerprint:
+                (body as { scope_fingerprint?: string })?.scope_fingerprint ||
+                '',
+              drain_deadline: fixture.host.ts + 30,
+              created_at: fixture.host.ts,
+              ended_at: null,
+              error: null,
+              rolled_back: null,
+              needs_revalidation: false,
+            },
+            job_id: `job-${fixture.jobCounter}`,
+          });
+        }
+        if (/^\/api\/deployments\/[^/]+\/cancel$/.test(path))
+          return send({
+            op: {
+              state: 'CANCELLED',
+              token: (body as { token?: string })?.token || 'apply-token',
+              scope_fingerprint: '',
+              drain_deadline: null,
+              created_at: fixture.host.ts,
+              ended_at: fixture.host.ts,
+              error: null,
+              rolled_back: null,
+              needs_revalidation: false,
+            },
+          });
         if (path.endsWith('/validate'))
           return send({
             errors: [],
@@ -430,10 +553,54 @@ export const test = base.extend<{ fixture: Fixture }>({
             stops: [],
             plan_token: 'review-token',
           });
-        if (/\/(start|stop|enabled)$/.test(path))
+        if (path.endsWith('/load-model')) {
+          const job = {
+            id: `job-${++fixture.jobCounter}`,
+            revision: 1,
+            name: 'Load model',
+            state: 'RUNNING',
+            deployment_id: path.split('/').at(-2),
+            created_at: fixture.host.ts,
+          };
+          fixture.registry.jobs.push(job);
+          return send(job);
+        }
+        if (path.endsWith('/start')) {
+          fixture.registry.jobs.push({
+            id: `job-${++fixture.jobCounter}`,
+            revision: 1,
+            name: 'Start deployment',
+            state: 'QUEUED',
+            deployment_id: path.split('/').at(-2),
+            created_at: fixture.host.ts,
+          });
           return send({ state: 'QUEUED' });
-        if (path === '/api/models/local' || path === '/api/downloads')
+        }
+        if (/\/(stop|enabled)$/.test(path)) return send({ state: 'QUEUED' });
+        if (path === '/api/downloads') {
+          fixture.registry.jobs.push({
+            id: `job-${++fixture.jobCounter}`,
+            revision: 1,
+            name: `Download ${b.repo} · ${b.filename}`,
+            state: 'QUEUED',
+            operation: 'download',
+            repo: b.repo,
+            filename: b.filename,
+            created_at: fixture.host.ts,
+          });
           return send({ state: 'QUEUED' });
+        }
+        if (path === '/api/models/local') {
+          fixture.registry.jobs.push({
+            id: `job-${++fixture.jobCounter}`,
+            revision: 1,
+            name: 'Add local model',
+            state: 'QUEUED',
+            operation: 'local-model',
+            created_at: fixture.host.ts,
+          });
+          return send({ state: 'QUEUED' });
+        }
         if (path === '/api/backup')
           return send({ path: '/fixtures/backup.sqlite' });
         if (path === '/api/settings') return send(body);
@@ -456,6 +623,136 @@ export const test = base.extend<{ fixture: Fixture }>({
               { name: 'model-7B-Q8_0.gguf', size: 8 * 1024 ** 3 },
             ],
           });
+        if (path === '/api/downloads/manifest') {
+          const rev = b.revision || 'main';
+          const manifest = {
+            repo: b.repo || 'fixture/model',
+            revision: rev,
+            files: [
+              {
+                name: 'model-7B-Q4_K_M-00001-of-00002.gguf',
+                size: 4 * 1024 ** 3,
+                status: 'downloaded',
+              },
+              {
+                name: 'model-7B-Q4_K_M-00002-of-00002.gguf',
+                size: 4 * 1024 ** 3,
+                status: 'not_downloaded',
+              },
+              {
+                name: 'model-7B.safetensors',
+                size: 8 * 1024 ** 3,
+                status: 'failed',
+              },
+              {
+                name: 'model-7B.projector.safetensors',
+                size: 100 * 1024 ** 2,
+                status: 'downloading',
+              },
+              { name: 'config.json', size: 1024, status: 'downloaded' },
+              { name: 'tokenizer.model', size: 2048, status: 'not_downloaded' },
+            ],
+            groups: [
+              {
+                id: 'gguf-7B-Q4_K_M-2',
+                name: 'model-7B-Q4_K_M',
+                kind: 'gguf_split',
+                required: [
+                  'model-7B-Q4_K_M-00001-of-00002.gguf',
+                  'model-7B-Q4_K_M-00002-of-00002.gguf',
+                ],
+                complete: false,
+                local_status: {
+                  'model-7B-Q4_K_M-00001-of-00002.gguf': 'downloaded',
+                  'model-7B-Q4_K_M-00002-of-00002.gguf': 'not_downloaded',
+                },
+                downloaded_count: 1,
+                failed_count: 0,
+                downloading_count: 0,
+              },
+              {
+                id: 'bundle-model-weights',
+                name: 'Model weights',
+                kind: 'safetensors',
+                required: ['model-7B.safetensors'],
+                complete: true,
+                local_status: { 'model-7B.safetensors': 'failed' },
+                downloaded_count: 0,
+                failed_count: 1,
+                downloading_count: 0,
+              },
+              {
+                id: 'model-7B.projector.safetensors',
+                name: 'model-7B.projector.safetensors',
+                kind: 'companion',
+                required: ['model-7B.projector.safetensors'],
+                complete: true,
+                local_status: {
+                  'model-7B.projector.safetensors': 'downloading',
+                },
+                downloaded_count: 0,
+                failed_count: 0,
+                downloading_count: 1,
+              },
+              {
+                id: 'config.json',
+                name: 'config.json',
+                kind: 'standalone',
+                required: ['config.json'],
+                complete: true,
+                local_status: { 'config.json': 'downloaded' },
+                downloaded_count: 1,
+                failed_count: 0,
+                downloading_count: 0,
+              },
+              {
+                id: 'tokenizer.model',
+                name: 'tokenizer.model',
+                kind: 'standalone',
+                required: ['tokenizer.model'],
+                complete: true,
+                local_status: { 'tokenizer.model': 'not_downloaded' },
+                downloaded_count: 0,
+                failed_count: 0,
+                downloading_count: 0,
+              },
+            ],
+          };
+          return send(manifest);
+        }
+        if (path === '/api/catalog/hf/readme') {
+          const params = new URLSearchParams(url.search);
+          const repo = params.get('repo') || 'fixture/model';
+          const revision = params.get('revision') || 'main';
+          return send({
+            repo,
+            revision,
+            content: `# Example Model\n\nA small fixture model used only by tests.\n\n## Usage\n\nRun it with \`menagerie\`.\n`,
+          });
+        }
+        if (path === '/api/downloads/files') {
+          const job = {
+            id: `job-${++fixture.jobCounter}`,
+            revision: 1,
+            name: 'Download files from ' + (b.repo || ''),
+            state: 'QUEUED',
+            operation: 'download_files',
+            repo: b.repo,
+            created_at: fixture.host.ts,
+          };
+          fixture.registry.jobs.push(job);
+          return send(job);
+        }
+        if (path === '/api/deployments/alias/suggest') {
+          const params = new URLSearchParams(url.search);
+          const name = params.get('name') || '';
+          const slug = name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 48);
+          return send({ alias: slug, base: slug, mode: 'generated' });
+        }
         fixture.unexpected.push(`${request.method()} ${path}`);
         return send({ error: 'Unmocked route: ' + path }, 500);
       });
