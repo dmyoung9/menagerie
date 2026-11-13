@@ -9,8 +9,8 @@ faked at the client / SDK boundaries, matching the Stage-1
 import hashlib
 from types import SimpleNamespace
 
-import pytest
 import httpx
+import pytest
 
 from controlplane import jobs as jobs_module
 from controlplane import manifests
@@ -73,9 +73,15 @@ def complete_ids(manifest):
 
 @pytest.mark.asyncio
 async def test_download_files_registers_per_file_no_artifact(tmp_path, monkeypatch):
-    files = [hf_file("model.safetensors"), hf_file("mmproj.gguf"), hf_file("config.json", verified=False)]
+    files = [
+        hf_file("model.safetensors"),
+        hf_file("mmproj.gguf"),
+        hf_file("config.json", verified=False),
+    ]
     jobs, store = make_jobs(tmp_path, files, monkeypatch)
-    monkeypatch.setattr(jobs_module, "hf_hub_download", lambda **kw: f"{CACHE}{kw['filename']}")
+    monkeypatch.setattr(
+        jobs_module, "hf_hub_download", lambda **kw: f"{CACHE}{kw['filename']}"
+    )
     monkeypatch.setattr(jobs_module.adapters, "file_hash", _file_hash())
 
     manifest = manifests.build_manifest(REPO, SHA, files)
@@ -96,7 +102,9 @@ async def test_download_files_registers_per_file_no_artifact(tmp_path, monkeypat
     assert store.list("artifact") == []
     assert store.list("deployment") == []
     # Deterministic (repo, revision, path) identity.
-    assert rows["model.safetensors"]["id"] == jobs_module.downloaded_file_id(REPO, SHA, "model.safetensors")
+    assert rows["model.safetensors"]["id"] == jobs_module.downloaded_file_id(
+        REPO, SHA, "model.safetensors"
+    )
 
 
 @pytest.mark.asyncio
@@ -181,7 +189,9 @@ async def test_download_files_reacquire_skips_downloaded(tmp_path, monkeypatch):
 async def test_download_files_deterministic_id_no_duplicates(tmp_path, monkeypatch):
     files = [hf_file("x.bin", verified=False)]
     jobs, store = make_jobs(tmp_path, files, monkeypatch)
-    monkeypatch.setattr(jobs_module, "hf_hub_download", lambda **kw: f"{CACHE}{kw['filename']}")
+    monkeypatch.setattr(
+        jobs_module, "hf_hub_download", lambda **kw: f"{CACHE}{kw['filename']}"
+    )
 
     manifest = manifests.build_manifest(REPO, SHA, files)
     gid = complete_ids(manifest)[0]
@@ -212,7 +222,9 @@ async def test_download_files_stale_selection_rejected(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_manifest_endpoint_groups_files_status_and_selection(tmp_path, monkeypatch):
+async def test_manifest_endpoint_groups_files_status_and_selection(
+    tmp_path, monkeypatch
+):
     app = create_app(tmp_path)
     store = app.state.store
     files = [
@@ -222,25 +234,41 @@ async def test_manifest_endpoint_groups_files_status_and_selection(tmp_path, mon
     ]
     monkeypatch.setattr(jobs_module.Jobs, "hf_files", hf_files_factory(files))
     # Seed one acquired file so per-file local status surfaces.
-    seed = manifests.downloaded_file_record(REPO, SHA, "config.json", status="downloaded")
+    seed = manifests.downloaded_file_record(
+        REPO, SHA, "config.json", status="downloaded"
+    )
     seed["id"] = jobs_module.downloaded_file_id(REPO, SHA, "config.json")
     store.put("downloaded_file", seed)
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as c:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as c:
         token = (await c.get("/api/status")).json()["csrf_token"]
         headers = {"X-Menagerie-Token": token}
         bundle_map = {"BundleA": ["model.safetensors"]}
         manifest = manifests.build_manifest(REPO, SHA, files, bundle_map)
-        bundle_gid = [g["id"] for g in manifest["groups"] if g["kind"] == "safetensors"][0]
+        bundle_gid = [
+            g["id"] for g in manifest["groups"] if g["kind"] == "safetensors"
+        ][0]
 
         # No selection: file list and groups carry per-file local status.
-        r = await c.post("/api/downloads/manifest", json={"repo": REPO, "bundle_map": bundle_map}, headers=headers)
+        r = await c.post(
+            "/api/downloads/manifest",
+            json={"repo": REPO, "bundle_map": bundle_map},
+            headers=headers,
+        )
         body = r.json()
         assert r.status_code == 200
         assert body["revision"] == SHA
-        assert {f["name"] for f in body["files"]} == {"model.safetensors", "model.safetensors.index.json", "config.json"}
+        assert {f["name"] for f in body["files"]} == {
+            "model.safetensors",
+            "model.safetensors.index.json",
+            "config.json",
+        }
         assert body["groups"]
-        assert any(g["id"] == bundle_gid and g["kind"] == "safetensors" for g in body["groups"])
+        assert any(
+            g["id"] == bundle_gid and g["kind"] == "safetensors" for g in body["groups"]
+        )
         by_name = {f["name"]: f for f in body["files"]}
         assert by_name["config.json"]["status"] == "downloaded"
         assert by_name["model.safetensors"]["status"] == "not_downloaded"
@@ -251,7 +279,11 @@ async def test_manifest_endpoint_groups_files_status_and_selection(tmp_path, mon
         # With a selection: required / pending / retry computed server-side.
         r2 = await c.post(
             "/api/downloads/manifest",
-            json={"repo": REPO, "bundle_map": bundle_map, "selected": [bundle_gid, "config.json"]},
+            json={
+                "repo": REPO,
+                "bundle_map": bundle_map,
+                "selected": [bundle_gid, "config.json"],
+            },
             headers=headers,
         )
         body2 = r2.json()
@@ -266,8 +298,14 @@ async def test_manifest_endpoint_groups_files_status_and_selection(tmp_path, mon
 @pytest.mark.asyncio
 async def test_manifest_endpoint_stale_selection_conflict(tmp_path, monkeypatch):
     app = create_app(tmp_path)
-    monkeypatch.setattr(jobs_module.Jobs, "hf_files", hf_files_factory([hf_file("x.bin", verified=False)]))
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as c:
+    monkeypatch.setattr(
+        jobs_module.Jobs,
+        "hf_files",
+        hf_files_factory([hf_file("x.bin", verified=False)]),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as c:
         token = (await c.get("/api/status")).json()["csrf_token"]
         r = await c.post(
             "/api/downloads/manifest",
@@ -280,21 +318,39 @@ async def test_manifest_endpoint_stale_selection_conflict(tmp_path, monkeypatch)
 @pytest.mark.asyncio
 async def test_manifest_endpoint_requires_token(tmp_path, monkeypatch):
     app = create_app(tmp_path)
-    monkeypatch.setattr(jobs_module.Jobs, "hf_files", hf_files_factory([hf_file("x.bin", verified=False)]))
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as c:
+    monkeypatch.setattr(
+        jobs_module.Jobs,
+        "hf_files",
+        hf_files_factory([hf_file("x.bin", verified=False)]),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as c:
         r = await c.post("/api/downloads/manifest", json={"repo": REPO})
         assert r.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_download_files_endpoint_requires_selection_and_sha(tmp_path, monkeypatch):
+async def test_download_files_endpoint_requires_selection_and_sha(
+    tmp_path, monkeypatch
+):
     app = create_app(tmp_path)
-    monkeypatch.setattr(jobs_module.Jobs, "hf_files", hf_files_factory([hf_file("x.bin", verified=False)]))
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as c:
+    monkeypatch.setattr(
+        jobs_module.Jobs,
+        "hf_files",
+        hf_files_factory([hf_file("x.bin", verified=False)]),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as c:
         token = (await c.get("/api/status")).json()["csrf_token"]
         headers = {"X-Menagerie-Token": token}
         # Empty selection -> 400.
-        r = await c.post("/api/downloads/files", json={"repo": REPO, "revision": SHA, "selected": []}, headers=headers)
+        r = await c.post(
+            "/api/downloads/files",
+            json={"repo": REPO, "revision": SHA, "selected": []},
+            headers=headers,
+        )
         assert r.status_code == 400
         # Non-sha revision -> 400 (must be the resolved sha from the manifest).
         r = await c.post(

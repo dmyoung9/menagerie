@@ -19,7 +19,15 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-from . import adapters, deployment_sets, host, lifecycle, pool_edit, runtime_protocol, templates
+from . import (
+    adapters,
+    deployment_sets,
+    host,
+    lifecycle,
+    pool_edit,
+    runtime_protocol,
+    templates,
+)
 from . import apply_ops as aops
 from . import queued_apply as qa
 from .catalog import apply_reasoning, export_config, normalize
@@ -892,8 +900,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         # Identifier mode: in "generated" the API ID follows the display name and
         # is regenerated outright (no compatibility alias) when the name changes;
         # in "custom" the ID is user-controlled and stable across renames.
-        if data.get("identifier_mode") == "generated" and previous is not None and (
-            previous.get("name") != data.get("name")
+        if (
+            data.get("identifier_mode") == "generated"
+            and previous is not None
+            and (previous.get("name") != data.get("name"))
         ):
             taken = {d["alias"] for d in all_d if d.get("id") != data.get("id")}
             data["alias"] = resolve_alias(data["name"], taken)
@@ -1562,7 +1572,11 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         the parse keyed on revision so unrelated polling does not remount the
         article.
         """
-        return {"repo": repo, "revision": revision, "content": await jobs.hf_readme(repo, revision)}
+        return {
+            "repo": repo,
+            "revision": revision,
+            "content": await jobs.hf_readme(repo, revision),
+        }
 
     @app.post("/api/downloads")
     async def download(request: Request):
@@ -1612,7 +1626,8 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             raise HTTPException(400, "Select at least one file or bundle to download")
         if not re.fullmatch(r"[a-f0-9]{40}", str(body.get("revision", ""))):
             raise HTTPException(
-                400, "revision must be the resolved 40-character sha from /api/downloads/manifest"
+                400,
+                "revision must be the resolved 40-character sha from /api/downloads/manifest",
             )
         return jobs.submit(
             "Download files from " + body["repo"],
@@ -1759,7 +1774,8 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     d
                     for d in store.list("deployment")
                     if d.get("enabled")
-                    and aops.effective_alias(store, manager.unit(d["id"]), d["id"]) == model
+                    and aops.effective_alias(store, manager.unit(d["id"]), d["id"])
+                    == model
                 ),
                 None,
             )

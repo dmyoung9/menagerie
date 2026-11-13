@@ -58,9 +58,9 @@ async def build_client(app):
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
     )
-    client.headers["X-Menagerie-Token"] = (
-        await client.get("/api/status")
-    ).json()["csrf_token"]
+    client.headers["X-Menagerie-Token"] = (await client.get("/api/status")).json()[
+        "csrf_token"
+    ]
     return client
 
 
@@ -124,7 +124,9 @@ def wire_fakes(manager, store, monkeypatch):
     return spawned
 
 
-async def test_read_endpoints_report_pending_scope_and_eligibility(tmp_path, monkeypatch):
+async def test_read_endpoints_report_pending_scope_and_eligibility(
+    tmp_path, monkeypatch
+):
     app, d = make_app(tmp_path)
     manager = app.state.manager
     wire_fakes(manager, app.state.store, monkeypatch)
@@ -200,9 +202,8 @@ async def test_save_apply_cycle_and_concurrent_conflict(tmp_path, monkeypatch):
         assert body["op"]["state"] == "pending"
         assert body["applied_rev"] is not None
         assert body["desired_rev"] != body["applied_rev"]
-        assert (
-            body["scope_fingerprint"]
-            == aops.scope_fingerprint(manager.unit(DEPLOY_ID))
+        assert body["scope_fingerprint"] == aops.scope_fingerprint(
+            manager.unit(DEPLOY_ID)
         )
 
         # Review + queue. The job is captured (not running), so the op is

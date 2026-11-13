@@ -43,9 +43,17 @@ from .manager import Conflict
 # is ``True``, so the shared "pending" literal is unambiguous).
 _STATE_BY_VALUE = {}
 for _name in (
-    "PENDING", "QUEUED", "APPLYING", "APPLIED", "FAILED",
-    "CANCELLED", "EXPIRED", "INVALID",
-    "ROLLODBACK_PENDING", "ROLLODBACK_UNKNOWN", "ROLLODBACK_SUCCEEDED",
+    "PENDING",
+    "QUEUED",
+    "APPLYING",
+    "APPLIED",
+    "FAILED",
+    "CANCELLED",
+    "EXPIRED",
+    "INVALID",
+    "ROLLODBACK_PENDING",
+    "ROLLODBACK_UNKNOWN",
+    "ROLLODBACK_SUCCEEDED",
 ):
     _STATE_BY_VALUE[getattr(qa.ApplyState, _name)] = getattr(qa.ApplyState, _name)
 
@@ -64,9 +72,7 @@ def scope_fingerprint(unit: dict) -> str:
         "residency": unit.get("residency"),
         "priority": unit.get("priority"),
     }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True).encode()
-    ).hexdigest()
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def op_public(op: qa.QueuedApplyOp) -> dict:
@@ -90,6 +96,7 @@ def _state(value: str, default) -> qa.ApplyState:
     """Resolve a stored state string to the exact ``ApplyState`` class-constant
     object so identity comparisons in the pure contract keep working."""
     return _STATE_BY_VALUE.get(value, default)
+
 
 # Fields the running configuration does *not* depend on. They are volatile
 # (telemetry, process identity, lifecycle state) and must never make a saved
@@ -273,9 +280,7 @@ def save_desired(store, unit: dict) -> qa.QueuedApplyOp:
             "Resolve it before saving another change."
         )
     desired_rev = unit_fingerprint(store, unit)
-    applied_rev = current_applied_rev(store, unit_id) or (
-        op.applied_rev if op else ""
-    )
+    applied_rev = current_applied_rev(store, unit_id) or (op.applied_rev if op else "")
     new_op = qa.create_op(unit_id, desired_rev, applied_rev, time.time())
     return save_op(store, new_op)
 
@@ -377,7 +382,9 @@ def pending(store, unit: dict) -> dict:
         "op": op,
         "desired_rev": desired_rev,
         "applied_rev": applied_rev,
-        "pending": is_pending and applied_rev is not None and desired_rev != applied_rev,
+        "pending": is_pending
+        and applied_rev is not None
+        and desired_rev != applied_rev,
     }
 
 

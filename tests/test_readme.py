@@ -73,14 +73,14 @@ def _fake_hf_files(sha="a" * 40, files=None):
 
 
 @pytest.mark.asyncio
-async def test_readme_endpoint_serves_pinned_revision_content(
-    tmp_path, monkeypatch
-):
+async def test_readme_endpoint_serves_pinned_revision_content(tmp_path, monkeypatch):
     app = create_app(tmp_path)
     sha = "a" * 40
 
     monkeypatch.setattr(Jobs, "hf_files", _fake_hf_files(sha))
-    client = _fake_client([(200, b"# Menagerie\n\nREADME body"), (404, b""), (404, b"")])
+    client = _fake_client(
+        [(200, b"# Menagerie\n\nREADME body"), (404, b""), (404, b"")]
+    )
     app.state.manager.client = client
 
     async with httpx.AsyncClient(
@@ -102,9 +102,7 @@ async def test_readme_endpoint_serves_pinned_revision_content(
 
 
 @pytest.mark.asyncio
-async def test_readme_falls_back_to_alternative_filenames(
-    tmp_path, monkeypatch
-):
+async def test_readme_falls_back_to_alternative_filenames(tmp_path, monkeypatch):
     app = create_app(tmp_path)
 
     monkeypatch.setattr(Jobs, "hf_files", _fake_hf_files())
@@ -125,9 +123,7 @@ async def test_readme_falls_back_to_alternative_filenames(
 
 
 @pytest.mark.asyncio
-async def test_readme_returns_none_when_all_candidates_missing(
-    tmp_path, monkeypatch
-):
+async def test_readme_returns_none_when_all_candidates_missing(tmp_path, monkeypatch):
     app = create_app(tmp_path)
 
     monkeypatch.setattr(Jobs, "hf_files", _fake_hf_files())
@@ -162,9 +158,7 @@ async def test_readme_caps_huge_readmes(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_readme_endpoint_is_public_get_no_token(
-    tmp_path, monkeypatch
-):
+async def test_readme_endpoint_is_public_get_no_token(tmp_path, monkeypatch):
     app = create_app(tmp_path)
 
     monkeypatch.setattr(Jobs, "hf_files", _fake_hf_files())

@@ -529,7 +529,9 @@ class Jobs:
             raise ValueError("Select a resolved 40-character model revision")
         metadata = await self.hf_files(repo, revision)
         resolved = metadata["revision"]
-        manifest = manifests.build_manifest(repo, resolved, metadata["files"], bundle_map)
+        manifest = manifests.build_manifest(
+            repo, resolved, metadata["files"], bundle_map
+        )
         required = manifests.required_files(manifest, selected)
 
         name_to_group = {n: g["id"] for g in manifest["groups"] for n in g["required"]}
@@ -548,7 +550,10 @@ class Jobs:
         transfer_bytes = sum(
             (files_by_name.get(n) or {}).get("size") or 0 for n in to_transfer
         )
-        if transfer_bytes and shutil.disk_usage(destination).free < transfer_bytes + 1024**3:
+        if (
+            transfer_bytes
+            and shutil.disk_usage(destination).free < transfer_bytes + 1024**3
+        ):
             raise ValueError("Insufficient disk capacity for selected files")
 
         progress = _download_progress(self, ident)
@@ -653,7 +658,9 @@ class Jobs:
         supplied selection is stale for the resolved revision."""
         metadata = await self.hf_files(repo, revision)
         resolved = metadata["revision"]
-        manifest = manifests.build_manifest(repo, resolved, metadata["files"], bundle_map)
+        manifest = manifests.build_manifest(
+            repo, resolved, metadata["files"], bundle_map
+        )
         statuses = self._file_statuses(repo, resolved)
 
         file_rows = []
@@ -677,17 +684,28 @@ class Jobs:
                 {
                     **group,
                     "local_status": per_file,
-                    "downloaded_count": sum(1 for s in per_file.values() if s == "downloaded"),
+                    "downloaded_count": sum(
+                        1 for s in per_file.values() if s == "downloaded"
+                    ),
                     "failed_count": sum(1 for s in per_file.values() if s == "failed"),
-                    "downloading_count": sum(1 for s in per_file.values() if s == "downloading"),
+                    "downloading_count": sum(
+                        1 for s in per_file.values() if s == "downloading"
+                    ),
                 }
             )
-        result = {"repo": repo, "revision": resolved, "files": file_rows, "groups": groups}
+        result = {
+            "repo": repo,
+            "revision": resolved,
+            "files": file_rows,
+            "groups": groups,
+        }
         if selected is not None:
             result["selected"] = manifests.validate_selection(manifest, selected)
             result["required_files"] = manifests.required_files(manifest, selected)
             result["pending"] = manifests.pending(manifest, selected, statuses)
-            result["retry_targets"] = manifests.retry_targets(manifest, selected, statuses)
+            result["retry_targets"] = manifests.retry_targets(
+                manifest, selected, statuses
+            )
         return result
 
     async def _download_template_file(self, repo, revision, filename):

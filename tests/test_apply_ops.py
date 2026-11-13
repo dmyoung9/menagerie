@@ -24,10 +24,7 @@ from controlplane.apply_ops import (
     discard,
     find_op,
     pending,
-    record_applied,
-    reconcile_all,
     save_desired,
-    save_op,
     unit_fingerprint,
 )
 from controlplane.queued_apply import ApplyState
@@ -138,7 +135,16 @@ def test_fingerprint_includes_all_members_of_a_pool(tmp_path):
     fp0 = unit_fingerprint(s, pu)
     # Changing one member's policy changes the pool's configuration.
     ma = s.get("deployment", "a")
-    s.put("deployment", {**ma, "profile_snapshot": {**ma["profile_snapshot"], "config": {"ctx-size": 16384}}})
+    s.put(
+        "deployment",
+        {
+            **ma,
+            "profile_snapshot": {
+                **ma["profile_snapshot"],
+                "config": {"ctx-size": 16384},
+            },
+        },
+    )
     assert unit_fingerprint(s, pu) != fp0
 
 
@@ -236,7 +242,7 @@ def test_record_applied_resolves_pending(tmp_path):
 def test_request_apply_requires_token_and_scope(tmp_path):
     s = store_for(tmp_path)
     d = put_standalone(s, "d", {"ctx-size": 8192})
-    op = save_desired(s, d)
+    save_desired(s, d)
     with pytest.raises(Exception, match="token and scope fingerprint"):
         apply_ops.request_apply(s, d, "", "fp")
     queued = apply_ops.request_apply(s, d, "tok", "fp")
@@ -272,7 +278,16 @@ def test_complete_apply_success_marks_applied_and_snapshot(tmp_path):
     apply_ops.request_apply(s, d, "tok", "fp")
     # Change the config while "queued" is not allowed in a real flow; the
     # apply job restarts the unit which loads whatever is currently stored.
-    d2 = s.put("deployment", {**d, "profile_snapshot": {**d["profile_snapshot"], "config": {"ctx-size": 16384}}})
+    d2 = s.put(
+        "deployment",
+        {
+            **d,
+            "profile_snapshot": {
+                **d["profile_snapshot"],
+                "config": {"ctx-size": 16384},
+            },
+        },
+    )
     apply_ops.complete_apply(s, d2, error=None)
     assert pending(s, d2)["pending"] is False
     assert current_applied_rev(s, d2["id"]) == unit_fingerprint(s, d2)
@@ -314,7 +329,16 @@ def test_discard_restores_applied_config(tmp_path):
     d = put_standalone(s, "d", {"ctx-size": 8192})
     apply_ops.record_applied(s, d)  # baseline: applied == 8192
     # Save a change (now desired=16384, applied=8192, pending).
-    d2 = s.put("deployment", {**d, "profile_snapshot": {**d["profile_snapshot"], "config": {"ctx-size": 16384}}})
+    d2 = s.put(
+        "deployment",
+        {
+            **d,
+            "profile_snapshot": {
+                **d["profile_snapshot"],
+                "config": {"ctx-size": 16384},
+            },
+        },
+    )
     op = save_desired(s, d2)
     assert qa.is_pending(op)
     # Discard restores the 8192 config and clears the op.
@@ -359,7 +383,6 @@ def test_reconcile_all_marks_inflight_failed(tmp_path):
     s = store_for(tmp_path)
     d = put_standalone(s, "d", {"ctx-size": 8192})
     apply_ops.request_apply(s, d, "tok", "fp")
-    queued = find_op(s, d["id"])
     # Simulate the daemon dying while queued, then relaunching.
     apply_ops.reconcile_all(s)
     re = find_op(s, d["id"])
@@ -369,8 +392,7 @@ def test_reconcile_all_marks_inflight_failed(tmp_path):
     assert qa.is_pending(re)  # the saved change is retained
     # A settled PENDING op is left untouched by reconcile_all.
     d2 = put_standalone(s, "e", {"ctx-size": 4096})
-    fresh = save_desired(s, d2)
-    before = find_op(s, "e")
+    save_desired(s, d2)
     apply_ops.reconcile_all(s)
     assert find_op(s, "e") is not None
     assert find_op(s, "e").state == ApplyState.PENDING
