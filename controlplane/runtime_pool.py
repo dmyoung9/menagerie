@@ -34,10 +34,9 @@ def validate(unit, store):
         )
     for member in unit.get("members") or []:
         profile = member["profile_snapshot"]
-        if (
-            profile.get("runtime_id") != unit.get("runtime_id")
-            or member.get("gpu") != unit.get("gpu")
-        ):
+        if profile.get("runtime_id") != unit.get("runtime_id") or member.get(
+            "gpu"
+        ) != unit.get("gpu"):
             errors.append(
                 "Pool members must mirror the pool's runtime installation and device"
             )

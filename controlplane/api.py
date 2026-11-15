@@ -832,9 +832,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             ):
                 raise Conflict("Unload the pool before deleting it")
             with store.transaction() as c:
-                members = [
-                    store.get("deployment", i, c) for i in unit["member_ids"]
-                ]
+                members = [store.get("deployment", i, c) for i in unit["member_ids"]]
                 # Model files and the runtime installation are the owner's
                 # property, not the pool's; deleting a pool drops only the
                 # deployment records and the pool itself.
@@ -1155,9 +1153,8 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     else None
                 )
                 if pool is not None and previous is None:
-                    if (
-                        pool.get("engine_pool")
-                        and pool_edit.eligible_for_pool(prepared, pool, store)
+                    if pool.get("engine_pool") and pool_edit.eligible_for_pool(
+                        prepared, pool, store
                     ):
                         raise Conflict(
                             "This setup is incompatible with its pool; choose compatible engine, device and settings"

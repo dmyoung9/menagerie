@@ -22,10 +22,13 @@
 #
 set -uo pipefail   # deliberately NOT -e: every branch must end in a safe state.
 
-WORKTREE="/home/drinf/.local/share/opencode/worktree/36fa360f5b81c69bc526c7e5b6802e6ec314f3d3/model-first-ui"
-STATE="/home/drinf/.local/state/menagerie"
+# Locations default to a standard user install; override WORKTREE/STATE/APP
+# to relocate any of them. WORKTREE defaults to this checkout's root (the
+# file lives under the checkout's scripts/).
+WORKTREE="${WORKTREE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+STATE="${STATE:-$HOME/.local/state/menagerie}"
 REG="${STATE}/registry.sqlite3"
-APP="/home/drinf/.local/share/menagerie/app"
+APP="${APP:-$HOME/.local/share/menagerie/app}"
 API_PORT=8017
 SERVICE="menagerie.service"
 WHEEL="${WORKTREE}/dist/menagerie-3.0.0-py3-none-any.whl"

@@ -93,11 +93,7 @@ class Manager:
 
     def runtime_port(self, deployment):
         unit = self.unit(deployment["id"])
-        return (
-            unit["port"]
-            if unit.get("engine_pool")
-            else deployment["port"]
-        )
+        return unit["port"] if unit.get("engine_pool") else deployment["port"]
 
     def unit_busy(self, unit):
         return any(self.inflight.get(i, 0) for i in unit["member_ids"])
@@ -928,9 +924,7 @@ class Manager:
         spec = adapters.launch_spec(d, p, a, r, folder, self.store)
         unit = self.unit(ident)
         pool_owner = (
-            unit["members"][0]
-            if unit.get("engine_pool") and unit["members"]
-            else None
+            unit["members"][0] if unit.get("engine_pool") and unit["members"] else None
         )
         if pool_owner:
             from . import runtime_pool

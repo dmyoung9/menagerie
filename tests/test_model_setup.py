@@ -42,7 +42,9 @@ async def test_process_pool_addition_review_apply_and_selected_load(tmp_path):
                 client,
                 setup_draft("Alpha")
                 | {
-                    "pool": pool_spec("Alpha pool", pool_port, "runtime", queue_timeout=10)
+                    "pool": pool_spec(
+                        "Alpha pool", pool_port, "runtime", queue_timeout=10
+                    )
                 },
             )
             key = manager.unit(first["id"])["id"]
@@ -263,9 +265,7 @@ async def test_cancel_during_drain_never_stops_live_model(setup, monkeypatch):
         client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
     )
     live = store.put("deployment", first | {"state": "READY"})
-    await save(
-        client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"]
-    )
+    await save(client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"])
     key = manager.unit(first["id"])["id"]
     monkeypatch.setattr(
         manager, "plan", lambda ids: {"errors": [], "stops": [], "plan_token": "base"}
@@ -301,9 +301,7 @@ async def test_failed_application_preserves_desired_configuration(
         client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
     )
     live = store.put("deployment", first | {"state": "READY"})
-    await save(
-        client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"]
-    )
+    await save(client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"])
     key = manager.unit(first["id"])["id"]
     monkeypatch.setattr(
         manager, "plan", lambda ids: {"errors": [], "stops": [], "plan_token": "base"}
@@ -399,9 +397,7 @@ async def test_reviewed_apply_updates_routing_and_clears_pending_only_after_read
         client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
     )
     live = store.put("deployment", first | {"state": "READY"})
-    await save(
-        client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"]
-    )
+    await save(client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"])
     key = manager.unit(first["id"])["id"]
     assert [r["id"] for r in (await client.get("/v1/models")).json()["data"]] == [
         "alpha"
@@ -426,9 +422,7 @@ async def test_reviewed_apply_updates_routing_and_clears_pending_only_after_read
         assert model_setup.desired(store, key)
         assert apply_ops.find_op(store, key).state == "applying"
         for ident in ids:
-            store.put(
-                "deployment", store.get("deployment", ident) | {"state": "READY"}
-            )
+            store.put("deployment", store.get("deployment", ident) | {"state": "READY"})
 
     monkeypatch.setattr(manager, "_stop_unit_locked", stop)
     monkeypatch.setattr(manager, "_activate_locked", activate)
@@ -448,7 +442,9 @@ async def test_member_disable_keeps_neighbor_available_and_runtime_running(setup
         client,
         draft("Alpha", port()) | {"pool": pool_spec("Pair", pool_port)},
     )
-    second = await save(client, draft("Beta", port()) | {"pool_id": manager.unit(first["id"])["id"]})
+    second = await save(
+        client, draft("Beta", port()) | {"pool_id": manager.unit(first["id"])["id"]}
+    )
     for row in (first, second):
         store.put("deployment", row | {"state": "READY"})
     response = await client.post(
