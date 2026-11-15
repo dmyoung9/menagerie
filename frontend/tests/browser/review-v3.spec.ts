@@ -80,24 +80,14 @@ test('performance explains why Add is unavailable without an engine', async ({
   fixture,
 }) => {
   fixture.registry.runtimes = [];
-  await page.goto('/#/deployments');
-  await page.getByText('Advanced', { exact: true }).click();
-  await page
-    .getByRole('button', {
-      name: 'Create supervised group or runtime pool',
-      exact: true,
-    })
-    .click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  const card = dialog.locator('[data-settings-section="memory"]');
+  await page.goto('/#/deployments/idle/configuration');
   await expect(
-    card.getByText(
+    page.getByText(
       'Choose an engine to see supported context and memory options.',
     ),
   ).toBeVisible();
   await expect(
-    card.getByRole('button', { name: 'Add performance flags' }),
+    page.getByRole('button', { name: 'Add performance flags' }),
   ).toHaveCount(0);
 });
 

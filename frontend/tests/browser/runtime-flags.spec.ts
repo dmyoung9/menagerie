@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, openAdvanced, openIdentity, openCard } from './fixtures';
-import { deploymentDraft } from '../../src/contracts';
+import { deploymentDraft, deploymentSetDraft } from '../../src/contracts';
 
 test('standalone NumberControl also preserves clearing and commits before Enter submission', async ({
   page,
@@ -74,44 +74,117 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
     label: 'Top-k',
     default: 0,
   };
-  await page.goto('/#/deployments');
-  await page.getByText('Advanced', { exact: true }).click();
-  await page
-    .getByRole('button', {
-      name: 'Create supervised group or runtime pool',
-      exact: true,
-    })
+  // Seed a two-member pool; pooled members carry a null member port. The pool's
+  // Configuration tab (not the wizard) reconciles both members in one shared form.
+  const base = {
+    artifact_id: 'model',
+    runtime_id: 'engine',
+    config: { 'ctx-size': 8192, parallel: 1, 'gpu-layers': 'all' },
+    raw_args: [],
+    catalog: {},
+    profile_snapshot: {
+      artifact_id: 'model',
+      runtime_id: 'engine',
+      config: { 'ctx-size': 8192, parallel: 1, 'gpu-layers': 'all' },
+      raw_args: [],
+      catalog: {},
+    },
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    queue_timeout: 300,
+    allow_eviction: false,
+    gpu: 0,
+    port: null,
+    state: 'STOPPED',
+    enabled: true,
+    revision: 1,
+    lifecycle: { serving: true },
+  };
+  const first = { ...base, id: 'pair-a', name: 'Alpha model', alias: 'alpha' };
+  const second = { ...base, id: 'pair-b', name: 'Beta model', alias: 'beta' };
+  fixture.registry.deployments.push(first, second);
+  fixture.sets.push({
+    id: 'buffered-pair',
+    name: 'Buffered pair',
+    multi_model: true,
+    enabled: true,
+    runtime_id: 'engine',
+    gpu: 0,
+    port: 9120,
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    queue_timeout: 300,
+    allow_eviction: false,
+    state: 'STOPPED',
+    revision: 1,
+    member_ids: ['pair-a', 'pair-b'],
+    members: [first, second],
+    lifecycle: { serving: true },
+  });
+  // The pool's Configuration tab renders the shared pool form, not a wizard.
+  await page.goto('/#/deployments/buffered-pair/configuration');
+  const switcher = page.locator('[aria-label="Models"]');
+  // Select the second member and add Top-k to its generation flags.
+  await switcher
+    .getByRole('button', { name: 'Beta model', exact: true })
     .click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Name', { exact: true }).fill('Buffered pair');
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  const second = dialog.locator('[data-model-index="1"]');
-  await second.locator('[data-settings-section="generation"] summary').click();
-  await second.getByRole('button', { name: 'Add generation flags' }).click();
+  await page
+    .locator(
+      '[data-model-index="1"] [data-settings-section="generation"] summary',
+    )
+    .click();
+  await page
+    .locator('[data-model-index="1"]')
+    .getByRole('button', { name: 'Add generation flags', exact: true })
+    .click();
   const picker = page.getByRole('dialog', { name: 'Add generation flags' });
   await picker.getByRole('checkbox', { name: 'Top-k', exact: true }).check();
   await picker.getByRole('button', { name: 'Add (1)', exact: true }).click();
-  await second.getByLabel('Top-k', { exact: true }).fill('');
-  await second.getByLabel('Top-k', { exact: true }).blur();
-  await dialog
-    .locator('[aria-label="Models"]')
-    .getByRole('button')
-    .first()
+  // Clear the second member's Top-k to leave an empty buffer that must survive
+  // the removal of the other member.
+  const topK = page
+    .locator('[data-model-index="1"]')
+    .getByLabel('Top-k', { exact: true });
+  await topK.fill('');
+  await topK.blur();
+  // Remove the first member.
+  await switcher
+    .getByRole('button', { name: 'Alpha model', exact: true })
     .click();
-  await dialog
+  await page
     .locator('[data-model-index="0"]')
     .getByRole('button', { name: 'Remove model', exact: true })
     .click();
-  const remaining = dialog.getByLabel('Top-k', { exact: true });
+  await page
+    .getByRole('alertdialog')
+    .getByRole('button', { name: 'Continue', exact: true })
+    .click();
+  // The remaining member is now the first row and still holds the empty buffer.
+  const remaining = page
+    .locator('[data-model-index="0"]')
+    .getByLabel('Top-k', { exact: true });
+  await expect(remaining).toBeVisible();
   await expect(remaining).toHaveValue('');
+  // Commit a value and save through the shared form.
   await remaining.fill('8');
-  await remaining.press('Enter');
-  await expect(dialog).toBeHidden();
-  const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments')!.body,
+  await remaining.blur();
+  await page
+    .getByRole('button', { name: 'Save deployment', exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1'),
+    )
+    .toBeDefined();
+  const saved = deploymentSetDraft(
+    fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1')!
+      .body,
   );
-  expect(saved.config['top-k']).toBe(8);
+  expect(saved.members).toHaveLength(1);
+  expect(saved.members[0].config['top-k']).toBe(8);
+  expect(saved.members[0].name).toBe('Beta model');
 });
 
 test('clearing is an editing buffer; blur validates without substituting zero and Enter commits retyped text', async ({

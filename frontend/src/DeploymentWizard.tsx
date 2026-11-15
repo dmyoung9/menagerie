@@ -135,6 +135,11 @@ export function DeploymentWizard({
   const [contextMode, setContextMode] = useState<ContextMode>('default');
   const [residency, setResidency] = useState('on-demand'),
     [idle, setIdle] = useState(300);
+  const [placement, setPlacement] = useState<
+    'standalone' | `pool:${string}` | 'new-pool'
+  >('standalone');
+  const [poolName, setPoolName] = useState('');
+  const [poolPort, setPoolPort] = useState<number | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalog>({
     model: {
       capabilities: {
@@ -191,6 +196,49 @@ export function DeploymentWizard({
   );
   const runtime = engines.find((r) => r.id === runtimeId) || engines[0];
   const schema = runtime?.capabilities?.schema || {};
+  const availablePools = (data.serving || [])
+    .filter((d) => d.multi_model)
+    .map((d) => ({
+      id: d.id,
+      name: d.name,
+      runtime_id: d.runtime_id || '',
+      gpu: d.gpu ?? null,
+      residency: d.residency || 'on-demand',
+      priority: d.priority ?? 50,
+      idle_timeout: d.idle_timeout ?? 300,
+      allow_eviction: d.allow_eviction ?? false,
+      queue_timeout: d.queue_timeout ?? 300,
+    }))
+    .filter((p) => !p.runtime_id || p.runtime_id === runtime?.id);
+  const poolId =
+    placement && placement.startsWith('pool:') ? placement.slice(5) : null;
+  const placementIncomplete =
+    placement === 'new-pool' && (!poolName.trim() || poolPort === null);
+  const isEditing = Boolean(savedRow);
+  const joinedPool = availablePools.find((p) => p.id === poolId);
+  const memberPolicy = (): {
+    residency: string;
+    priority: number;
+    idle_timeout: number;
+    allow_eviction: boolean;
+    queue_timeout: number;
+  } => {
+    if (joinedPool)
+      return {
+        residency: joinedPool.residency,
+        priority: joinedPool.priority,
+        idle_timeout: joinedPool.idle_timeout,
+        allow_eviction: joinedPool.allow_eviction,
+        queue_timeout: joinedPool.queue_timeout,
+      };
+    return {
+      residency,
+      priority: advanced.priority ?? 50,
+      idle_timeout: idle,
+      allow_eviction: advanced.allow_eviction ?? false,
+      queue_timeout: advanced.queue_timeout ?? 300,
+    };
+  };
   const schemaKeys = JSON.stringify(Object.keys(schema).sort());
   const previousRuntime = useRef<{ id?: string; keys: string[] } | undefined>(
     undefined,
@@ -277,12 +325,17 @@ export function DeploymentWizard({
     }
     return config;
   };
+  const previewGpu =
+    placement !== 'standalone'
+      ? (joinedPool?.gpu ?? null)
+      : (advanced.gpu ?? null);
   const preview = useResourcePreview(
     runtime
       ? [
           {
             ...advanced,
             name: displayName,
+            gpu: previewGpu,
             configuration: {
               name: displayName,
               artifact_id: artifactId,
@@ -310,6 +363,18 @@ export function DeploymentWizard({
       setError('Enter a name for this model.');
       return;
     }
+    const pooled = placement !== 'standalone';
+    const policy = memberPolicy();
+    const poolSpec =
+      placement === 'new-pool'
+        ? {
+            name: poolName,
+            runtime_id: runtime.id,
+            port: poolPort,
+            ...policy,
+            enabled: true,
+          }
+        : undefined;
     setBusy(true);
     setError('');
     setOutcome(null);
@@ -326,17 +391,25 @@ export function DeploymentWizard({
           ...(savedRow ? { id: savedRow.id } : {}),
           name: displayName,
           artifact_id: artifactId,
-          runtime_id: runtime.id,
+          runtime_id: pooled
+            ? joinedPool?.runtime_id || runtime.id
+            : runtime.id,
+          gpu: pooled ? (joinedPool?.gpu ?? null) : (advanced.gpu ?? null),
           config: buildConfig(),
           raw_args: args,
           catalog,
           alias: apiAlias,
           identifier_mode: identifierMode,
           runtime_assignment: advanced.runtime_assignment,
-          residency,
-          idle_timeout: idle,
+          ...policy,
+          port: pooled ? null : advanced.port,
           template_override: templateOverride,
           enabled: mode !== 'disabled',
+          ...(placement.startsWith('pool:')
+            ? { pool_id: poolId }
+            : placement === 'new-pool'
+              ? { pool: poolSpec }
+              : {}),
         },
       );
       setSavedRow(saved);
@@ -636,6 +709,85 @@ export function DeploymentWizard({
                     onChange={(e) => setName(e.target.value)}
                   />
                 </Field>
+                <Field
+                  label="Placement"
+                  hint={
+                    isEditing
+                      ? 'Placement is fixed once the member is created.'
+                      : placement === 'standalone'
+                        ? 'The model gets its own serving port.'
+                        : placement === 'new-pool'
+                          ? 'Creates a pool that shares one engine, device and port.'
+                          : 'Joins the selected pool, including its runtime, port and policy.'
+                  }
+                >
+                  <NativeSelect
+                    disabled={isEditing}
+                    value={placement}
+                    onChange={(e) =>
+                      setPlacement(
+                        e.target.value as
+                          'standalone' | `pool:${string}` | 'new-pool',
+                      )
+                    }
+                  >
+                    <NativeSelectOption value="standalone">
+                      Standalone deployment
+                    </NativeSelectOption>
+                    {!isEditing &&
+                      availablePools.map((p) => (
+                        <NativeSelectOption key={p.id} value={'pool:' + p.id}>
+                          Join pool: {p.name}
+                        </NativeSelectOption>
+                      ))}
+                    {!isEditing && (
+                      <NativeSelectOption value="new-pool">
+                        New pool…
+                      </NativeSelectOption>
+                    )}
+                  </NativeSelect>
+                </Field>
+                {!isEditing && placement === 'new-pool' && (
+                  <div className="pool-new mb-5">
+                    {!poolName && poolPort === null && (
+                      <div className="empty mb-3">
+                        <h3>Pool not set up yet</h3>
+                        <p className="muted">
+                          Give the pool a name and serving port. Models added to
+                          it share this engine, device and port.
+                        </p>
+                      </div>
+                    )}
+                    <Field label="Pool name">
+                      <Input
+                        value={poolName}
+                        placeholder="e.g. LFM3"
+                        onChange={(e) => setPoolName(e.target.value)}
+                      />
+                    </Field>
+                    <Field
+                      label="Serving port"
+                      hint={
+                        poolPort === null
+                          ? 'Required. Avoid 8001 and 8017 (Menagerie itself).'
+                          : undefined
+                      }
+                    >
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        value={poolPort === null ? '' : String(poolPort)}
+                        onChange={(e) =>
+                          setPoolPort(
+                            e.target.value === ''
+                              ? null
+                              : Number(e.target.value),
+                          )
+                        }
+                      />
+                    </Field>
+                  </div>
+                )}
                 {identifierMode === 'generated' ? (
                   <Field label="API model ID" hint={generatedHint}>
                     <div className="flex items-center gap-2">
@@ -994,7 +1146,11 @@ export function DeploymentWizard({
               <Button
                 variant="default"
                 type="submit"
-                disabled={Object.values(invalid).some(Boolean) || !runtime}
+                disabled={
+                  Object.values(invalid).some(Boolean) ||
+                  !runtime ||
+                  placementIncomplete
+                }
               >
                 Continue
               </Button>

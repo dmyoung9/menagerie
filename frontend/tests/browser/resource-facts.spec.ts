@@ -3,18 +3,37 @@ import { test, expect } from './fixtures';
 
 test('resource preview pairs stacked capacity and allocation selection without policy copy', async ({
   page,
+  fixture,
 }, testInfo) => {
+  // A pool owns the device; joining it is how a wizard member previews on GPU 0.
+  // Match the set shape the /api/model-setups handler produces (required
+  // "enabled" boolean plus the common group fields the serving decoder expects).
+  fixture.sets.push({
+    id: 'seed-pool',
+    name: 'Seed pool',
+    multi_model: true,
+    enabled: true,
+    runtime_id: 'engine',
+    gpu: 0,
+    port: 9120,
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    allow_eviction: false,
+    queue_timeout: 300,
+    revision: 1,
+    state: 'STOPPED',
+    member_ids: [],
+    members: [],
+    lifecycle: { serving: true },
+  });
   await page.goto('/#/deployments');
-  await page.getByText('Advanced', { exact: true }).click();
-  await page
-    .getByRole('button', {
-      name: 'Create supervised group or runtime pool',
-      exact: true,
-    })
-    .click();
+  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  await dialog.getByLabel('GPU', { exact: true }).selectOption('0');
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  await dialog
+    .getByLabel('Placement', { exact: true })
+    .selectOption('pool:seed-pool');
   const preview = dialog.getByRole('complementary', {
     name: 'Deployment resource preview',
   });

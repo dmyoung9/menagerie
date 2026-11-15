@@ -772,17 +772,6 @@ export default function App() {
                     Return to setup
                   </Button>
                 )}
-                {page === 'deployments' && (
-                  <details>
-                    <summary>Advanced</summary>
-                    <Button
-                      variant="outline"
-                      onClick={() => open({ type: 'deployment-set' })}
-                    >
-                      Create supervised group or runtime pool
-                    </Button>
-                  </details>
-                )}
               </div>
             </div>
           )}
@@ -821,6 +810,7 @@ export default function App() {
                           host={host}
                           actions={actions}
                           compact
+                          runtimes={data.runtimes}
                         />
                       ) : (
                         <Empty

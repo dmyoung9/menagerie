@@ -227,18 +227,67 @@ test('new deployment members get common defaults and a nested Drawer without sub
   page,
   fixture,
 }) => {
-  await page.goto('/#/deployments');
-  await page.getByText('Advanced', { exact: true }).click();
+  // Seed a single-member pool so the detail editor has a member to add from.
+  const member = (id: string) => ({
+    id,
+    name: `Example ${id}`,
+    alias: id,
+    artifact_id: 'model',
+    runtime_id: 'engine',
+    config: {},
+    raw_args: [],
+    catalog: {},
+    enabled: true,
+    state: 'STOPPED',
+    revision: 1,
+    port: null,
+    gpu: null,
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    queue_timeout: 300,
+    allow_eviction: false,
+    lifecycle: { serving: false },
+    profile_snapshot: {
+      artifact_id: 'model',
+      runtime_id: 'engine',
+      config: {},
+      raw_args: [],
+      catalog: {},
+    },
+  });
+  const first = member('seed-a');
+  fixture.registry.deployments.push(first);
+  fixture.sets.push({
+    id: 'shared',
+    name: 'Shared pool',
+    engine_pool: true,
+    runtime_id: 'engine',
+    gpu: null,
+    port: 8200,
+    max_loaded: 4,
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    allow_eviction: false,
+    queue_timeout: 300,
+    enabled: true,
+    state: 'STOPPED',
+    revision: 1,
+    multi_model: true,
+    member_ids: ['seed-a'],
+    members: [first],
+    lifecycle: { serving: false },
+  });
+  await page.goto('/#/deployments/shared');
+  await expect(
+    page.getByRole('heading', { name: 'Shared pool', exact: true }),
+  ).toBeVisible();
   await page
-    .getByRole('button', {
-      name: 'Create supervised group or runtime pool',
-      exact: true,
-    })
+    .getByRole('button', { name: 'Configuration', exact: true })
     .click();
-  await page
-    .getByRole('dialog')
-    .getByRole('button', { name: 'Add model', exact: true })
-    .click();
+  // Add a new member; the draft gains it without a write.
+  await page.getByRole('button', { name: 'Add model', exact: true }).click();
   await openCard(page, 'model');
   await openCard(page, 'variants');
   await expect(
@@ -277,7 +326,10 @@ test('new deployment members get common defaults and a nested Drawer without sub
   await drawer.getByRole('button', { name: 'Cancel', exact: true }).click();
   expect(
     fixture.writes.filter(
-      (w) => w.path === '/api/deployments' || w.path === '/api/deployment-sets',
+      (w) =>
+        w.path === '/api/model-setups' ||
+        w.path === '/api/deployment-sets' ||
+        w.path === '/api/deployments',
     ),
   ).toEqual([]);
 });

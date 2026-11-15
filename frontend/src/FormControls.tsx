@@ -91,10 +91,10 @@ export function Placement({
         <Field label="Private port">
           <NumberControl
             label="Private port"
-            required
+            required={value.port != null}
             min={1024}
             max={65535}
-            value={value.port}
+            value={value.port ?? undefined}
             change={(port) => change({ ...value, port: port ?? 0 })}
           />
         </Field>

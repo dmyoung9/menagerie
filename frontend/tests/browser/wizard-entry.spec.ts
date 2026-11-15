@@ -29,13 +29,23 @@ test('Deployments entry opens model setup without an infrastructure choice', asy
   await expect(dialog.getByLabel('Model', { exact: true })).toBeVisible();
 });
 
-test('Explicit group creation remains under Advanced', async ({ page }) => {
+test('New pool and join options are offered from the Set up model wizard', async ({
+  page,
+}) => {
   await page.goto('/#/deployments');
-  await page.getByText('Advanced', { exact: true }).click();
-  await page
-    .getByRole('button', { name: 'Create supervised group or runtime pool' })
-    .click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Model', { exact: true }).selectOption('model');
+  await dialog.getByLabel('Engine', { exact: true }).selectOption('engine');
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(dialog.getByLabel('Name', { exact: true })).toBeVisible();
+  await dialog
+    .getByLabel('Placement', { exact: true })
+    .selectOption({ label: 'New pool…' });
+  await expect(dialog.getByLabel('Pool name', { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByLabel('Serving port', { exact: true }),
+  ).toBeVisible();
 });
 
 test('default setup saves automatic assignment and waits for the model load job', async ({

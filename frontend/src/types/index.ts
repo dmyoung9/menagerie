@@ -206,7 +206,7 @@ export type DeploymentDraft = {
   raw_args: string[];
   catalog: ModelCatalog;
   alias: string;
-  port: number;
+  port?: number | null;
   residency: string;
   priority: number;
   idle_timeout: number;
@@ -220,6 +220,9 @@ export type DeploymentSetDraft = {
   id?: string;
   name: string;
   engine_pool?: boolean;
+  runtime_id?: string | null;
+  gpu?: number | null;
+  port?: number | null;
   max_loaded?: number;
   residency: string;
   priority: number;
@@ -262,7 +265,7 @@ export type Deployment = {
   catalog: ModelCatalog;
   profile_snapshot?: ProfileSnapshot;
   alias: string;
-  port?: number;
+  port?: number | null;
   residency?: string;
   priority?: number;
   idle_timeout?: number;
@@ -299,6 +302,10 @@ export type DeploymentSet = Omit<
 > & {
   multi_model: true;
   alias?: never;
+  runtime_id?: string | null;
+  port?: number | null;
+  gpu?: number | null;
+  failure_reason?: string | null;
   members: Deployment[];
   member_ids: string[];
 };

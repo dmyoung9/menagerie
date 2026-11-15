@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 import { test as base, expect } from './network';
 import type {
   Deployment,
+  DeploymentDraft,
   DeploymentSet,
   ProfileSnapshot,
   ServingDeployment,
@@ -429,6 +430,82 @@ export const test = base.extend<{ fixture: Fixture }>({
               catalog: draft.catalog,
             },
           });
+          const raw = body as {
+            pool?: {
+              id?: string;
+              name: string;
+              enabled?: boolean;
+              [key: string]: unknown;
+            };
+            pool_id?: string;
+          };
+          const slugify = (text: string) =>
+            text
+              .toLowerCase()
+              .replace(/[^a-z0-9._-]+/g, '-')
+              .replace(/^-+|-+$/g, '') || 'pool';
+          // Wizard new-pool: the model POSTs an inline pool spec plus one
+          // pooled member (port null). Create the set and register the member.
+          if (path === '/api/model-setups' && raw.pool) {
+            const poolSpec = raw.pool;
+            const poolId = poolSpec.id ?? slugify(poolSpec.name);
+            const memberId = `${poolId}-member`;
+            const poolMember: Deployment = {
+              ...member(input as DeploymentDraft, memberId),
+              unit_id: poolId,
+            };
+            const saved: DeploymentSet = {
+              ...poolSpec,
+              id: poolId,
+              enabled: poolSpec.enabled ?? false,
+              multi_model: true,
+              revision: 1,
+              state: 'STOPPED',
+              members: [poolMember],
+              member_ids: [memberId],
+              lifecycle: { serving: poolSpec.enabled },
+            };
+            fixture.sets = [
+              ...fixture.sets.filter((group) => group.id !== poolId),
+              saved,
+            ];
+            fixture.registry.deployments = [
+              ...fixture.registry.deployments.filter(
+                (d) => d.unit_id !== poolId,
+              ),
+              poolMember,
+            ];
+            // The endpoint returns the created member deployment, as the
+            // backend does; the wizard stores that row and completes from it.
+            return send(poolMember);
+          }
+          // Wizard join-pool: the model POSTs pool_id and is appended to an
+          // existing set as a pooled member.
+          if (path === '/api/model-setups' && raw.pool_id) {
+            const poolId = raw.pool_id;
+            const existing = fixture.sets.find((group) => group.id === poolId);
+            if (!existing) return send({ error: 'Pool not found' }, 404);
+            const memberId = `${poolId}-member-${Date.now()}`;
+            const poolMember: Deployment = {
+              ...member(input as DeploymentDraft, memberId),
+              unit_id: poolId,
+            };
+            fixture.sets = fixture.sets.map((group) =>
+              group.id === poolId
+                ? {
+                    ...group,
+                    members: [...group.members, poolMember],
+                    member_ids: [...group.member_ids, memberId],
+                    revision: group.revision + 1,
+                  }
+                : group,
+            );
+            fixture.registry.deployments = [
+              ...fixture.registry.deployments.filter((d) => d.id !== memberId),
+              poolMember,
+            ];
+            return send(poolMember);
+          }
           if ('members' in input) {
             const members = input.members.map((draft, i) => ({
               ...member(draft, `${id}-${i}`),

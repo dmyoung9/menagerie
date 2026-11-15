@@ -111,18 +111,23 @@ test('unsaved editor dismissal is accessible and busy submissions cannot be dism
   page,
   fixture,
 }) => {
-  await page.goto('/#/deployments');
-  await page.getByText('Advanced', { exact: true }).click();
   const opener = page.getByRole('button', {
-    name: 'Create supervised group or runtime pool',
+    name: 'Set up model',
     exact: true,
   });
+  await page.goto('/#/deployments');
+
+  // No changes yet: Escape closes the wizard and returns focus to the trigger.
   await opener.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toBeHidden();
   await expect(opener).toBeFocused();
+
+  // Editing makes dismissal ask to discard, and the guard is visible to beforeunload.
   await opener.click();
   const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog.getByLabel('Name', { exact: true }).fill('Unsaved deployment');
   expect(
     await page.evaluate(() => {
@@ -140,16 +145,18 @@ test('unsaved editor dismissal is accessible and busy submissions cannot be dism
   await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue(
     'Unsaved deployment',
   );
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  await expect(
-    dialog.getByRole('heading', { name: 'Resource preview', exact: true }),
-  ).toBeVisible();
+
+  // A submission in flight locks the close button; the write still lands.
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   fixture.holdSave = true;
   await dialog
-    .getByRole('button', { name: 'Save deployment', exact: true })
+    .getByRole('button', {
+      name: 'Make available without loading',
+      exact: true,
+    })
     .click();
   await expect
-    .poll(() => fixture.writes.some((w) => w.path === '/api/deployments'))
+    .poll(() => fixture.writes.some((w) => w.path === '/api/model-setups'))
     .toBe(true);
   await page.keyboard.press('Escape');
   await expect(dialog).toBeVisible();
@@ -157,9 +164,10 @@ test('unsaved editor dismissal is accessible and busy submissions cannot be dism
     dialog.getByRole('button', { name: 'Close dialog' }),
   ).toBeDisabled();
   fixture.releaseSave();
-  await expect(dialog).toBeHidden();
   await expect(
-    page.getByText('Deployment saved', { exact: true }),
+    dialog.getByText('Unsaved deployment is available', {
+      exact: true,
+    }),
   ).toBeVisible();
 });
 
@@ -167,75 +175,115 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
   page,
   fixture,
 }) => {
+  // First run: create the pool with its first member (context 32K, tools on).
   await page.goto('/#/deployments');
-  await page.getByText('Advanced', { exact: true }).click();
-  await page
+  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+
+  await dialog.getByLabel('Name', { exact: true }).fill('Pair');
+  // Context capacity: Custom → 32K preset (32768 tokens).
+  await dialog
+    .getByLabel('Context capacity', { exact: true })
+    .selectOption('custom');
+  await dialog.getByRole('button', { name: '32K', exact: true }).click();
+  // Capabilities: Tools (carried in the member catalog).
+  await dialog.getByRole('button', { name: 'Tools', exact: true }).click();
+  await expect(
+    dialog.getByRole('button', { name: 'Tools', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+
+  // Placement: New pool — "Continue" is disabled until name and port exist.
+  await dialog
+    .getByLabel('Placement', { exact: true })
+    .selectOption('new-pool');
+  await expect(
+    dialog.getByRole('button', { name: 'Continue', exact: true }),
+  ).toBeDisabled();
+  await dialog.getByLabel('Pool name', { exact: true }).fill('Buffered pair');
+  await dialog.getByLabel('Serving port', { exact: true }).fill('9120');
+  await expect(
+    dialog.getByRole('button', { name: 'Continue', exact: true }),
+  ).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+
+  // Failed input: alias collision keeps the form intact.
+  fixture.failSave = true;
+  await dialog
     .getByRole('button', {
-      name: 'Create supervised group or runtime pool',
+      name: 'Make available without loading',
       exact: true,
     })
     .click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Name', { exact: true }).fill('Pair');
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  const context = dialog.getByLabel('ctx-size', { exact: true });
-  await context.fill('16384');
-  await dialog.getByRole('button', { name: '32K', exact: true }).click();
-  await expect(context).toHaveValue('32768');
-  await dialog
-    .locator('[data-settings-section="model"] summary')
-    .filter({ visible: true })
-    .click();
-  await dialog.getByRole('button', { name: 'Tools', exact: true }).click();
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  const secondMember = dialog.locator('[data-model-index="1"]');
-  await expect(secondMember).toBeVisible();
-  await secondMember
-    .getByLabel('Model display name', { exact: true })
-    .fill('Second member');
-  fixture.failSave = true;
-  await dialog
-    .getByRole('button', { name: 'Save deployment', exact: true })
-    .click();
-  await expect(dialog.getByRole('alert')).toContainText('Alias already exists');
+  await expect(dialog.getByText('Alias already exists')).toBeVisible();
   await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue('Pair');
-  await dialog
-    .locator('[data-slot="toggle-group"][aria-label="Models"]')
-    .getByRole('button')
-    .first()
-    .click();
-  await expect(context.filter({ visible: true })).toHaveValue('32768');
-  await dialog
-    .locator('[data-settings-section="diagnostics"] summary')
-    .filter({ visible: true })
-    .click();
-  const json = dialog
-    .getByLabel('Runtime options (JSON)', { exact: true })
-    .filter({ visible: true });
-  await json.fill('{invalid');
-  await expect(
-    dialog.getByRole('button', { name: 'Save deployment', exact: true }),
-  ).toBeDisabled();
-  await json.fill('{"ctx-size":32768,"parallel":1,"gpu-layers":"all"}');
   fixture.failSave = false;
+
+  // Invalid JSON in the advanced options blocks "Continue"; valid JSON unblocks it.
+  await dialog.getByRole('button', { name: 'Back', exact: true }).click();
+  await dialog.getByText('Advanced', { exact: true }).click();
   await dialog
-    .getByRole('button', { name: 'Save deployment', exact: true })
+    .getByText('Additional engine arguments', { exact: true })
     .click();
-  await expect(dialog).toBeHidden();
-  const saved = contracts.deploymentSetDraft(
-    fixture.writes.filter((w) => w.path === '/api/deployment-sets').at(-1)!
-      .body,
-  );
-  expect(saved.members).toHaveLength(2);
-  expect(saved.members[0].config['ctx-size']).toBe(32768);
-  expect(saved.members[0].catalog.model?.capabilities?.tools).toBe(true);
-  expect(saved.members[1].name).toBe('Second member');
-  expect(
-    new Set(saved.members.map((m: { alias: string }) => m.alias)).size,
-  ).toBe(2);
-  expect(new Set(saved.members.map((m: { port: number }) => m.port)).size).toBe(
-    2,
-  );
+  await dialog.getByLabel('Additional engine arguments').fill('{invalid');
+  await expect(
+    dialog.getByRole('button', { name: 'Continue', exact: true }),
+  ).toBeDisabled();
+  await dialog.getByLabel('Additional engine arguments').fill('[]');
+  await expect(
+    dialog.getByRole('button', { name: 'Continue', exact: true }),
+  ).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  await dialog
+    .getByRole('button', {
+      name: 'Make available without loading',
+      exact: true,
+    })
+    .click();
+  await expect(
+    dialog.getByText('Pair is available', { exact: true }),
+  ).toBeVisible();
+  await expect(fixture.sets).toHaveLength(1);
+  const pool = fixture.sets[0];
+
+  // Exit to the deployments list, then join the pool as the second member.
+  await dialog
+    .getByRole('button', { name: 'Open deployment', exact: true })
+    .click();
+  await navigate(page, 'Deployments');
+  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
+  const wizard = page.getByRole('dialog');
+  await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
+  await wizard.getByLabel('Name', { exact: true }).fill('Second member');
+  await expect(
+    wizard.locator(`option[value="pool:${pool.id}"]`),
+  ).toBeAttached();
+  await wizard
+    .getByLabel('Placement', { exact: true })
+    .selectOption('pool:' + pool.id);
+  await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
+  await wizard
+    .getByRole('button', {
+      name: 'Make available without loading',
+      exact: true,
+    })
+    .click();
+  await expect(
+    wizard.getByText('Second member is available', { exact: true }),
+  ).toBeVisible();
+
+  // The pool holds two pooled members: member 0 carries the reviewed context and
+  // tools; every pooled member shares one engine/device and carries no port.
+  await expect(fixture.sets[0].members).toHaveLength(2);
+  expect(fixture.sets[0].id).toBe('buffered-pair');
+  const [first, second] = fixture.sets[0].members;
+  expect(first.unit_id).toBe(pool.id);
+  expect(second.unit_id).toBe(pool.id);
+  expect(first.config['ctx-size']).toBe(32768);
+  expect(first.catalog.model?.capabilities?.tools).toBe(true);
+  expect(second.name).toBe('Second member');
+  expect(new Set(fixture.sets[0].members.map((m) => m.alias)).size).toBe(2);
+  expect(fixture.sets[0].members.every((m) => m.port === null)).toBe(true);
 });
 
 test('launch warnings remain advisory and submit the plan token; local files use the original endpoint', async ({
@@ -458,30 +506,25 @@ test('Base UI Select, Switch, outside dismissal and discard actions preserve pol
   page,
   fixture,
 }) => {
+  // Outside-click dismissal of an unrelated dialog.
   await page.goto('/#/overview');
   await page.getByRole('button', { name: 'Connect client' }).click();
   await page.mouse.click(1, 1);
   await expect(page.getByRole('dialog')).toBeHidden();
+
   await navigate(page, 'Deployments');
-  await page.getByText('Advanced', { exact: true }).click();
-  await page
-    .getByRole('button', {
-      name: 'Create supervised group or runtime pool',
-      exact: true,
-    })
-    .click();
+  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  // Base UI Select: choose "Pinned" through the value, not a DOM option click.
   const mode = dialog.getByRole('combobox', { name: 'Mode', exact: true });
-  await mode.click();
-  await page.getByRole('option', { name: 'Pinned', exact: true }).click();
+  await mode.selectOption('Pinned');
   await expect(mode).toContainText('Pinned');
-  const enabled = dialog.getByRole('switch', {
-    name: 'Enabled for clients',
-    exact: true,
-  });
-  await enabled.uncheck();
-  await expect(enabled).not.toBeChecked();
+  // Base UI toggle (ToggleGroupItem, aria-pressed) marks the wizard dirty.
+  await dialog.getByRole('button', { name: 'Tools', exact: true }).click();
+  await expect(
+    dialog.getByRole('button', { name: 'Tools', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
   await dialog.getByRole('button', { name: 'Close dialog' }).click();
   await expect(page.getByRole('alertdialog')).toBeVisible();
   await page
@@ -531,17 +574,12 @@ for (const width of [1440, 390])
       });
     }
     await navigate(page, 'Deployments');
-    await page.getByText('Advanced', { exact: true }).click();
     await page
-      .getByRole('button', {
-        name: 'Create supervised group or runtime pool',
-        exact: true,
-      })
+      .getByRole('button', { name: 'Set up model', exact: true })
       .click();
     const dialog = page.getByRole('dialog');
-    await dialog
-      .getByRole('button', { name: 'Add model', exact: true })
-      .click();
+    await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
     await expect(
       dialog.getByRole('heading', { name: 'Resource preview', exact: true }),
     ).toBeVisible();
@@ -549,7 +587,7 @@ for (const width of [1440, 390])
       await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth),
     ).toBe(true);
     const save = dialog.getByRole('button', {
-      name: 'Save deployment',
+      name: 'Make available without loading',
       exact: true,
     });
     await expect(save).toBeEnabled();

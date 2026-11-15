@@ -26,7 +26,6 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   active,
-  api,
   Dialog,
   Empty,
   Field,
@@ -81,6 +80,7 @@ import type {
   HostSnapshot,
   OperationEvent,
   ResourcePreviewDraft,
+  Runtime,
   ServingDeployment,
 } from './types';
 
@@ -224,13 +224,24 @@ export function ServingTable({
   host,
   actions,
   compact = false,
+  runtimes = [],
 }: {
   rows: ServingDeployment[];
   host: HostSnapshot;
   actions: DeploymentActions;
   compact?: boolean;
+  runtimes?: Runtime[];
 }) {
   const [expanded, setExpanded] = useState<string[]>([]);
+  function poolSubtitle(d: ServingDeployment) {
+    const modelCount = d.members?.length ?? 0;
+    if (modelCount <= 1) return null;
+    const runtimeName = runtimes.find((r) => r.id === d.runtime_id)?.name;
+    const parts: string[] = [`${modelCount} models`];
+    if (d.runtime_id) parts.push(runtimeName ? runtimeName : d.runtime_id);
+    if (d.port != null) parts.push(`:${d.port}`);
+    return parts.join(' · ');
+  }
   function primary(d: ServingDeployment) {
     const label = !d.enabled ? 'Enable' : active(d) ? 'Unload' : 'Load';
     const onClick = () =>
@@ -332,9 +343,7 @@ export function ServingTable({
                         {d.name}
                       </a>
                       {d.members?.length > 1 && (
-                        <small className="muted">
-                          {d.members.length} models
-                        </small>
+                        <small className="muted">{poolSubtitle(d)}</small>
                       )}
                       {(d.state === 'FAILED' || d.lifecycle?.failure) && (
                         <a
@@ -360,13 +369,21 @@ export function ServingTable({
                     <div className="actions">
                       {primary(d)}
                       <Menu label={'Actions for ' + d.name}>
-                        <DropdownMenuItem
-                          render={
-                            <a href={`#/deployments/${d.id}/configuration`} />
-                          }
-                        >
-                          Edit
-                        </DropdownMenuItem>
+                        {d.multi_model ? (
+                          <DropdownMenuItem
+                            onClick={() => actions.edit('deployment_sets', d)}
+                          >
+                            Edit
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            render={
+                              <a href={`#/deployments/${d.id}/configuration`} />
+                            }
+                          >
+                            Edit
+                          </DropdownMenuItem>
+                        )}
                         {!d.multi_model && (
                           <DropdownMenuItem
                             onClick={() => actions.edit('deployments', d, true)}
@@ -464,6 +481,9 @@ export function DeploymentSetEditor({
             id: initial.id,
             name: initial.name,
             engine_pool: initial.engine_pool ?? false,
+            runtime_id: initial.runtime_id ?? null,
+            gpu: initial.gpu ?? null,
+            port: initial.port ?? null,
             max_loaded: initial.max_loaded ?? 4,
             residency: initial.residency || 'on-demand',
             priority: initial.priority ?? 50,
@@ -479,7 +499,6 @@ export function DeploymentSetEditor({
   );
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [separate, setSeparate] = useState(false),
     [pendingRevision, setPendingRevision] = useState<number | null>(null),
     [revisionConflict, setRevisionConflict] = useState(false);
   const [artifactId, setArtifactId] = useState(
@@ -601,13 +620,15 @@ export function DeploymentSetEditor({
       ...defaults.deployments,
       name: model.name,
       artifact_id: model.id,
-      runtime_id: runtime?.id || '',
+      runtime_id: value.engine_pool
+        ? value.runtime_id || ''
+        : runtime?.id || '',
       config,
       raw_args: [],
       catalog: structuredClone(defaults.deployments.catalog),
       alias,
-      port,
-      gpu: null,
+      port: value.engine_pool ? null : port,
+      gpu: value.engine_pool ? (value.gpu ?? null) : null,
     };
     set('members', [...value.members, member]);
     setSelected(value.members.length);
@@ -750,9 +771,12 @@ export function DeploymentSetEditor({
                   }}
                 >
                   {value.members.map((m, index: number) => (
-                    <ToggleGroupItem key={m.id || m.port} value={String(index)}>
+                    <ToggleGroupItem
+                      key={m.id || 'm' + index}
+                      value={String(index)}
+                    >
                       {m.name || `Model ${index + 1}`}
-                      {invalid[m.id || m.port] || aliasError(m)
+                      {invalid[m.id || 'm' + index] || aliasError(m)
                         ? ' · Check settings'
                         : ''}
                     </ToggleGroupItem>
@@ -764,7 +788,7 @@ export function DeploymentSetEditor({
                   hidden={selected !== index}
                   data-model-index={index}
                   className="model-edit-section"
-                  key={m.id || m.port}
+                  key={m.id || 'm' + index}
                 >
                   <h3>{m.name}</h3>
                   <p className="text-muted-foreground text-sm">
@@ -816,7 +840,10 @@ export function DeploymentSetEditor({
                       data={data}
                       set={(member) => updateMember(index, member)}
                       onValid={(valid) =>
-                        setInvalid((v) => ({ ...v, [m.id || m.port]: !valid }))
+                        setInvalid((v) => ({
+                          ...v,
+                          [m.id || 'm' + index]: !valid,
+                        }))
                       }
                       recommendation={
                         preview.data?.members?.[index]?.recommendation
@@ -873,7 +900,10 @@ export function DeploymentSetEditor({
                         value.members.filter((_, i) => i !== index),
                       );
                       setSelected(Math.max(0, selected - 1));
-                      setInvalid((v) => ({ ...v, [m.id || m.port]: false }));
+                      setInvalid((v) => ({
+                        ...v,
+                        [m.id || 'm' + index]: false,
+                      }));
                     }}
                   >
                     Remove model
@@ -893,7 +923,7 @@ export function DeploymentSetEditor({
                   </p>
                   <Field label="Shared installed engine">
                     <NativeSelect
-                      value={value.members[0]?.runtime_id || ''}
+                      value={value.runtime_id ?? ''}
                       onChange={async (e) => {
                         const runtimeId = e.target.value;
                         if (
@@ -904,9 +934,11 @@ export function DeploymentSetEditor({
                           return;
                         setValue((previous) => ({
                           ...previous,
+                          runtime_id: runtimeId,
                           members: previous.members.map((member) => ({
                             ...member,
                             runtime_id: runtimeId,
+                            port: null,
                             config: {},
                             raw_args: [],
                           })),
@@ -916,7 +948,7 @@ export function DeploymentSetEditor({
                       {data.runtimes
                         .filter(
                           (runtime) =>
-                            runtime.id === value.members[0]?.runtime_id ||
+                            runtime.id === value.runtime_id ||
                             (runtime.execution_kind === 'native' &&
                               runtime.engine === 'llama.cpp' &&
                               runtime.capabilities?.flags?.includes(
@@ -933,22 +965,34 @@ export function DeploymentSetEditor({
                         ))}
                     </NativeSelect>
                   </Field>
-                  {value.members[0] && (
+                  <Field label="Shared device">
                     <Placement
                       part="gpu"
-                      value={value.members[0]}
+                      value={{ gpu: value.gpu ?? null }}
                       host={data.host?.[0]}
                       change={(placement) =>
                         setValue((previous) => ({
                           ...previous,
+                          gpu: placement.gpu ?? null,
                           members: previous.members.map((member) => ({
                             ...member,
-                            gpu: placement.gpu,
+                            gpu: placement.gpu ?? null,
+                            port: null,
                           })),
                         }))
                       }
                     />
-                  )}
+                  </Field>
+                  <Field label="Serving port">
+                    <NumberControl
+                      label="Serving port"
+                      required
+                      min={1024}
+                      max={65535}
+                      value={value.port ?? undefined}
+                      change={(v) => set('port', v ?? null)}
+                    />
+                  </Field>
                 </>
               )}
               <Field
@@ -1049,7 +1093,7 @@ export function DeploymentSetEditor({
                 </Field>
                 {!value.engine_pool &&
                   value.members.map((member, index) => (
-                    <FieldSet key={member.id || member.port}>
+                    <FieldSet key={member.id || 'member' + index}>
                       <FieldLegend>{member.name} endpoint</FieldLegend>
                       <Placement
                         part="network"
@@ -1117,16 +1161,6 @@ export function DeploymentSetEditor({
             >
               Discard
             </Button>
-            {initial && value.members.length > 1 && (
-              <Button
-                variant="destructive"
-                type="button"
-                disabled={busy}
-                onClick={() => setSeparate(true)}
-              >
-                Separate models…
-              </Button>
-            )}
             <Button
               variant="default"
               type="submit"
@@ -1142,35 +1176,6 @@ export function DeploymentSetEditor({
           </div>
         </form>
       </DraftFormProvider>
-      {separate && (
-        <section className="warning">
-          <p>
-            Make each model a standalone deployment? Current shared policies
-            will be kept.
-          </p>
-          <Button
-            variant="destructive"
-            type="button"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await api(
-                  `/api/deployment-sets/${initial!.id}/dissolve?expected=${initial!.revision}`,
-                  {},
-                );
-                saved('');
-              } catch (e) {
-                setError(message(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            Separate models
-          </Button>
-        </section>
-      )}
     </Shell>
   );
 }

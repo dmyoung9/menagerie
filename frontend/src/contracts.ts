@@ -305,7 +305,7 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     runtime_assignment: opt(d.oneOf('automatic', 'dedicated')),
     identifier_mode: opt(d.oneOf('generated', 'custom')),
     active_alias: opt(d.string),
-    port: opt(d.number),
+    port: opt(d.nullable(d.number)),
     residency: opt(d.string),
     priority: opt(d.number),
     idle_timeout: opt(d.number),
@@ -348,8 +348,9 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
       members,
       member_ids,
     };
-  // A group has no member-specific alias, private port, or profile snapshot.
-  for (const key of ['alias', 'port', 'gpu', 'profile_snapshot']) {
+  // A group has no member-specific alias or profile snapshot; it does own
+  // the pool runtime, device and serving port.
+  for (const key of ['alias', 'profile_snapshot']) {
     if (input[key] !== undefined)
       d.fail(`${path}.${key}`, 'no member-specific field on a serving group');
   }
@@ -359,6 +360,9 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
     name: d.string,
     enabled: d.boolean,
     engine_pool: opt(d.boolean),
+    runtime_id: opt(d.nullable(d.string)),
+    gpu: opt(d.nullable(d.number)),
+    port: opt(d.nullable(d.number)),
     max_loaded: opt(d.number),
     state: d.string,
     residency: opt(d.string),
@@ -384,7 +388,7 @@ export const deploymentDraft = d.object<T.DeploymentDraft>({
   raw_args: stringArray,
   catalog: modelCatalog,
   alias: d.string,
-  port: d.number,
+  port: d.nullable(d.number),
   residency: d.string,
   priority: d.number,
   idle_timeout: d.number,
@@ -398,6 +402,9 @@ export const deploymentSetDraft = d.object<T.DeploymentSetDraft>({
   id: opt(d.string),
   name: d.string,
   engine_pool: opt(d.boolean),
+  runtime_id: opt(d.nullable(d.string)),
+  gpu: opt(d.nullable(d.number)),
+  port: opt(d.nullable(d.number)),
   max_loaded: opt(d.number),
   residency: d.string,
   priority: d.number,
