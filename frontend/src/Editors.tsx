@@ -16,12 +16,7 @@ import { ConfigurationSearchProvider } from '@/components/configuration-search';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import { Field, JsonEdit, Menu, type Registry } from './ui';
 import { EngineCatalog } from './EngineCatalog';
-import {
-  Duration,
-  Placement,
-  RuntimeControl,
-  RuntimeSettings,
-} from './FormControls';
+import { Duration, Placement, RuntimeControl } from './FormControls';
 import { RuntimeFlagCard } from './RuntimeFlagCard';
 import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
@@ -37,7 +32,6 @@ import {
   stringArray,
   modelCatalog,
   environment,
-  profileDraft,
   deploymentDraft,
   runtimeDraft,
   runtimeCapabilities,
@@ -48,16 +42,14 @@ import { editable } from './editor-state';
 import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { artifactLimits } from './artifact-metadata';
 import type {
-  Artifact,
   Deployment,
+  DeploymentDraft,
   EditorDraft,
   EditorDraftMap,
   EditorState,
   EngineRecommendation,
   EditableSource,
   JsonValue,
-  Profile,
-  ProfileDraft,
   Runtime,
   RuntimeRecommendation,
 } from './types';
@@ -135,7 +127,7 @@ export function ConfigurationFields({
   recommendation,
   modelFields,
   placementFields,
-  formPath = 'configuration.config',
+  formPath = 'config',
   templateOverride,
   runtimeLocked = false,
   observed,
@@ -145,9 +137,9 @@ export function ConfigurationFields({
   availability,
   forecast,
 }: {
-  value: ProfileDraft;
+  value: DeploymentDraft;
   data: Registry;
-  set: (value: ProfileDraft) => void;
+  set: (value: DeploymentDraft) => void;
   onValid: (valid: boolean) => void;
   recommendation?: RuntimeRecommendation;
   modelFields?: ReactNode;
@@ -1055,9 +1047,7 @@ type EditorProps = {
   onReconciled?: (fresh: EditableSource) => void;
 };
 type EditorField =
-  | keyof EditorDraftMap['profiles']
-  | keyof EditorDraftMap['deployments']
-  | keyof EditorDraftMap['runtimes'];
+  keyof EditorDraftMap['deployments'] | keyof EditorDraftMap['runtimes'];
 export function Editor(props: EditorProps) {
   const { initial, data, remove, busy, onReconciled } = props;
   const kind = initial.kind;
@@ -1102,8 +1092,7 @@ export function Editor(props: EditorProps) {
     reset,
   } = useDraftForm<EditorDraft>(initial.value, async (value) => {
     if (Object.values(invalid).some(Boolean) || busy || props.disabled) return;
-    if (kind === 'profiles') props.save({ kind, value: profileDraft(value) });
-    else if (kind === 'deployments') {
+    if (kind === 'deployments') {
       const draft = deploymentDraft(value);
       let alias = draft.alias;
       setNamingError('');
@@ -1145,11 +1134,9 @@ export function Editor(props: EditorProps) {
     );
     if (!fresh) return;
     const freshValue =
-      kind === 'profiles'
-        ? editable('profiles', fresh as Profile)
-        : kind === 'deployments'
-          ? editable('deployments', fresh as Deployment)
-          : editable('runtimes', fresh as Runtime);
+      kind === 'deployments'
+        ? editable('deployments', fresh as Deployment)
+        : editable('runtimes', fresh as Runtime);
     setValue(
       reconcileDeep(mountRef.current!, freshValue, value) as EditorDraft,
     );
@@ -1160,7 +1147,6 @@ export function Editor(props: EditorProps) {
     !!props.embedded && changed,
     !!props.embedded && busy,
   );
-  const profile = 'artifact_id' in value ? value : undefined;
   const deployment = 'alias' in value ? value : undefined;
   const originalDeployment =
     'alias' in initial.value ? initial.value : undefined;
@@ -1177,7 +1163,6 @@ export function Editor(props: EditorProps) {
   );
   const runtime = 'engine' in value ? value : undefined;
   const decode = {
-    profiles: profileDraft,
     deployments: deploymentDraft,
     runtimes: runtimeDraft,
   }[kind];
@@ -1191,7 +1176,22 @@ export function Editor(props: EditorProps) {
         .map((d) => ({ ...d, configuration: d.profile_snapshot }))
     : [];
   const preview = useResourcePreview(
-    deployment?.configuration ? [deployment, ...peers] : [],
+    deployment
+      ? [
+          {
+            ...deployment,
+            configuration: {
+              name: deployment.name,
+              artifact_id: deployment.artifact_id,
+              runtime_id: deployment.runtime_id,
+              config: deployment.config,
+              raw_args: deployment.raw_args,
+              catalog: deployment.catalog,
+            },
+          },
+          ...peers,
+        ]
+      : [],
     data.host?.[0]?.ts,
   );
   const set = (key: EditorField, v: unknown) =>
@@ -1239,32 +1239,6 @@ export function Editor(props: EditorProps) {
       />
       {label}
     </label>
-  );
-  const select = (
-    key: EditorField,
-    rows: (Artifact | Runtime)[],
-    label: string,
-  ) => (
-    <Field label={label}>
-      <NativeSelect
-        required
-        value={
-          typeof read(key) === 'string' || typeof read(key) === 'number'
-            ? String(read(key))
-            : ''
-        }
-        onChange={(e) => set(key, e.target.value)}
-      >
-        <NativeSelectOption value="" disabled>
-          Select…
-        </NativeSelectOption>
-        {rows.map((r) => (
-          <NativeSelectOption key={r.id} value={r.id}>
-            {r.name}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
-    </Field>
   );
   const json = (
     key: 'config' | 'raw_args' | 'catalog' | 'env' | 'command_template',
@@ -1474,7 +1448,7 @@ export function Editor(props: EditorProps) {
         )}
       </SettingsSection>
     ) : null;
-  const forecast = deployment?.configuration && (
+  const forecast = deployment && (
     <DraftResources compact preview={preview.data} error={preview.error} />
   );
   return (
@@ -1547,9 +1521,9 @@ export function Editor(props: EditorProps) {
               disabled={busy || props.disabled}
             >
               {identity}
-              {kind === 'deployments' && deployment.configuration && (
+              {deployment && (
                 <ConfigurationFields
-                  value={deployment.configuration}
+                  value={deployment}
                   deploymentId={deployment.id}
                   templateOverride={deployment.template_override}
                   runtimeLocked={Boolean(owner?.engine_pool)}
@@ -1564,7 +1538,7 @@ export function Editor(props: EditorProps) {
                     )?.runtime_observation?.observed_at
                   }
                   data={data}
-                  set={(configuration) => set('configuration', configuration)}
+                  set={(configuration) => setValue(configuration)}
                   onValid={(valid) =>
                     setInvalid((prev) => ({
                       ...prev,
@@ -1579,7 +1553,7 @@ export function Editor(props: EditorProps) {
                     <ChatTemplateSettings
                       label="Chat template"
                       model={data.models.find(
-                        (m) => m.id === deployment.configuration?.artifact_id,
+                        (m) => m.id === deployment.artifact_id,
                       )}
                       override={deployment.template_override || null}
                       onChange={(selection) =>
@@ -1617,32 +1591,6 @@ export function Editor(props: EditorProps) {
         ) : (
           <FieldSet key={epoch} disabled={busy || props.disabled}>
             {identity}
-            {kind === 'profiles' && profile && (
-              <>
-                {select('artifact_id', data.models || [], 'Model')}
-                {select('runtime_id', data.runtimes || [], 'Engine')}
-                <RuntimeSettings
-                  engineSelected={Boolean(profile.runtime_id)}
-                  schema={
-                    data.runtimes?.find((r) => r.id === profile.runtime_id)
-                      ?.capabilities?.schema || {}
-                  }
-                  value={profile.config}
-                  change={(config) => set('config', config)}
-                  host={data.host?.[0]}
-                  formPath="config"
-                />
-                <details>
-                  <summary>Advanced</summary>
-                  {json('config', 'Runtime options (JSON)')}
-                  {json('raw_args', 'Arguments (JSON array)')}
-                  {json('catalog', 'Client capabilities (JSON)')}
-                </details>
-                <p className="muted">
-                  Running deployments keep their saved revision.
-                </p>
-              </>
-            )}
             {kind === 'runtimes' && runtime && (
               <>
                 <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
@@ -1753,7 +1701,7 @@ export function Editor(props: EditorProps) {
               busy || props.disabled || Object.values(invalid).some(Boolean)
             }
           >
-            {busy ? 'Saving…' : kind === 'profiles' ? 'Save revision' : 'Save'}
+            {busy ? 'Saving…' : 'Save'}
           </Button>
         </div>
       </form>

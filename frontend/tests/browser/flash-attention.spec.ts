@@ -64,8 +64,8 @@ for (const width of [1440, 576, 320]) {
       fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     );
-    expect(saved.configuration!.config['flash-attn']).toBe('auto');
-    expect(saved.configuration!.config).not.toHaveProperty('cache-type-v');
+    expect(saved.config['flash-attn']).toBe('auto');
+    expect(saved.config).not.toHaveProperty('cache-type-v');
   });
 }
 

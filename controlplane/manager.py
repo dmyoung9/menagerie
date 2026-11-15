@@ -771,6 +771,16 @@ class Manager:
             raise Conflict("Deployment has active requests")
         stopped, started = [], []
         unit = self.unit(ids[0])
+
+        def _member(ident):
+            d = self.store.get("deployment", ident)
+            p = d["profile_snapshot"]
+            return {
+                **d,
+                "artifact_identity": self.store.get("artifact", p["artifact_id"]),
+                "runtime_identity": self.store.get("runtime", p["runtime_id"]),
+            }
+
         activation = self.store.put(
             "activation",
             {
@@ -779,7 +789,7 @@ class Manager:
                 "deployment_name": unit["name"],
                 "deployment_policy": {k: unit[k] for k in deployment_sets.POLICY_KEYS},
                 "started_at": time.time(),
-                "deployments": [self.store.get("deployment", i) for i in ids],
+                "deployments": [_member(i) for i in ids],
                 "authorized_stops": authorized_stops or [],
                 "plan": check,
                 "state": "STARTING",

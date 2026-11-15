@@ -36,18 +36,13 @@ def store_for(tmp_path):
 
 
 def put_standalone(store, ident: str, config: dict) -> dict:
-    store.put(
-        "profile",
-        {
-            "id": f"p{ident}",
-            "name": ident,
-            "artifact_id": "w",
-            "runtime_id": "r",
-            "config": config,
-            "raw_args": [],
-            "catalog": {},
-        },
-    )
+    snapshot = {
+        "artifact_id": "w",
+        "runtime_id": "r",
+        "config": config,
+        "raw_args": [],
+        "catalog": {},
+    }
     return store.put(
         "deployment",
         {
@@ -55,8 +50,12 @@ def put_standalone(store, ident: str, config: dict) -> dict:
             "name": ident,
             "alias": ident,
             "port": 90000 + len(ident),
-            "profile_id": f"p{ident}",
-            "profile_snapshot": store.get("profile", f"p{ident}"),
+            "artifact_id": "w",
+            "runtime_id": "r",
+            "config": config,
+            "raw_args": [],
+            "catalog": {},
+            "profile_snapshot": snapshot,
             "state": "STOPPED",
             "residency": "on-demand",
             "priority": 50,

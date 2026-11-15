@@ -80,6 +80,7 @@ import type {
   DeploymentSetDraft,
   HostSnapshot,
   OperationEvent,
+  ResourcePreviewDraft,
   ServingDeployment,
 } from './types';
 
@@ -486,7 +487,19 @@ export function DeploymentSetEditor({
     ),
     [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState(0);
-  const preview = useResourcePreview(value.members, data.host?.[0]?.ts);
+  const previewMembers: ResourcePreviewDraft[] = value.members.map((m) => ({
+    name: m.name,
+    gpu: m.gpu ?? null,
+    configuration: {
+      name: m.name,
+      artifact_id: m.artifact_id,
+      runtime_id: m.runtime_id,
+      config: m.config,
+      raw_args: m.raw_args,
+      catalog: m.catalog,
+    },
+  }));
+  const preview = useResourcePreview(previewMembers, data.host?.[0]?.ts);
   const [epoch, setEpoch] = useState(0);
   // Mount-time set draft, the reference for touched-vs-adopted fields. It must
   // not follow the live initial, or untouched fields would adopt stale server
@@ -557,9 +570,7 @@ export function DeploymentSetEditor({
     );
     const runtime =
       value.engine_pool && value.members.length
-        ? compatible.find(
-            (r) => r.id === value.members[0].configuration?.runtime_id,
-          )
+        ? compatible.find((r) => r.id === value.members[0].runtime_id)
         : compatible.find((r) => r.engine === recommended) || compatible[0];
     if (value.engine_pool && value.members.length && !runtime) {
       setError('This model is incompatible with the shared pool engine.');
@@ -589,17 +600,14 @@ export function DeploymentSetEditor({
     const member: DeploymentDraft = {
       ...defaults.deployments,
       name: model.name,
+      artifact_id: model.id,
+      runtime_id: runtime?.id || '',
+      config,
+      raw_args: [],
+      catalog: structuredClone(defaults.deployments.catalog),
       alias,
       port,
       gpu: null,
-      configuration: {
-        name: model.name,
-        artifact_id: model.id,
-        runtime_id: runtime?.id || '',
-        config,
-        raw_args: [],
-        catalog: structuredClone(defaults.profiles.catalog),
-      },
     };
     set('members', [...value.members, member]);
     setSelected(value.members.length);
@@ -792,8 +800,8 @@ export function DeploymentSetEditor({
                   </Field>
                   <div className="configuration-grid">
                     <ConfigurationFields
-                      formPath={`members[${index}].configuration.config`}
-                      value={m.configuration!}
+                      formPath={`members[${index}].config`}
+                      value={m}
                       deploymentId={m.id}
                       templateOverride={m.template_override}
                       runtimeLocked={Boolean(value.engine_pool)}
@@ -806,9 +814,7 @@ export function DeploymentSetEditor({
                           ?.runtime_observation?.observed_at
                       }
                       data={data}
-                      set={(configuration) =>
-                        updateMember(index, { configuration })
-                      }
+                      set={(member) => updateMember(index, member)}
                       onValid={(valid) =>
                         setInvalid((v) => ({ ...v, [m.id || m.port]: !valid }))
                       }
@@ -816,11 +822,11 @@ export function DeploymentSetEditor({
                         preview.data?.members?.[index]?.recommendation
                       }
                       modelFields={
-                        m.configuration && (
+                        m && (
                           <ChatTemplateSettings
                             label="Chat template"
                             model={data.models.find(
-                              (x) => x.id === m.configuration?.artifact_id,
+                              (x) => x.id === m.artifact_id,
                             )}
                             override={m.template_override || null}
                             onChange={(selection) =>
@@ -887,7 +893,7 @@ export function DeploymentSetEditor({
                   </p>
                   <Field label="Shared installed engine">
                     <NativeSelect
-                      value={value.members[0]?.configuration?.runtime_id || ''}
+                      value={value.members[0]?.runtime_id || ''}
                       onChange={async (e) => {
                         const runtimeId = e.target.value;
                         if (
@@ -900,14 +906,9 @@ export function DeploymentSetEditor({
                           ...previous,
                           members: previous.members.map((member) => ({
                             ...member,
-                            configuration: member.configuration
-                              ? {
-                                  ...member.configuration,
-                                  runtime_id: runtimeId,
-                                  config: {},
-                                  raw_args: [],
-                                }
-                              : undefined,
+                            runtime_id: runtimeId,
+                            config: {},
+                            raw_args: [],
                           })),
                         }));
                       }}
@@ -915,8 +916,7 @@ export function DeploymentSetEditor({
                       {data.runtimes
                         .filter(
                           (runtime) =>
-                            runtime.id ===
-                              value.members[0]?.configuration?.runtime_id ||
+                            runtime.id === value.members[0]?.runtime_id ||
                             (runtime.execution_kind === 'native' &&
                               runtime.engine === 'llama.cpp' &&
                               runtime.capabilities?.flags?.includes(

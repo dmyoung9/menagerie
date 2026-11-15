@@ -348,7 +348,7 @@ for (const width of [1440, 576, 320]) {
       fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     );
-    expect(saved.configuration!.config).toMatchObject({
+    expect(saved.config).toMatchObject({
       'top-p': 0.9,
       'top-k': 40,
       'min-p': 0.05,
@@ -361,7 +361,7 @@ for (const width of [1440, 576, 320]) {
       extension: 'preserved',
       mmproj: '/models/example-mmproj.gguf',
     });
-    expect(saved.configuration!.catalog.model?.capabilities).toMatchObject({
+    expect(saved.catalog.model?.capabilities).toMatchObject({
       input: ['image'],
       output: ['image'],
       reasoning: { supported: true },

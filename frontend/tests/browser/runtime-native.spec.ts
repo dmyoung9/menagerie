@@ -25,7 +25,7 @@ test('new deployments leave tuning and device placement to the engine', async ({
     fixture.writes.find((w) => w.path === '/api/deployments')!.body,
   );
   expect(saved.gpu).toBeNull();
-  expect(saved.configuration!.config).toEqual({});
+  expect(saved.config).toEqual({});
 });
 
 test('a native pool remains a pool even with one model and round-trips its policy', async ({
@@ -61,7 +61,7 @@ test('a native pool remains a pool even with one model and round-trips its polic
   expect(saved.engine_pool).toBe(true);
   expect(saved.residency).toBe('on-demand');
   expect(saved.allow_eviction).toBe(false);
-  expect(saved.members[0].configuration!.config).toEqual({});
+  expect(saved.members[0].config).toEqual({});
 });
 
 test('native pool device visibility is edited once and saved for all members', async ({
@@ -99,8 +99,7 @@ test('native pool device visibility is edited once and saved for all members', a
   expect(saved.members.map((member) => member.gpu)).toEqual([0, 0]);
   expect(new Set(saved.members.map((member) => member.port)).size).toBe(2);
   expect(new Set(saved.members.map((member) => member.alias)).size).toBe(2);
-  expect(
-    new Set(saved.members.map((member) => member.configuration!.runtime_id))
-      .size,
-  ).toBe(1);
+  expect(new Set(saved.members.map((member) => member.runtime_id)).size).toBe(
+    1,
+  );
 });

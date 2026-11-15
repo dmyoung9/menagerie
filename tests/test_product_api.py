@@ -92,7 +92,7 @@ async def test_wizard_configuration_saves_without_loading_and_preserves_snapshot
             "X-Menagerie-Token": (await client.get("/api/status")).json()["csrf_token"]
         }
         payload = {
-            "name": "Example settings",
+            "name": "Example",
             "artifact_id": "model",
             "runtime_id": "engine",
             "config": {"ctx-size": 65536, "parallel": 2, "gpu-layers": "all"},
@@ -108,47 +108,46 @@ async def test_wizard_configuration_saves_without_loading_and_preserves_snapshot
                     "limit": {"output": 8192},
                 },
             },
+            "alias": "example",
+            "port": 8120,
+            "residency": "on-demand",
         }
-        response = await client.post("/api/profiles", json=payload, headers=headers)
+        response = await client.post("/api/model-setups", json=payload, headers=headers)
         assert response.status_code == 200, response.text
-        profile = response.json()
-        assert profile["catalog"]["model"]["limit"] == {
+        deployment = response.json()
+        assert deployment["catalog"]["model"]["limit"] == {
             "context": 32768,
             "output": 8192,
         }
-        response = await client.post(
-            "/api/deployments",
-            json={
-                "name": "Example",
-                "profile_id": profile["id"],
-                "alias": "example",
-                "port": 8120,
-                "residency": "on-demand",
+        assert deployment["state"] == "STOPPED"
+        assert deployment["enabled"] is True
+        saved = store.get("deployment", deployment["id"])
+        assert saved["artifact_id"] == "model"
+        assert saved["runtime_id"] == "engine"
+        assert saved["config"] == {
+            "ctx-size": 65536,
+            "parallel": 2,
+            "gpu-layers": "all",
+        }
+        assert "profile_id" not in saved
+        assert saved["profile_snapshot"]["config"] == saved["config"]
+        assert saved["profile_snapshot"]["catalog"] == saved["catalog"]
+        assert store.list("job") == []
+        revised = await client.post(
+            f"/api/model-setups?expected={deployment['revision']}",
+            json=payload
+            | {
+                "id": deployment["id"],
+                "config": {"ctx-size": 16384, "parallel": 1},
             },
             headers=headers,
         )
-        assert response.status_code == 200, response.text
-        deployment = response.json()
-        assert deployment["state"] == "STOPPED"
-        assert deployment["enabled"] is True
-        assert store.list("job") == []
-        revised = await client.post(
-            "/api/profiles?expected=1",
-            json=payload
-            | {"id": profile["id"], "config": {"ctx-size": 16384, "parallel": 1}},
-            headers=headers,
-        )
         assert revised.status_code == 200, revised.text
-        assert (
-            store.get("deployment", deployment["id"])["profile_snapshot"]["revision"]
-            == 1
-        )
-        assert (
-            store.get("deployment", deployment["id"])["profile_snapshot"]["config"][
-                "ctx-size"
-            ]
-            == 65536
-        )
+        assert revised.json()["revision"] == deployment["revision"] + 1
+        updated = store.get("deployment", deployment["id"])
+        assert updated["revision"] == deployment["revision"] + 1
+        assert updated["config"]["ctx-size"] == 16384
+        assert updated["profile_snapshot"]["config"]["ctx-size"] == 16384
 
 
 async def test_unrelated_history_is_preserved(tmp_path):

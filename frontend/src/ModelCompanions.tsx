@@ -11,7 +11,12 @@ import {
   hasEmbeddedMtp,
   selectMtp,
 } from './companion-options';
-import type { Artifact, JsonValue, ProfileDraft, RuntimeField } from './types';
+import type {
+  Artifact,
+  DeploymentDraft,
+  JsonValue,
+  RuntimeField,
+} from './types';
 
 export function ModelCompanions({
   model,
@@ -22,9 +27,9 @@ export function ModelCompanions({
 }: {
   model?: Artifact;
   models: Artifact[];
-  value: ProfileDraft;
+  value: DeploymentDraft;
   schema: Record<string, RuntimeField>;
-  change: (value: ProfileDraft) => void;
+  change: (value: DeploymentDraft) => void;
 }) {
   const { projectors, heads } = companionOptions(model, models);
   const config = value.config;

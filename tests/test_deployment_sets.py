@@ -43,9 +43,6 @@ async def setup(tmp_path):
 
 def third(store):
     d = store.get("deployment", "a")
-    p = store.put(
-        "profile", d["profile_snapshot"] | {"id": "c", "name": "c", "catalog": {}}
-    )
     store.put(
         "deployment",
         d
@@ -54,8 +51,12 @@ def third(store):
             "name": "Large",
             "alias": "c",
             "port": port(),
-            "profile_id": p["id"],
-            "profile_snapshot": p,
+            "artifact_id": d["artifact_id"],
+            "runtime_id": d["runtime_id"],
+            "config": d["config"],
+            "raw_args": d["raw_args"],
+            "catalog": {},
+            "profile_snapshot": d["profile_snapshot"] | {"catalog": {}},
             "residency": "on-demand",
             "allow_eviction": True,
         },

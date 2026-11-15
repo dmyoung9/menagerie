@@ -5,19 +5,16 @@ import type {
   DeploymentSetDraft,
   DeploymentDraft,
   EditableSourceMap,
-  ProfileDraft,
   RuntimeDraft,
 } from './types';
 
 export type DraftLike = Record<string, unknown>;
 
-export type RecordKind = 'profiles' | 'deployments' | 'runtimes';
+export type RecordKind = 'deployments' | 'runtimes';
 
-type EditorKindDraft<K extends RecordKind> = K extends 'profiles'
-  ? ProfileDraft
-  : K extends 'deployments'
-    ? DeploymentDraft
-    : RuntimeDraft;
+type EditorKindDraft<K extends RecordKind> = K extends 'deployments'
+  ? DeploymentDraft
+  : RuntimeDraft;
 
 /** Deep equality that treats missing keys as distinct from present values.
  *  An omitted field is an explicit choice (engine default), so it must never

@@ -5,6 +5,7 @@ import json
 import httpx
 
 from controlplane.api import create_app
+from controlplane.schema import profile_view
 
 
 async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
@@ -31,7 +32,6 @@ async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
         },
     )
     settings = {
-        "name": "Ignored settings label",
         "artifact_id": "weights",
         "runtime_id": "engine",
         "config": {"ctx-size": 16384, "parallel": 2},
@@ -44,7 +44,11 @@ async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
         "name": "Gemma Four",
         "alias": "gemma4",
         "port": 8120,
-        "configuration": settings,
+        "artifact_id": settings["artifact_id"],
+        "runtime_id": settings["runtime_id"],
+        "config": settings["config"],
+        "raw_args": [],
+        "catalog": settings["catalog"],
     }
     try:
         async with httpx.AsyncClient(
@@ -78,23 +82,27 @@ async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
             )
             assert duplicate.status_code == 200, duplicate.text
             second = duplicate.json()
-            assert second["profile_id"] != first["profile_id"]
-            profiles_before = store.list("profile")
+            # Each deployment owns its configuration; the snapshot is the
+            # deployment's own five fields, not a second handle on a shared
+            # profile.
+            assert first["id"] != second["id"]
+            assert profile_view(second) == second["profile_snapshot"]
+            first_row = store.get("deployment", first["id"])
             conflict = await save(
                 payload | {"id": first["id"], "name": "Changed"}, expected=0
             )
             assert conflict.status_code >= 400
-            assert store.list("profile") == profiles_before
+            assert store.get("deployment", first["id"]) == first_row
             invalid = await save(
                 payload
                 | {
                     "alias": "invalid",
                     "port": 8122,
-                    "configuration": settings | {"raw_args": ["--port", "9000"]},
+                    "raw_args": ["--port", "9000"],
                 }
             )
             assert invalid.status_code >= 400
-            assert store.list("profile") == profiles_before
+            assert store.get("deployment", first["id"]) == first_row
             renamed = await save(
                 payload | {"id": first["id"], "name": "Gemma Renamed"},
                 expected=first["revision"],
@@ -139,8 +147,8 @@ async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
             store.put(
                 "deployment", renamed.json() | {"state": "READY"}, historical=False
             )
-            before = store.list("profile")
+            row_before = store.get("deployment", first["id"])
             assert (await save(payload | {"id": first["id"]})).status_code == 409
-            assert store.list("profile") == before
+            assert store.get("deployment", first["id"]) == row_before
     finally:
         await app.state.manager.close()

@@ -148,19 +148,20 @@ class Runtime(Record):
     trust: bool = False
 
 
-class Profile(Record):
-    name: str
-    artifact_id: str
-    runtime_id: str
-    config: dict = Field(default_factory=dict)
-    raw_args: list[str] = Field(default_factory=list)
-    catalog: dict = Field(default_factory=dict)
-
-
 class CapabilityPreview(BaseModel):
-    configuration: Profile
+    configuration: dict
     template_override: dict | None = None
     deployment_id: str | None = None
+
+
+# The five configuration fields a deployment carries directly (the collapsed
+# profile). Kept in one place so writers and readers stay in sync.
+PROFILE_FIELDS = ("artifact_id", "runtime_id", "config", "raw_args", "catalog")
+
+
+def profile_view(d: dict) -> dict:
+    """The five configuration keys of a deployment-shaped dict."""
+    return {k: d.get(k, {}) for k in PROFILE_FIELDS}
 
 
 class DeploymentPolicy(Record):
@@ -174,8 +175,11 @@ class DeploymentPolicy(Record):
 
 class Deployment(DeploymentPolicy):
     name: str
-    profile_id: str | None = None
-    configuration: Profile | None = None
+    artifact_id: str
+    runtime_id: str
+    config: dict = Field(default_factory=dict)
+    raw_args: list[str] = Field(default_factory=list)
+    catalog: dict = Field(default_factory=dict)
     alias: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,159}$")
     # How the API identifier (alias) is derived. In "generated" mode the
     # identifier follows the display name (deterministic slug); in "custom"
@@ -225,7 +229,7 @@ class Settings(BaseModel):
 class ResourceDraft(BaseModel):
     name: str = "Draft model"
     gpu: int | None = Field(default=None, ge=0, le=31)
-    configuration: Profile
+    configuration: dict
 
 
 class ResourcePreview(BaseModel):

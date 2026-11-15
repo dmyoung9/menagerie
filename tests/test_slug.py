@@ -249,7 +249,9 @@ def _seed(app, **fields):
 
 def test_new_deployment_defaults_to_generated_mode(tmp_path):
     app = create_app(tmp_path)
-    row = _seed(app, name="Example", profile_id="p1", alias="example-8b")
+    row = _seed(
+        app, name="Example", artifact_id="w", runtime_id="r", alias="example-8b"
+    )
     assert row["identifier_mode"] == "generated"
     # The stored alias is preserved verbatim (not recomputed from the name).
     assert row["alias"] == "example-8b"
@@ -260,7 +262,8 @@ def test_custom_mode_is_persisted_and_alias_is_stable(tmp_path):
     row = _seed(
         app,
         name="Example",
-        profile_id="p1",
+        artifact_id="w",
+        runtime_id="r",
         alias="my-custom-id",
         identifier_mode="custom",
     )
@@ -275,7 +278,12 @@ def test_legacy_deployment_without_mode_is_treated_as_generated(tmp_path):
     app = create_app(tmp_path)
     store = app.state.store
     row = Deployment(
-        id="legacy", name="Legacy", profile_id="p1", alias="legacy", port=8120
+        id="legacy",
+        name="Legacy",
+        artifact_id="w",
+        runtime_id="r",
+        alias="legacy",
+        port=8120,
     ).model_dump(exclude_none=True)
     row.update(state="STOPPED")
     del row["identifier_mode"]  # simulate a record that predates the field

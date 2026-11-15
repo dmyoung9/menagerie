@@ -138,7 +138,6 @@ function WizardHarness() {
             },
           ],
           deployments: [],
-          profiles: [],
           host: [],
           jobs: [],
         }}

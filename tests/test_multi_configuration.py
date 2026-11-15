@@ -6,6 +6,7 @@ import httpx
 from test_controlplane import baseline, port, seed
 
 from controlplane.api import create_app
+from controlplane.schema import profile_view
 
 
 async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
@@ -37,12 +38,11 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
             "name": alias,
             "alias": alias,
             "port": port,
-            "configuration": {
-                "name": alias,
-                "artifact_id": "weights",
-                "runtime_id": "engine",
-                "config": {"ctx-size": 8192},
-            },
+            "artifact_id": "weights",
+            "runtime_id": "engine",
+            "config": {"ctx-size": 8192},
+            "raw_args": [],
+            "catalog": {},
         }
 
     def draft(unit):
@@ -96,7 +96,16 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
             assert b.status_code == 200, b.text
             b = await unit(b.json()["id"])
             assert set(a["member_ids"]).isdisjoint(b["member_ids"])
-            assert len({m["profile_id"] for u in (a, b) for m in u["members"]}) == 4
+            # Each member is its own deployment owning an independent
+            # configuration snapshot; sharing the installed artifact is the
+            # point, not a shared profile.
+            member_ids = {m["id"] for u in (a, b) for m in u["members"]}
+            assert len(member_ids) == 4
+            assert all(
+                profile_view(m) == m["profile_snapshot"]
+                for u in (a, b)
+                for m in u["members"]
+            )
             assert all(
                 m["profile_snapshot"]["artifact_id"] == "weights"
                 for u in (a, b)
@@ -105,7 +114,7 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
 
             changed = draft(a)
             changed["members"][0]["name"] = "Gemma renamed"
-            changed["members"][0]["configuration"]["config"]["ctx-size"] = 32768
+            changed["members"][0]["config"]["ctx-size"] = 32768
             changed.update(idle_timeout=900)
             response = await save(changed, a["revision"])
             assert response.status_code == 200, response.text
@@ -123,9 +132,7 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
                 == "Gemma renamed"
             )
 
-            before = {
-                k: store.list(k) for k in ("profile", "deployment", "deployment_set")
-            }
+            before = {k: store.list(k) for k in ("deployment", "deployment_set")}
             invalid = deepcopy(changed)
             invalid["members"].append(
                 member("b-gemma", 8124)
@@ -179,11 +186,11 @@ async def test_reused_weights_have_independent_serving_lifecycles(tmp_path):
                         "name": f"{name}-{i}",
                         "alias": f"{name}-{i}",
                         "port": port(),
-                        "configuration": {
-                            "name": "Gemma",
-                            "artifact_id": "weights",
-                            "runtime_id": "runtime",
-                        },
+                        "artifact_id": "weights",
+                        "runtime_id": "runtime",
+                        "config": {},
+                        "raw_args": [],
+                        "catalog": {},
                     }
                     for i in range(2)
                 ]

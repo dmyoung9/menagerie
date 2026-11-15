@@ -7,7 +7,7 @@ import {
 } from '../contracts';
 import { array } from '../decode';
 import type {
-  ProfileDraft,
+  ResourceConfiguration,
   ResourcePreview,
   ResourcePreviewDraft,
 } from '../types';
@@ -23,7 +23,7 @@ export function useResourcePreview(
     'config',
     'raw_args',
     'catalog',
-  ] as const satisfies readonly (keyof ProfileDraft)[];
+  ] as const satisfies readonly (keyof ResourceConfiguration)[];
   const payload = JSON.stringify(
     members.map((member) => {
       const configuration = member.configuration;

@@ -8,7 +8,7 @@ test('curated sections preserve omission and separate explicit automatic context
   const deployment = fixture.registry.deployments.find(
     (entry) => entry.id === 'idle',
   )!;
-  deployment.profile_snapshot!.config = {};
+  deployment.config = {};
   fixture.registry.runtimes[0].capabilities!.schema!['ctx-size'].min = 0;
   fixture.registry.runtimes[0].capabilities!.schema!['ctx-size'].presentation =
     {
@@ -51,7 +51,7 @@ test('curated sections preserve omission and separate explicit automatic context
       (entry) => entry.path === '/api/model-setups?expected=1',
     )!.body,
   );
-  expect(saved.configuration!.config).toEqual({ 'ctx-size': 0 });
+  expect(saved.config).toEqual({ 'ctx-size': 0 });
 });
 
 test('capability warnings retain manual controls and recommendations need explicit application', async ({
@@ -61,7 +61,7 @@ test('capability warnings retain manual controls and recommendations need explic
   const deployment = fixture.registry.deployments.find(
     (entry) => entry.id === 'idle',
   )!;
-  deployment.profile_snapshot!.config = {};
+  deployment.config = {};
   fixture.registry.runtimes[0].capabilities!.schema!.temp = {
     type: 'number',
     min: 0,

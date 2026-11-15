@@ -51,9 +51,9 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
   page,
   fixture,
 }) => {
-  const snapshot = fixture.registry.deployments[1].profile_snapshot;
-  if (!snapshot) throw new Error('Expected fixture profile snapshot');
-  snapshot.catalog = contracts.modelCatalog({
+  const target = fixture.registry.deployments[1];
+  if (!target) throw new Error('Expected fixture deployment');
+  target.catalog = contracts.modelCatalog({
     vendor: { retain: true },
     model: { compatibility: { reasoningField: 'reasoning_content' } },
   });
@@ -85,8 +85,8 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
     entry.path.startsWith('/api/model-setups'),
   );
   const saved = contracts.deploymentDraft(write?.body);
-  expect(saved.configuration?.raw_args).toEqual(['--fixture-control']);
-  const catalog = recordValue(saved.configuration?.catalog);
+  expect(saved.raw_args).toEqual(['--fixture-control']);
+  const catalog = recordValue(saved.catalog);
   expect(catalog.vendor).toEqual({ retain: true });
   expect(recordValue(catalog.model).compatibility).toEqual({
     reasoningField: 'reasoning_content',

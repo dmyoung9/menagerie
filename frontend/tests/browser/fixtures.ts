@@ -3,8 +3,8 @@ import { test as base, expect } from './network';
 import type {
   Deployment,
   DeploymentSet,
+  ProfileSnapshot,
   ServingDeployment,
-  Profile,
   Registry,
   HostSnapshot,
   GpuSnapshot,
@@ -13,7 +13,7 @@ import * as contracts from '../../src/contracts';
 
 export type Fixture = {
   registry: Required<
-    Pick<Registry, 'models' | 'runtimes' | 'profiles' | 'deployments' | 'jobs'>
+    Pick<Registry, 'models' | 'runtimes' | 'deployments' | 'jobs'>
   >;
   host: HostSnapshot & { ts: number; gpus: GpuSnapshot[] };
   writes: { path: string; body: unknown }[];
@@ -69,10 +69,7 @@ export async function openCard(page: Page, name: string) {
 export const test = base.extend<{ fixture: Fixture }>({
   fixture: [
     async ({ page }, use) => {
-      const profile: Profile = {
-        id: 'fixture-profile',
-        revision: 1,
-        name: 'Example settings',
+      const profileSnapshot: ProfileSnapshot = {
         artifact_id: 'model',
         runtime_id: 'engine',
         config: { 'ctx-size': 8192, parallel: 1, 'gpu-layers': 'all' },
@@ -84,21 +81,28 @@ export const test = base.extend<{ fixture: Fixture }>({
         state: string,
         enabled = true,
       ): Deployment => ({
-        id,
-        name: `Example ${id}`,
-        alias: id,
-        revision: 1,
-        state,
-        enabled,
-        residency: 'on-demand',
-        priority: 50,
-        idle_timeout: 300,
-        queue_timeout: 300,
-        gpu: 0,
-        port: id === 'ready' ? 8120 : 8121,
-        allow_eviction: false,
-        profile_snapshot: profile,
-        lifecycle: { serving: enabled },
+        ...{
+          id,
+          name: `Example ${id}`,
+          alias: id,
+          revision: 1,
+          state,
+          enabled,
+          residency: 'on-demand',
+          priority: 50,
+          idle_timeout: 300,
+          queue_timeout: 300,
+          gpu: 0,
+          port: id === 'ready' ? 8120 : 8121,
+          allow_eviction: false,
+          artifact_id: profileSnapshot.artifact_id,
+          runtime_id: profileSnapshot.runtime_id,
+          config: profileSnapshot.config,
+          raw_args: profileSnapshot.raw_args,
+          catalog: profileSnapshot.catalog,
+          profile_snapshot: profileSnapshot,
+          lifecycle: { serving: enabled },
+        },
       });
       const fixture: Fixture = {
         registry: {
@@ -148,7 +152,6 @@ export const test = base.extend<{ fixture: Fixture }>({
               },
             },
           ],
-          profiles: [],
           deployments: [
             deployment('ready', 'READY'),
             deployment('idle', 'STOPPED'),
@@ -414,21 +417,18 @@ export const test = base.extend<{ fixture: Fixture }>({
           const member = (
             draft: import('../../src/types').DeploymentDraft,
             memberId: string,
-          ): Deployment => {
-            const { configuration, ...fields } = draft;
-            return {
-              ...deployment(memberId, 'STOPPED'),
-              ...fields,
-              id: memberId,
-              profile_snapshot: configuration
-                ? {
-                    ...configuration,
-                    revision: 1,
-                    id: configuration.id || `profile-${memberId}`,
-                  }
-                : profile,
-            };
-          };
+          ): Deployment => ({
+            ...deployment(memberId, 'STOPPED'),
+            ...draft,
+            id: memberId,
+            profile_snapshot: {
+              artifact_id: draft.artifact_id,
+              runtime_id: draft.runtime_id,
+              config: draft.config,
+              raw_args: draft.raw_args,
+              catalog: draft.catalog,
+            },
+          });
           if ('members' in input) {
             const members = input.members.map((draft, i) => ({
               ...member(draft, `${id}-${i}`),

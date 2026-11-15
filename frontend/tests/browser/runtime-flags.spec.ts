@@ -111,7 +111,7 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
   const saved = deploymentDraft(
     fixture.writes.find((w) => w.path === '/api/deployments')!.body,
   );
-  expect(saved.configuration!.config['top-k']).toBe(8);
+  expect(saved.config['top-k']).toBe(8);
 });
 
 test('clearing is an editing buffer; blur validates without substituting zero and Enter commits retyped text', async ({
@@ -166,7 +166,7 @@ test('clearing is an editing buffer; blur validates without substituting zero an
     deploymentDraft(
       fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.config['top-k'],
+    ).config['top-k'],
   ).toBe(12);
   await expect(
     page.getByRole('button', { name: 'Discard', exact: true }),
@@ -244,7 +244,7 @@ test('removing an invalid flag clears its errors and unrelated omitted batch def
     .toBe(2);
   const saved = deploymentDraft(
     fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
-  ).configuration!.config;
+  ).config;
   expect(saved).not.toHaveProperty('top-k');
   expect(saved).not.toHaveProperty('batch-size');
   expect(saved['ubatch-size']).toBe(4096);
@@ -350,7 +350,7 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
     .toBe(2);
   const saved = deploymentDraft(
     fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
-  ).configuration!.config;
+  ).config;
   expect(saved['top-k']).toBe(0);
   expect(saved['top-p']).toBe(0.955);
   expect(saved).not.toHaveProperty('threads');
@@ -390,7 +390,7 @@ test('saved thread counts above host concurrency remain editable and save unchan
     deploymentDraft(
       fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.config.threads,
+    ).config.threads,
   ).toBe(16);
 });
 
@@ -650,7 +650,7 @@ for (const width of [1440, 576, 320]) {
     const saved = deploymentDraft(
       fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.config;
+    ).config;
     expect(saved).toMatchObject({
       'top-p': 0.95,
       'repeat-penalty': 1.13,

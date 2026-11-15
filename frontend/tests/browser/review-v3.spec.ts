@@ -54,9 +54,9 @@ test('advanced memory controls are quiet by default, explain themselves and pres
     fixture.writes.find((write) => write.path.startsWith('/api/model-setups?'))!
       .body,
   );
-  expect(saved.configuration!.config['fit-target']).toBeUndefined();
-  expect(saved.configuration!.config['split-mode']).toBeUndefined();
-  expect(saved.configuration!.config['gpu-layers']).toBe('all');
+  expect(saved.config['fit-target']).toBeUndefined();
+  expect(saved.config['split-mode']).toBeUndefined();
+  expect(saved.config['gpu-layers']).toBe('all');
 });
 
 test('performance explains engine defaults and its Add action', async ({

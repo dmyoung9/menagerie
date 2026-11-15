@@ -25,13 +25,7 @@ async def test_process_pool_addition_review_apply_and_selected_load(tmp_path):
         ]
 
         def setup_draft(name):
-            return draft(name, port()) | {
-                "configuration": {
-                    "name": name,
-                    "artifact_id": "weights",
-                    "runtime_id": "runtime",
-                    "config": {},
-                },
+            return draft(name, port(), runtime_id="runtime") | {
                 "queue_timeout": 10,
             }
 
@@ -139,19 +133,18 @@ async def setup(tmp_path):
     await app.state.manager.client.aclose()
 
 
-def draft(name, port):
+def draft(name, port, artifact_id="weights", runtime_id="engine"):
     return {
         "name": name,
         "alias": name.lower(),
         "port": port,
+        "artifact_id": artifact_id,
+        "runtime_id": runtime_id,
+        "config": {},
+        "raw_args": [],
+        "catalog": {},
         "runtime_assignment": "automatic",
         "allow_eviction": True,
-        "configuration": {
-            "name": name,
-            "artifact_id": "weights",
-            "runtime_id": "engine",
-            "config": {},
-        },
     }
 
 

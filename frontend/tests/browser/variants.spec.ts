@@ -9,9 +9,7 @@ for (const enabled of [true, false]) {
     page,
     fixture,
   }) => {
-    fixture.registry.deployments.find(
-      (d) => d.id === 'idle',
-    )!.profile_snapshot!.catalog = {
+    fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
       reasoning: {
         default_mode: 'default',
         presets: [
@@ -58,7 +56,7 @@ for (const enabled of [true, false]) {
     const saved = deploymentDraft(
       fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.catalog;
+    ).catalog;
     expect(saved.reasoning?.default_mode).toBe('default');
     expect(
       saved.reasoning?.presets?.find((p) => p.id === 'default'),
@@ -77,9 +75,7 @@ test('selecting legacy blank Instant as default persists its configured thinking
   page,
   fixture,
 }) => {
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = {
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
     model: { capabilities: { reasoning: false } },
     reasoning: { presets: [{ id: 'instant', enabled: false, body: {} }] },
   };
@@ -112,7 +108,7 @@ test('selecting legacy blank Instant as default persists its configured thinking
     .toBe(2);
   const saved = deploymentDraft(
     fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
-  ).configuration!.catalog;
+  ).catalog;
   expect(
     saved.reasoning?.presets?.find((mode) => mode.id === 'instant'),
   ).toMatchObject({
@@ -132,7 +128,7 @@ for (const width of [1440, 320]) {
       'Research variant with a deliberately long name and no per-row configuration label';
     fixture.registry.deployments.find(
       (deployment) => deployment.id === 'idle',
-    )!.profile_snapshot!.catalog = {
+    )!.catalog = {
       model: { capabilities: { reasoning: true } },
       reasoning: {
         presets: [
@@ -290,9 +286,7 @@ test('guided destination changes and JSON preserve additional template controls'
   page,
   fixture,
 }) => {
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = {
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
     model: { capabilities: { reasoning: true } },
     reasoning: {
       presets: [
@@ -343,7 +337,7 @@ test('guided destination changes and JSON preserve additional template controls'
     deploymentDraft(
       fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.catalog.reasoning!.presets![0].body,
+    ).catalog.reasoning!.presets![0].body,
   ).toEqual({
     reasoning_budget: 8192,
     chat_template_kwargs: { style: 'research', reasoning_effort: 'max' },
@@ -356,9 +350,7 @@ for (const width of [1440, 576, 320]) {
     fixture,
   }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 });
-    fixture.registry.deployments.find(
-      (d) => d.id === 'idle',
-    )!.profile_snapshot!.catalog = {
+    fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
       model: { capabilities: { reasoning: true } },
       reasoning: { presets: defaultReasoningOptions() },
     };
@@ -542,7 +534,7 @@ for (const width of [1440, 576, 320]) {
     const saved = deploymentDraft(
       fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.catalog;
+    ).catalog;
     expect(saved.reasoning?.default_mode).toBe('research');
     expect(
       saved.reasoning?.presets?.find((mode) => mode.id === 'xhigh')?.body,
@@ -635,9 +627,8 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
       ],
     },
   };
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = structuredClone(catalog);
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog =
+    structuredClone(catalog);
   await page.goto('/#/deployments/idle/configuration');
   await openCard(page, 'variants');
   const section = page.getByRole('region', { name: 'Variants', exact: true });
@@ -675,7 +666,7 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
       fixture.writes.find(
         (write) => write.path === '/api/model-setups?expected=1',
       )!.body,
-    ).configuration!.catalog.reasoning,
+    ).catalog.reasoning,
   ).toEqual(catalog.reasoning);
   await openCard(page, 'variants');
   await section
@@ -701,9 +692,7 @@ test('invalid JSON stays local, cancellation guards drafts, and prompt-only vari
   page,
   fixture,
 }) => {
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = {
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
     model: {
       capabilities: { reasoning: true },
       variants: [{ id: 'research', body: { temperature: 1 } }],
@@ -797,9 +786,7 @@ test('overflow menus support keyboard reordering and preserve disabled variants'
   page,
   fixture,
 }) => {
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = {
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
     model: { capabilities: { reasoning: true } },
     reasoning: { presets: defaultReasoningOptions() },
   };

@@ -35,13 +35,14 @@ from .catalog import apply_reasoning, export_config, normalize
 from .jobs import Jobs
 from .manager import ACTIVE, Conflict, Manager, redact
 from .schema import (
+    PROFILE_FIELDS,
     CapabilityPreview,
     Deployment,
     DeploymentSet,
-    Profile,
     ResourcePreview,
     Runtime,
     Settings,
+    profile_view,
 )
 from .slug import resolve_alias, slug
 from .store import Store, encode, identity, uid
@@ -382,7 +383,6 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     kinds = {
         "models": "artifact",
         "runtimes": "runtime",
-        "profiles": "profile",
         "deployments": "deployment",
         "jobs": "job",
         "deployment_sets": "deployment_set",
@@ -424,7 +424,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     async def capability_preview(body: CapabilityPreview):
         from .capabilities import effective
 
-        profile = body.configuration.model_dump(exclude_none=True)
+        profile = dict(body.configuration)
         artifact = store.get("artifact", profile["artifact_id"])
         runtime = store.get("runtime", profile["runtime_id"])
         selection = templates.effective_selection(
@@ -877,23 +877,6 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             ),
         }
 
-    @app.post("/api/profiles")
-    async def profile(body: Profile, expected: int | None = None):
-        data = body.model_dump(exclude_none=True)
-        artifact, runtime = (
-            store.get("artifact", data["artifact_id"]),
-            store.get("runtime", data["runtime_id"]),
-        )
-        errors = adapters.validate_profile(data, artifact, runtime)
-        if errors:
-            raise ValueError("; ".join(errors))
-        data["catalog"] = normalize(data)
-        return store.put("profile", data, expected=expected)
-
-    @app.get("/api/profiles/{ident}/revisions")
-    async def profile_revisions(ident: str):
-        return store.history("profile", ident)
-
     @app.post("/api/deployments")
     async def deployment(body: Deployment, expected: int | None = None):
         async with manager.lock:
@@ -969,31 +952,18 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             for d in all_d + desired_members
         ):
             raise Conflict("Alias and port must be unique")
-        configuration = data.pop("configuration", None)
-        if configuration is not None:
-            configuration.pop("id", None)
-            artifact = store.get("artifact", configuration["artifact_id"], c)
-            runtime = store.get("runtime", configuration["runtime_id"], c)
-            errors = adapters.validate_profile(configuration, artifact, runtime)
-            if errors:
-                raise ValueError("; ".join(errors))
-            configuration["name"] = data["name"]
-            configuration["catalog"] = normalize(configuration, data["alias"])
-        elif not data.get("profile_id"):
-            raise ValueError("Deployment configuration is required")
-        if configuration is not None:
-            # Private revision backing; never mutate another deployment's recipe.
-            if previous:
-                configuration["id"] = previous["profile_id"]
-                if any(
-                    d["id"] != previous["id"] and d["profile_id"] == configuration["id"]
-                    for d in all_d
-                ):
-                    configuration.pop("id")
-            snapshot = store.put("profile", configuration, c=c)
-            data["profile_id"] = snapshot["id"]
-        else:
-            snapshot = store.get("profile", data["profile_id"], c)
+        # The deployment is its own profile: five fields, no shared entity.
+        if not data.get("artifact_id") or not data.get("runtime_id"):
+            raise ValueError("Deployment requires artifact_id and runtime_id")
+        artifact = store.get("artifact", data["artifact_id"], c)
+        runtime = store.get("runtime", data["runtime_id"], c)
+        errors = adapters.validate_profile(profile_view(data), artifact, runtime)
+        if errors:
+            raise ValueError("; ".join(errors))
+        data["catalog"] = normalize(
+            profile_view(data) | {"name": data["name"]}, data["alias"]
+        )
+        snapshot = profile_view(data)
         override = data.get("template_override")
         if override:
             if not isinstance(override, dict) or not override.get("source"):
@@ -1527,43 +1497,38 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     @app.post("/api/history/sessions/{ident}/restore")
     async def restore(ident: str):
         session = store.get("session", ident)
-        p = dict(session["deployment_snapshot"]["profile_snapshot"])
-        p.pop("revision", None)
-        p["id"] = uid()
-        p["name"] += " (restored)"
+        saved = session["deployment_snapshot"]
+        snapshot = {k: saved["profile_snapshot"][k] for k in PROFILE_FIELDS}
         with store.transaction() as c:
             for kind, key, snapshot_key in (
                 ("artifact", "artifact_id", "artifact_identity"),
                 ("runtime", "runtime_id", "runtime_identity"),
             ):
-                saved = session[snapshot_key]
+                saved_identity = session[snapshot_key]
                 try:
-                    current = store.get(kind, saved["id"], c)
+                    current = store.get(kind, saved_identity["id"], c)
                 except KeyError:
                     current = None
                 if current is None:
-                    current = store.put(kind, saved, c=c)
+                    current = store.put(kind, saved_identity, c=c)
                 elif (
                     kind == "runtime"
                     and current.get("capabilities", {}).get("sha256")
-                    != saved.get("capabilities", {}).get("sha256")
+                    != saved_identity.get("capabilities", {}).get("sha256")
                 ) or (
-                    kind == "artifact" and current.get("sha256") != saved.get("sha256")
+                    kind == "artifact"
+                    and current.get("sha256") != saved_identity.get("sha256")
                 ):
-                    current = store.put(kind, saved | {"id": uid()}, c=c)
-                p[key] = current["id"]
-            p = store.put("profile", p, c=c)
-            saved = session["deployment_snapshot"]
+                    current = store.put(kind, saved_identity | {"id": uid()}, c=c)
+                snapshot[key] = current["id"]
             restored = {
-                key: saved[key]
-                for key in Deployment.model_fields
-                if key in saved and key not in {"id", "configuration"}
+                key: saved[key] for key in Deployment.model_fields if key in saved
             }
             restored.update(
+                **{k: snapshot[k] for k in PROFILE_FIELDS},
                 id=uid(),
                 name=saved["name"] + " (restored)",
-                profile_id=p["id"],
-                profile_snapshot=p,
+                profile_snapshot=snapshot,
                 alias=saved["alias"][:140] + "-" + uid()[:8],
                 enabled=False,
                 state="STOPPED",
@@ -1590,22 +1555,45 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             deployments = []
             with store.transaction() as c:
                 for snapshot in saved["deployments"]:
-                    p = dict(snapshot["profile_snapshot"])
-                    p["id"] = uid()
-                    p["name"] += " (restored)"
-                    p["catalog"] = normalize(p)
-                    p["catalog"]["catalog_id"] += "-" + suffix
-                    p = store.put("profile", p, c=c)
                     d = {
                         k: v
                         for k, v in snapshot.items()
                         if k in Deployment.model_fields
                     }
+                    name = snapshot["name"] + " (restored)"
+                    snapshot_ = {
+                        k: snapshot["profile_snapshot"][k] for k in PROFILE_FIELDS
+                    }
+                    for kind, key, snapshot_key in (
+                        ("artifact", "artifact_id", "artifact_identity"),
+                        ("runtime", "runtime_id", "runtime_identity"),
+                    ):
+                        saved_identity = snapshot[snapshot_key]
+                        try:
+                            current = store.get(kind, saved_identity["id"], c)
+                        except KeyError:
+                            current = None
+                        if current is None:
+                            current = store.put(kind, saved_identity, c=c)
+                        elif (
+                            kind == "runtime"
+                            and current.get("capabilities", {}).get("sha256")
+                            != saved_identity.get("capabilities", {}).get("sha256")
+                        ) or (
+                            kind == "artifact"
+                            and current.get("sha256") != saved_identity.get("sha256")
+                        ):
+                            current = store.put(
+                                kind, saved_identity | {"id": uid()}, c=c
+                            )
+                        snapshot_[key] = current["id"]
+                    snapshot_["catalog"] = normalize(snapshot_ | {"name": name})
+                    snapshot_["catalog"]["catalog_id"] += "-" + suffix
                     d.update(
                         id=uid(),
-                        name=d["name"] + " (restored)",
-                        profile_id=p["id"],
-                        profile_snapshot=p,
+                        name=name,
+                        **{k: snapshot_[k] for k in PROFILE_FIELDS},
+                        profile_snapshot=snapshot_,
                         alias=d["alias"] + "-" + suffix,
                         enabled=False,
                         state="STOPPED",
@@ -1697,7 +1685,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
 
     @app.post("/api/registry/{kind}/{ident}/delete")
     async def delete_record(kind: str, ident: str, remove_files: bool = False):
-        if kind not in {"models", "runtimes", "profiles", "deployments"}:
+        if kind not in {"models", "runtimes", "deployments"}:
             raise HTTPException(404)
         async with manager.lock:
             row = store.get(kinds[kind], ident)
@@ -1713,18 +1701,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     )
                 if row["state"] in ACTIVE:
                     raise Conflict("Unload the deployment first")
-            if kind in {"models", "runtimes", "profiles"}:
+            if kind in {"models", "runtimes"}:
                 key = {
                     "models": "artifact_id",
                     "runtimes": "runtime_id",
-                    "profiles": "id",
                 }[kind]
                 if any(d["profile_snapshot"].get(key) == ident for d in deployments):
                     raise Conflict("Deployment snapshots still reference this record")
-                if kind != "profiles" and any(
-                    p.get(key) == ident for p in store.list("profile")
-                ):
-                    raise Conflict("Profiles still reference this record")
                 if kind == "models":
                     # Template assets belong to the model; remove the custom
                     # template files they own and the rows themselves so a
@@ -1948,7 +1931,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             # executes the applied configuration; advertise the served ID, not
             # the desired one, so no client ever requests an unserved ID.
             served_alias = aops.effective_alias(store, unit, d["id"])
-            catalog = normalize(d["profile_snapshot"], served_alias)
+            catalog = normalize(d, served_alias)
             catalog["catalog_id"] = served_alias
             catalog["model"]["name"] = d["name"]
             rows.append(

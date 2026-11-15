@@ -8,7 +8,6 @@ object({
   status: contracts.status,
   models: array(contracts.artifact),
   runtimes: array(contracts.runtime),
-  profiles: array(contracts.profile),
   deployments: array(contracts.deployment),
   serving: array(contracts.servingDeployment),
   jobs: array(contracts.job),
@@ -19,6 +18,5 @@ object({
   recommendation: contracts.engineRecommendation,
   activations: array(contracts.historyActivation),
   events: array(contracts.operationEvent),
-  revisions: array(contracts.profile),
 })(JSON.parse(readFileSync(0, 'utf8')) as unknown);
 console.log('Backend/frontend contracts match');

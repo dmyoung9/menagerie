@@ -3,25 +3,17 @@ import { runtimeFlags } from './runtime-flags.ts';
 import type { DeploymentSetDraft, EditorDraft, JsonValue } from './types';
 
 export type FormDraft = EditorDraft | DeploymentSetDraft;
-export type ConfigPath =
-  'config' | 'configuration.config' | `members[${number}].configuration.config`;
+export type ConfigPath = 'config' | `members[${number}].config`;
 
 export function configurations(
   draft: FormDraft,
 ): [ConfigPath, Record<string, JsonValue>][] {
-  if ('members' in draft)
-    return draft.members.flatMap((member, index) =>
-      member.configuration
-        ? [
-            [
-              `members[${index}].configuration.config` as ConfigPath,
-              member.configuration.config,
-            ] as [ConfigPath, Record<string, JsonValue>],
-          ]
-        : [],
-    );
-  if ('configuration' in draft && draft.configuration)
-    return [['configuration.config', draft.configuration.config]];
+  if ('members' in draft) {
+    const out: [ConfigPath, Record<string, JsonValue>][] = [];
+    for (const [index, member] of draft.members.entries())
+      out.push([`members[${index}].config` as ConfigPath, member.config]);
+    return out;
+  }
   if ('config' in draft) return [['config', draft.config]];
   return [];
 }
@@ -64,8 +56,8 @@ export function configAt(
 }
 
 function configOwner(draft: FormDraft, path: ConfigPath): string {
-  const config = path.replace(/\.?config$/, '');
-  const profile = config ? getBy(draft, config) : draft;
+  const base = path.replace(/\.?config$/, '');
+  const profile = base === '' ? draft : getBy(draft, base);
   const member =
     'members' in draft
       ? draft.members[Number(path.match(/\[(\d+)\]/)?.[1])]

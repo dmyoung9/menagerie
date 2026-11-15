@@ -227,10 +227,8 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
       .body,
   );
   expect(saved.members).toHaveLength(2);
-  expect(saved.members[0].configuration?.config['ctx-size']).toBe(32768);
-  expect(
-    saved.members[0].configuration?.catalog.model?.capabilities?.tools,
-  ).toBe(true);
+  expect(saved.members[0].config['ctx-size']).toBe(32768);
+  expect(saved.members[0].catalog.model?.capabilities?.tools).toBe(true);
   expect(saved.members[1].name).toBe('Second member');
   expect(
     new Set(saved.members.map((m: { alias: string }) => m.alias)).size,
@@ -407,7 +405,7 @@ test('engine-reset confirmation is cancellable and recovery retains its existing
     contracts.deploymentDraft(
       fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration?.runtime_id,
+    ).runtime_id,
   ).toBe('engine-two');
   await navigate(page, 'Settings');
   await page.getByRole('button', { name: 'Recovery', exact: true }).click();
@@ -432,7 +430,6 @@ test('empty installation and connection errors remain actionable', async ({
   fixture.registry = {
     models: [],
     runtimes: [],
-    profiles: [],
     deployments: [],
     jobs: [],
   };

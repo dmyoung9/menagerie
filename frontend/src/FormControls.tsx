@@ -588,7 +588,7 @@ export function RuntimeSettings({
   after,
   disabled = false,
   engineSelected = Object.keys(schema).length > 0,
-  formPath = 'configuration.config',
+  formPath = 'config',
   curated = false,
 }: {
   schema: Record<string, RuntimeField>;

@@ -39,7 +39,6 @@ import type {
   JsonValue,
   LaunchPlan,
   ModelCatalog,
-  ProfileDraft,
   TemplateSelection,
 } from './types';
 import { ChatTemplateSettings } from './ChatTemplateSettings';
@@ -152,8 +151,8 @@ export function DeploymentWizard({
     form,
     value: extraDraft,
     setValue: setExtraDraft,
-  } = useDraftForm<ProfileDraft>(
-    { ...defaults.profiles, config: {} },
+  } = useDraftForm<DeploymentDraft>(
+    { ...defaults.deployments, config: {} },
     (draft) => {
       setExtraDraft(draft);
       if (step < 2) advance();
@@ -198,7 +197,7 @@ export function DeploymentWizard({
   );
   const extraDefaults = JSON.stringify(
     Object.fromEntries(
-      Object.entries(defaults.profiles.config || {}).filter(
+      Object.entries(defaults.deployments.config || {}).filter(
         ([key]) => schema[key] && !['ctx-size', 'parallel'].includes(key),
       ),
     ),
@@ -318,14 +317,6 @@ export function DeploymentWizard({
     setLaunchError('');
     setAccepted(false);
     try {
-      const configuration = {
-        name: displayName,
-        artifact_id: artifactId,
-        runtime_id: runtime.id,
-        config: buildConfig(),
-        raw_args: args,
-        catalog,
-      };
       const saved = await readApi(
         '/api/model-setups' +
           (savedRow ? `?expected=${savedRow.revision}` : ''),
@@ -334,7 +325,11 @@ export function DeploymentWizard({
           ...advanced,
           ...(savedRow ? { id: savedRow.id } : {}),
           name: displayName,
-          configuration,
+          artifact_id: artifactId,
+          runtime_id: runtime.id,
+          config: buildConfig(),
+          raw_args: args,
+          catalog,
           alias: apiAlias,
           identifier_mode: identifierMode,
           runtime_assignment: advanced.runtime_assignment,

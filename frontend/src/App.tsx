@@ -83,7 +83,6 @@ import type {
   MetricSample,
   ModalState,
   OperationEvent,
-  Profile,
   Registry,
   Runtime,
   ServingDeployment,
@@ -185,10 +184,9 @@ function useRoute() {
   return { route, hashQuery };
 }
 
-type SliceKey =
-  'status' | 'models' | 'runtimes' | 'profiles' | 'deployments' | 'jobs';
+type SliceKey = 'status' | 'models' | 'runtimes' | 'deployments' | 'jobs';
 
-/** The six inventory endpoints, fetched independently. A slice that errors or
+/** The five inventory endpoints, fetched independently. A slice that errors or
  * is slow keeps its last-good value and only its own error/loading state. */
 const ENDPOINTS: Record<
   SliceKey,
@@ -199,10 +197,6 @@ const ENDPOINTS: Record<
   runtimes: {
     path: '/api/registry/runtimes',
     decode: array(contracts.runtime),
-  },
-  profiles: {
-    path: '/api/registry/profiles',
-    decode: array(contracts.profile),
   },
   deployments: {
     path: '/api/registry/deployments',
@@ -225,8 +219,6 @@ const affectedSlices = (kind?: string): SliceKey[] => {
       return ['models'];
     case 'runtimes':
       return ['runtimes'];
-    case 'profiles':
-      return ['profiles'];
     case 'deployments':
     case 'serving-deployments':
     case 'deployment_sets':
@@ -264,7 +256,6 @@ type SliceData = {
   status: AppStatus | null;
   models: Artifact[];
   runtimes: Runtime[];
-  profiles: Profile[];
   deployments: Deployment[];
   jobs: Job[];
 };
@@ -277,7 +268,7 @@ type Slice<T> = {
 type Slices = { [K in keyof SliceData]: Slice<SliceData[K]> };
 /** The union of every slice's data shape; enough to type a decoupled fetch result. */
 type SliceDataValue =
-  AppStatus | null | Artifact[] | Runtime[] | Profile[] | Deployment[] | Job[];
+  AppStatus | null | Artifact[] | Runtime[] | Deployment[] | Job[];
 
 function initSlice<T>(data: T): Slice<T> {
   return { data, loading: true, error: null, updatedAt: null };
@@ -290,7 +281,6 @@ export default function App() {
       status: initSlice<AppStatus | null>(null),
       models: initSlice<Artifact[]>([]),
       runtimes: initSlice<Runtime[]>([]),
-      profiles: initSlice<Profile[]>([]),
       deployments: initSlice<Deployment[]>([]),
       jobs: initSlice<Job[]>([]),
     }),
@@ -310,7 +300,6 @@ export default function App() {
     status: 0,
     models: 0,
     runtimes: 0,
-    profiles: 0,
     deployments: 0,
     jobs: 0,
   });
@@ -415,24 +404,6 @@ export default function App() {
       setNotice('');
     }
   }, [notice]);
-  const revisionId = modal?.type === 'revisions' ? modal.row.id : undefined;
-  useEffect(() => {
-    if (!revisionId) return;
-    let alive = true;
-    readApi(`/api/profiles/${revisionId}/revisions`, array(contracts.profile))
-      .then((value) => {
-        if (alive)
-          setModal((current) =>
-            current?.type === 'revisions' ? { ...current, value } : current,
-          );
-      })
-      .catch((e) => {
-        if (alive) setModalError(message(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [revisionId]);
   const open = (value: ModalState | null) => {
     setModalError('');
     setRevisionConflict(false);
@@ -539,7 +510,6 @@ export default function App() {
   const data: Registry = {
     models: slices.models.data,
     runtimes: slices.runtimes.data,
-    profiles: slices.profiles.data,
     deployments,
     jobs,
     host: status?.host ? [status.host] : [],
@@ -566,23 +536,7 @@ export default function App() {
       return;
     }
     let editor: import('./types').EditorState;
-    if (kind === 'profiles') {
-      const value = editable(
-        kind,
-        row ? contracts.profile(row) : undefined,
-        clone,
-      );
-      if (!row) {
-        value.artifact_id = data.models?.[0]?.id || '';
-        value.runtime_id = data.runtimes?.[0]?.id || '';
-        for (const [key, field] of Object.entries(
-          data.runtimes?.[0]?.capabilities?.schema || {},
-        )) {
-          if (field.default !== undefined) value.config[key] = field.default;
-        }
-      }
-      editor = { kind, value };
-    } else if (kind === 'runtimes') {
+    if (kind === 'runtimes') {
       editor = {
         kind,
         value: editable(kind, row ? contracts.runtime(row) : undefined, clone),
@@ -624,8 +578,6 @@ export default function App() {
   const actions = {
     edit,
     inspect,
-    revisions: (row: Profile) =>
-      open({ type: 'revisions', title: row.name + ' revisions', row }),
     load: (
       kind: import('./types').LaunchKind,
       row: import('./types').LaunchTarget,
@@ -1301,7 +1253,6 @@ export default function App() {
                     (
                       {
                         runtimes: 'engine',
-                        profiles: 'profile',
                         deployments: 'deployment',
                       } as Record<string, string>
                     )[modal.kind]
@@ -1559,12 +1510,6 @@ export default function App() {
             {modal.type === 'inspect' && (
               <StructuredDetails value={modal.value} />
             )}
-            {modal.type === 'revisions' &&
-              (modal.value ? (
-                <StructuredDetails value={modal.value} />
-              ) : (
-                <p className="muted">Loading revisions…</p>
-              ))}
             {modal.type === 'model' && (
               <>
                 <dl className="properties">

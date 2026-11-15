@@ -66,7 +66,6 @@ import type {
   Job,
   MetricSample,
   OperationEvent,
-  Profile,
   Runtime,
   TemplateAssetPublic,
   TemplateSelection,
@@ -107,7 +106,6 @@ function InspectModel({ id }: { id: string }) {
 }
 type Actions = DeploymentActions & {
   inspect: (title: string, value: unknown) => void;
-  revisions: (row: Profile) => void;
 };
 export function ActivityFeed({
   events,

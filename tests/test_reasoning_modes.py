@@ -293,16 +293,30 @@ async def test_gateway_applies_defaults_modes_and_prefixes_before_any_runtime_lo
         }
     }
     profile["catalog"]["reasoning"]["presets"][0]["prompt_prefix"] = "{REASON:research}"
+    cfg = profile["config"]
+    cat = profile["catalog"]
+    snap = {
+        "artifact_id": "model",
+        "runtime_id": "engine",
+        "config": cfg,
+        "raw_args": [],
+        "catalog": cat,
+    }
     deployment = app.state.store.put(
         "deployment",
         {
             "id": "d",
             "name": "Synthetic",
             "alias": "synthetic",
+            "artifact_id": "model",
+            "runtime_id": "engine",
+            "config": cfg,
+            "raw_args": [],
+            "catalog": cat,
             "enabled": True,
             "residency": "on-demand",
             "state": "STOPPED",
-            "profile_snapshot": profile,
+            "profile_snapshot": snap,
             "port": 8120,
         },
     )

@@ -147,9 +147,7 @@ for (const width of [1440, 576, 320]) {
     fixture,
   }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 });
-    fixture.registry.deployments.find(
-      (d) => d.id === 'idle',
-    )!.profile_snapshot!.catalog = {
+    fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
       model: {
         capabilities: {
           tools: true,
