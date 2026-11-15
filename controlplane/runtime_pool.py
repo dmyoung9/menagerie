@@ -14,24 +14,32 @@ def validate(unit, store):
     if not unit.get("engine_pool"):
         return []
     errors = []
-    members = unit["members"]
-    runtimes = {m["profile_snapshot"]["runtime_id"] for m in members}
-    if len(runtimes) != 1 or len({m.get("gpu") for m in members}) != 1:
-        errors.append(
-            "A runtime pool requires one runtime installation and shared device visibility"
-        )
-    if unit["residency"] != "on-demand":
-        errors.append(
-            "Runtime pools require on-demand policy; use supervised deployments for pinned or atomic residency"
-        )
-    for member in members:
-        profile = member["profile_snapshot"]
-        runtime = store.get("runtime", profile["runtime_id"])
+    # The pool is the owner of the shared serving settings: one runtime
+    # installation, one device, one port.
+    if not unit.get("runtime_id"):
+        errors.append("A runtime pool requires a runtime installation")
+    if unit.get("port") is None:
+        errors.append("A runtime pool requires a single serving port")
+    if unit.get("runtime_id"):
+        runtime = store.get("runtime", unit["runtime_id"])
         if runtime["execution_kind"] != "native" or not runtime.get(
             "capabilities", {}
         ).get("mechanisms", {}).get("router"):
             errors.append(
                 "Runtime pool requires a native installation advertising model routing"
+            )
+    if unit["residency"] != "on-demand":
+        errors.append(
+            "Runtime pools require on-demand policy; use supervised deployments for pinned or atomic residency"
+        )
+    for member in unit.get("members") or []:
+        profile = member["profile_snapshot"]
+        if (
+            profile.get("runtime_id") != unit.get("runtime_id")
+            or member.get("gpu") != unit.get("gpu")
+        ):
+            errors.append(
+                "Pool members must mirror the pool's runtime installation and device"
             )
         if profile.get("raw_args"):
             errors.append(
@@ -94,7 +102,7 @@ def preset(unit, store):
 def launch_spec(unit, store, spec, settings, member_id):
     """Render router startup at the adapter boundary, not in the lifecycle owner."""
     owner = unit["members"][0]
-    runtime = store.get("runtime", owner["profile_snapshot"]["runtime_id"])
+    runtime = store.get("runtime", unit["runtime_id"])
     folder = store.root / "deployments" / owner["id"]
     folder.mkdir(parents=True, exist_ok=True)
     cache = folder / "engine-cache"
@@ -112,7 +120,7 @@ def launch_spec(unit, store, spec, settings, member_id):
         "--host",
         "127.0.0.1",
         "--port",
-        str(owner["port"]),
+        str(unit["port"]),
         "--no-ui",
         "--metrics",
         "--models-max",

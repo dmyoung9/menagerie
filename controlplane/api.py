@@ -163,6 +163,17 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         if previous:
             data = previous | data
         ident = data.setdefault("id", uid())
+        data.setdefault("gpu", None)
+        if data.get("engine_pool"):
+            if (
+                not data.get("runtime_id")
+                or data.get("port") is None
+                or data.get("port") in {8001, 8017}
+            ):
+                raise ValueError(
+                    "A runtime pool requires a runtime installation and a single "
+                    "serving port (ports 8001 and 8017 are reserved for Menagerie)"
+                )
         if any(d["id"] == ident for d in store.list("deployment", c)):
             raise Conflict("Deployment ID is already used by a model member")
         affected = set(data["member_ids"]) | set(
@@ -692,8 +703,6 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     for removed in owned - set(data["member_ids"]):
                         d = store.get("deployment", removed, c)
                         store.put("deployment", d | {"enabled": False}, c=c)
-                if not data["member_ids"]:
-                    raise ValueError("A deployment requires at least one model")
                 return save_set(data, expected, c)
 
     @app.post("/api/serving-deployments/{ident}/validate")
@@ -765,31 +774,83 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 manager.unit(ident), manager.settings(), manager.inflight
             )
 
-    @app.post("/api/deployment-sets/{ident}/dissolve")
-    async def dissolve_set(ident: str, expected: int):
+    @app.post("/api/deployment-sets/{ident}/members/{member_id}/remove")
+    async def remove_member(ident: str, member_id: str, expected: int):
         async with manager.lock:
             unit = manager.unit(ident)
-            if (
-                not unit["multi_model"]
-                or unit["id"] != ident
-                or unit["revision"] != expected
-            ):
-                raise Conflict("Deployment changed; refresh before separating models")
+            if unit["id"] != ident or unit["revision"] != expected:
+                raise Conflict("Deployment changed; refresh before removing a model")
+            if member_id not in unit["member_ids"]:
+                raise Conflict("Model is not a member of this pool")
+            if model_setup.desired(store, unit["id"]):
+                raise Conflict(
+                    "Apply or discard the pending pool changes before removing a model"
+                )
             if manager.unit_busy(unit) or any(
                 d["state"] in ACTIVE for d in unit["members"]
             ):
-                raise Conflict("Unload the deployment before separating models")
+                raise Conflict("Unload the pool before removing a model")
             with store.transaction() as c:
-                c.execute(
-                    "DELETE FROM objects WHERE kind='deployment_set' AND id=?", (ident,)
+                member = store.get("deployment", member_id, c)
+                stored = store.get("deployment_set", unit["id"], c)
+                store.put(
+                    "deployment_set",
+                    stored
+                    | {
+                        "member_ids": [
+                            i for i in stored["member_ids"] if i != member_id
+                        ]
+                    },
+                    expected=unit["revision"],
+                    c=c,
                 )
+                # The member's deployment record is dropped only; its model files
+                # and the pool's runtime installation stay put.
+                store.delete("deployment", member_id, c)
                 store.event(
-                    "deployment_separated",
-                    {"name": unit["name"], "members": unit["member_ids"]},
+                    "deployment_removed",
+                    {"name": member["name"], "pool": unit["name"]},
+                    member_id,
+                    c,
+                )
+            return deployment_sets.describe(
+                manager.unit(ident), manager.settings(), manager.inflight
+            )
+
+    @app.post("/api/deployment-sets/{ident}/delete")
+    async def delete_pool(ident: str, expected: int):
+        async with manager.lock:
+            unit = manager.unit(ident)
+            if unit["id"] != ident or unit["revision"] != expected:
+                raise Conflict("Deployment changed; refresh before deleting the pool")
+            if model_setup.desired(store, unit["id"]):
+                raise Conflict(
+                    "Apply or discard the pending pool changes before deleting it"
+                )
+            if manager.unit_busy(unit) or any(
+                d["state"] in ACTIVE for d in unit["members"]
+            ):
+                raise Conflict("Unload the pool before deleting it")
+            with store.transaction() as c:
+                members = [
+                    store.get("deployment", i, c) for i in unit["member_ids"]
+                ]
+                # Model files and the runtime installation are the owner's
+                # property, not the pool's; deleting a pool drops only the
+                # deployment records and the pool itself.
+                for member in members:
+                    store.delete("deployment", member["id"], c)
+                store.delete("deployment_set", ident, c)
+                store.event(
+                    "pool_deleted",
+                    {
+                        "name": unit["name"],
+                        "members": [m["name"] for m in members],
+                    },
                     ident,
                     c,
                 )
-            return {"member_ids": unit["member_ids"]}
+            return {"deleted": unit["name"], "members": [m["name"] for m in members]}
 
     @app.post("/api/models/local")
     async def add_local_model(request: Request):
@@ -881,7 +942,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     async def deployment(body: Deployment, expected: int | None = None):
         async with manager.lock:
             with store.transaction() as c:
-                saved = save_member(body.model_dump(exclude_none=True), expected, c)
+                data = body.model_dump(exclude_none=True)
+                data.pop("pool_id", None)
+                data.pop("pool", None)
+                saved = save_member(data, expected, c)
                 owner = deployment_sets.unit_for(store, saved["id"])
                 if owner and owner["multi_model"]:
                     store.put(
@@ -925,6 +989,18 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             and (previous["state"] in ACTIVE or manager.inflight.get(previous["id"], 0))
         ):
             raise Conflict("Stop this deployment before changing its configuration")
+        if previous is not None:
+            # The body wins and the registry fills the gaps, so an edit never
+            # drops fields it did not touch.
+            data = previous | data
+        if owner and owner.get("engine_pool"):
+            # The pool owns the member's engine, device and serving port.
+            data = {
+                **data,
+                "runtime_id": owner["runtime_id"],
+                "gpu": owner.get("gpu"),
+                "port": None,
+            }
         # Identifier mode: in "generated" the API ID follows the display name and
         # is regenerated outright (no compatibility alias) when the name changes;
         # in "custom" the ID is user-controlled and stable across renames.
@@ -944,11 +1020,18 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     "The generated API model ID changed; review the name and identifier again"
                 )
             data["alias"] = generated
-        if data["port"] in {8001, 8017}:
+        if data.get("port") in {8001, 8017}:
             raise ValueError("Ports 8001 and 8017 are reserved for Menagerie")
         if any(
             d["id"] != data.get("id")
-            and (d["alias"] == data["alias"] or d["port"] == data["port"])
+            and (
+                d["alias"] == data["alias"]
+                or (
+                    data["port"] is not None
+                    and d["port"] is not None
+                    and d["port"] == data["port"]
+                )
+            )
             for d in all_d + desired_members
         ):
             raise Conflict("Alias and port must be unique")
@@ -1001,9 +1084,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
     async def model_setup_save(body: Deployment, expected: int | None = None):
         async with manager.lock:
             data = body.model_dump(exclude_none=True)
+            pool_id = data.pop("pool_id", None)
+            pool_spec = data.pop("pool", None)
             previous = store.get("deployment", data["id"]) if data.get("id") else None
             if previous and (expected is None or previous["revision"] != expected):
                 raise Conflict("Revision changed; review changes before saving")
+            if previous is not None and (pool_id is not None or pool_spec is not None):
+                raise ValueError("Pool targeting is only for new members")
             owner = (
                 manager.unit(model_setup.unit_id(store, previous["id"]))
                 if previous
@@ -1018,48 +1105,77 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 if not aops.load_applied(store, owner["id"]):
                     aops.record_applied(store, owner)
             with store.transaction() as c:
+                # Resolve the member's pool: a member edit inherits the set it
+                # already belongs to; a new member targets an explicit pool,
+                # or an inline spec that creates the pool atomically with it;
+                # nothing else makes a member pooled.
+                pool_id_for_member = None
+                if previous is not None:
+                    pool_id_for_member = owner["id"] if owner["multi_model"] else None
+                elif pool_spec is not None:
+                    pool_id_for_member = save_set(
+                        {
+                            "id": uid(),
+                            "name": pool_spec["name"],
+                            "engine_pool": True,
+                            "runtime_id": pool_spec["runtime_id"],
+                            "gpu": pool_spec.get("gpu"),
+                            "port": pool_spec["port"],
+                            "max_loaded": pool_spec.get("max_loaded", 4),
+                            "member_ids": [],
+                            "enabled": True,
+                            "residency": pool_spec.get("residency", "on-demand"),
+                            "priority": pool_spec.get("priority", 50),
+                            "idle_timeout": pool_spec.get("idle_timeout", 300),
+                            "allow_eviction": pool_spec.get("allow_eviction", False),
+                            "queue_timeout": pool_spec.get("queue_timeout", 300),
+                        },
+                        c=c,
+                    )["id"]
+                elif pool_id is not None:
+                    pool_id_for_member = pool_id
+                if pool_id_for_member is not None and not data.get("id"):
+                    pool = store.get("deployment_set", pool_id_for_member, c)
+                    if not pool.get("engine_pool"):
+                        raise Conflict("Models can only be added to a runtime pool")
+                    data["runtime_id"] = pool["runtime_id"]
+                    data["gpu"] = pool["gpu"]
+                    data["port"] = None
                 prepared = save_member(
-                    data, c=c, owner_id=owner["id"] if owner else None, prepare=True
+                    data, c=c, owner_id=pool_id_for_member, prepare=True
                 )
                 pool = (
-                    store.get("deployment_set", owner["id"])
-                    if owner and owner["multi_model"]
-                    else model_setup.choose_pool(store, prepared)
-                    if not previous
+                    store.get("deployment_set", pool_id_for_member, c)
+                    if pool_id_for_member
                     else None
                 )
-                if pool:
-                    live_pool = next(
-                        (
-                            p
-                            for p in store.list("deployment_set")
-                            if p["id"] == pool["id"]
-                        ),
-                        None,
-                    )
-                    owner = manager.unit(pool["id"]) if live_pool else None
+                pool_unit = (
+                    deployment_sets.unit_for(store, pool_id_for_member)
+                    if pool_id_for_member
+                    else None
+                )
+                if pool is not None and previous is None:
                     if (
-                        owner
-                        and owner.get("engine_pool")
-                        and pool_edit.eligible_for_pool(prepared, owner, store)
+                        pool.get("engine_pool")
+                        and pool_edit.eligible_for_pool(prepared, pool, store)
                     ):
                         raise Conflict(
                             "This setup is incompatible with its pool; choose compatible engine, device and settings"
                         )
-                    if owner and any(
-                        prepared[k] != owner[k]
+                    if any(
+                        prepared[k] != pool[k]
                         for k in deployment_sets.POLICY_KEYS
                         if k != "enabled"
                     ):
                         raise Conflict(
-                            "Shared policy belongs to the runtime; edit it in Advanced runtime controls"
+                            "Shared policy belongs to the pool; edit it from the pool"
                         )
                 key = pool["id"] if pool else prepared["id"]
                 pending_snapshot = model_setup.desired(store, key)
                 needs_apply = bool(
                     pending_snapshot
-                    or owner
-                    and any(m["state"] in ACTIVE for m in owner["members"])
+                    or pool_unit is not None
+                    and any(m["state"] in ACTIVE for m in pool_unit["members"])
                 )
                 if needs_apply:
                     op = aops.find_op(store, key)
@@ -1067,7 +1183,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                         raise Conflict(
                             "A change is already being applied; cancel it before editing"
                         )
-                    snap = pending_snapshot or model_setup.snapshot(store, owner)
+                    snap = pending_snapshot or model_setup.snapshot(store, pool_unit)
                     snap["rows"] = [
                         r
                         for r in snap["rows"]

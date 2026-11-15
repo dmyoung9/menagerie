@@ -104,13 +104,15 @@ def eligible_for_pool(proposed, unit, store):
     proposed_residency = proposed.get("residency")
     pool_residency = unit.get("residency")
     members = unit.get("members") or []
-    pool_runtime_id = None
-    pool_gpu = None
+    pool_runtime_id = unit.get("runtime_id") or (
+        members[0].get("profile_snapshot", {}).get("runtime_id") if members else None
+    )
+    pool_gpu = unit.get("gpu")
+    if pool_gpu is None and members:
+        pool_gpu = members[0].get("gpu")
 
     # A native pool must share exactly one runtime installation.
     if members:
-        pool_runtime_id = members[0].get("profile_snapshot", {}).get("runtime_id")
-        pool_gpu = members[0].get("gpu")
         if len({m.get("profile_snapshot", {}).get("runtime_id") for m in members}) != 1:
             errors.append(
                 "The existing pool is internally inconsistent: its members use "

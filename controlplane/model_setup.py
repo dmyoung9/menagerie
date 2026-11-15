@@ -7,8 +7,8 @@ process ownership underneath a running pool.
 
 import copy
 
-from . import apply_ops, deployment_sets, pool_edit, runtime_pool
-from .store import identity, uid
+from . import apply_ops, deployment_sets, runtime_pool
+from .store import identity
 
 
 def desired(store, unit_id):
@@ -73,38 +73,6 @@ def projection(store, row):
                     }
                 )
     return row
-
-
-def choose_pool(store, member):
-    if (
-        member.get("runtime_assignment") != "automatic"
-        or member.get("residency") != "on-demand"
-    ):
-        return None
-    policy = {k: member[k] for k in deployment_sets.POLICY_KEYS if k != "enabled"}
-    candidate = policy | {"members": [], "engine_pool": True}
-    if pool_edit.eligible_for_pool(member, candidate, store):
-        return None
-    # Only pools created by this workflow participate. Legacy assignments and
-    # explicit supervised groups are never silently converted or repurposed.
-    for pool in sorted(store.list("deployment_set"), key=lambda r: r["id"]):
-        if not pool.get("automatic_pool") or not pool.get("enabled"):
-            continue
-        if any(pool.get(k) != v for k, v in policy.items()):
-            continue
-        unit = deployment_sets.unit_for(store, pool["id"])
-        if not pool_edit.eligible_for_pool(member, unit, store):
-            return pool
-    return {
-        "id": uid(),
-        "name": "Automatic runtime pool",
-        "engine_pool": True,
-        "automatic_pool": True,
-        "max_loaded": 4,
-        "member_ids": [],
-        "enabled": True,
-        **policy,
-    }
 
 
 def snapshot(store, unit):

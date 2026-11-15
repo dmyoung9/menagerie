@@ -411,9 +411,12 @@ async def test_auto_device_stops_count_residents_and_priority_gates_eviction(tmp
         await m.close()
 
 
-async def test_live_membership_changes_are_rejected_and_separation_preserves_members(
+async def test_live_membership_changes_are_rejected_and_members_can_be_separated(
     tmp_path,
 ):
+    """Live membership edits are refused; when idle, a member may be
+    removed or the whole pool deleted, keeping model files and pool revisions
+    intact."""
     app, store, m = await setup(tmp_path)
     try:
         await m.activate(["a"], True)
@@ -438,22 +441,47 @@ async def test_live_membership_changes_are_rejected_and_separation_preserves_mem
             )
             unit = response.json()
             assert response.status_code == 200, response.text
+            # A policy edit is permitted while the pool is idle; the shared
+            # idle_timeout propagates to both members.
             changed = await client.post(
                 f"/api/deployment-sets?expected={unit['revision']}",
                 json=body | {"id": unit["id"], "idle_timeout": 900},
                 headers=headers,
             )
             assert changed.status_code == 200, changed.text
-            assert "source_group_id" not in store.get("deployment_set", unit["id"])
-            separated = await client.post(
-                f"/api/deployment-sets/{unit['id']}/dissolve?expected={changed.json()['revision']}",
+            assert store.get("deployment_set", unit["id"])["idle_timeout"] == 900
+            assert all(d["idle_timeout"] == 900 for d in store.list("deployment"))
+            # Remove a single member: its deployment record is dropped but the
+            # pool (and its remaining members) survives, and the model files
+            # are never dropped.
+            removed = await client.post(
+                (
+                    f"/api/deployment-sets/{unit['id']}/members/a/remove"
+                    f"?expected={changed.json()['revision']}"
+                ),
                 json={},
                 headers=headers,
             )
-            assert separated.status_code == 200
-            assert len(deployment_sets.units(store)) == 2
-            assert all(d["idle_timeout"] == 900 for d in store.list("deployment"))
-            assert {d["alias"] for d in store.list("deployment")} == {"a", "b"}
+            assert removed.status_code == 200, removed.text
+            pool = store.get("deployment_set", unit["id"])
+            assert pool["member_ids"] == ["b"]
+            assert pool["idle_timeout"] == 900
+            assert "a" not in {d["id"] for d in store.list("deployment")}
+            assert store.get("deployment", "b")["idle_timeout"] == 900
+            # Delete the whole pool: the last member goes with it, the set is
+            # gone, and model files + the runtime installation remain.
+            deleted = await client.post(
+                (
+                    f"/api/deployment-sets/{unit['id']}/delete?expected="
+                    f"{removed.json()['revision']}"
+                ),
+                json={},
+                headers=headers,
+            )
+            assert deleted.status_code == 200, deleted.text
+            assert store.list("deployment_set") == []
+            assert store.list("deployment") == []
+            assert "weights" in {d["id"] for d in store.list("artifact")}
     finally:
         await m.close()
 

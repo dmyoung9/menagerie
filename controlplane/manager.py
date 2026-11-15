@@ -94,7 +94,7 @@ class Manager:
     def runtime_port(self, deployment):
         unit = self.unit(deployment["id"])
         return (
-            unit["members"][0]["port"]
+            unit["port"]
             if unit.get("engine_pool")
             else deployment["port"]
         )
@@ -110,6 +110,8 @@ class Manager:
 
     def automatic_stops(self, ids):
         selected = deployment_sets.expand(self.store, ids)
+        if not selected:
+            return []
         priority = min(self.unit(i)["priority"] for i in selected)
         deficits = {}
         for gpu in self.host.get("gpus", []):
@@ -541,12 +543,30 @@ class Manager:
                     f"{self.store.get('deployment', i)['name']}: waiting for active requests to finish"
                 )
         aliases = [d["alias"] for d in all_d]
-        ports = [d["port"] for d in all_d]
+        # A serving port may belong to only one unit; pooled members share the
+        # pool's port, so track it per unit and probe it once. A port that is
+        # already served by the unit's own process is never re-probed.
+        port_owner = {}
+        checked_ports = set()
+        active_units = {
+            u["id"]
+            for u in deployment_sets.units(self.store)
+            if any(m["state"] in ACTIVE for m in u.get("members") or [])
+        }
         for d in selected:
-            if not d["enabled"] and not self.unit(d["id"]).get("engine_pool"):
+            unit = self.unit(d["id"])
+            if not d["enabled"] and not unit.get("engine_pool"):
                 errors.append(f"{d['alias']} is disabled")
-            if aliases.count(d["alias"]) > 1 or ports.count(d["port"]) > 1:
-                errors.append(f"Duplicate alias or port: {d['alias']}")
+            port = self.runtime_port(d)
+            if aliases.count(d["alias"]) > 1:
+                errors.append(f"Duplicate alias: {d['alias']}")
+            if port is not None:
+                if port in port_owner and port_owner[port] != unit["id"]:
+                    errors.append(
+                        f"Duplicate port {port}: two units claim the same serving port"
+                    )
+                else:
+                    port_owner.setdefault(port, unit["id"])
             p = d["profile_snapshot"]
             a, r = (
                 self.store.get("artifact", p["artifact_id"]),
@@ -587,14 +607,20 @@ class Manager:
                 ):
                     errors.append(f"Missing auxiliary artifact for {d['alias']}: {key}")
             if d["state"] not in ACTIVE:
-                sock = socket.socket()
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                try:
-                    sock.bind(("127.0.0.1", d["port"]))
-                except OSError:
-                    errors.append(f"Port {d['port']} is already occupied")
-                finally:
-                    sock.close()
+                if (
+                    port is not None
+                    and port not in checked_ports
+                    and unit["id"] not in active_units
+                ):
+                    checked_ports.add(port)
+                    sock = socket.socket()
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    try:
+                        sock.bind(("127.0.0.1", port))
+                    except OSError:
+                        errors.append(f"Port {port} is already occupied")
+                    finally:
+                        sock.close()
             est = self.estimate(d)
             estimates[d["id"]] = est
         settings = self.settings()
@@ -769,6 +795,9 @@ class Manager:
             raise Conflict("; ".join(check["errors"]))
         if any(self.inflight.get(i, 0) for i in authorized_stops or []):
             raise Conflict("Deployment has active requests")
+        # An empty pool has nothing to start and nothing to stop.
+        if not ids:
+            return {"started": [], "stopped": []}
         stopped, started = [], []
         unit = self.unit(ids[0])
 
@@ -898,7 +927,11 @@ class Manager:
         folder.mkdir(parents=True, exist_ok=True)
         spec = adapters.launch_spec(d, p, a, r, folder, self.store)
         unit = self.unit(ident)
-        pool_owner = unit["members"][0] if unit.get("engine_pool") else None
+        pool_owner = (
+            unit["members"][0]
+            if unit.get("engine_pool") and unit["members"]
+            else None
+        )
         if pool_owner:
             from . import runtime_pool
 
@@ -1367,9 +1400,9 @@ class Manager:
         for unit in deployment_sets.units(self.store):
             from .runtime_protocol import native_idle_sleep
 
-            member = unit["members"][0]
-            if unit.get("engine_pool"):
+            if unit.get("engine_pool") or not unit["members"]:
                 continue
+            member = unit["members"][0]
             runtime = self.store.get(
                 "runtime", member["profile_snapshot"]["runtime_id"]
             )

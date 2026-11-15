@@ -68,15 +68,26 @@ def put_standalone(store, ident: str, config: dict) -> dict:
 
 
 def put_pool(store) -> dict:
-    """A two-member runtime pool (multi-model unit)."""
+    """A two-member runtime pool (multi-model unit).
+
+    Pooled members mirror the pool's runtime and device and never carry a
+    port of their own; the pool owns the single serving port.
+    """
     for ident in ("a", "b"):
         put_standalone(store, ident, {"ctx-size": 8192})
+        store.put(
+            "deployment",
+            store.get("deployment", ident) | {"port": None},
+        )
     store.put(
         "deployment_set",
         {
             "id": "pool",
             "name": "pool",
             "engine_pool": True,
+            "runtime_id": "r",
+            "gpu": 0,
+            "port": 90010,
             "max_loaded": 2,
             "member_ids": ["a", "b"],
             "residency": "on-demand",

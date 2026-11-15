@@ -176,7 +176,10 @@ class DeploymentPolicy(Record):
 class Deployment(DeploymentPolicy):
     name: str
     artifact_id: str
-    runtime_id: str
+    # When the member sits in a pool the pool owns its runtime installation,
+    # device and serving port; the member mirrors them (with the port null
+    # while pooled). A standalone member carries them directly.
+    runtime_id: str | None = None
     config: dict = Field(default_factory=dict)
     raw_args: list[str] = Field(default_factory=list)
     catalog: dict = Field(default_factory=dict)
@@ -188,8 +191,13 @@ class Deployment(DeploymentPolicy):
     # regenerated only when the name actually changes.
     identifier_mode: Literal["generated", "custom"] = "generated"
     runtime_assignment: Literal["automatic", "dedicated"] = "dedicated"
-    port: int = Field(ge=1024, le=65535)
+    port: int | None = Field(default=None, ge=1024, le=65535)
     gpu: int | None = Field(default=None, ge=0, le=31)
+    # Member targeting for /api/model-setups: an existing pool id, or an
+    # inline specification of a pool created atomically with the member.
+    # Never persisted on the member itself.
+    pool_id: str | None = None
+    pool: dict | None = None
     # Per-deployment template override. None means "use model default";
     # an explicit {source: embedded|published|custom, asset_id} wins over the
     # model default. The source "automatic" is not stored at the deployment level
@@ -201,6 +209,13 @@ class Deployment(DeploymentPolicy):
 class DeploymentSet(DeploymentPolicy):
     name: str
     engine_pool: bool = False
+    # A runtime pool serves all of its members from one router process on one
+    # port; the installation and device are the pool's, not each member's.
+    # Members mirror runtime_id/gpu from the pool and never carry a port
+    # while pooled.
+    runtime_id: str | None = None
+    gpu: int | None = Field(default=None, ge=0, le=31)
+    port: int | None = Field(default=None, ge=1024, le=65535)
     max_loaded: int = Field(default=4, ge=1, le=128)
     member_ids: list[str] = Field(default_factory=list)
     members: list[Deployment] | None = None

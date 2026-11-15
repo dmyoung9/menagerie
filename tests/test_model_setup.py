@@ -1,4 +1,9 @@
-"""Model-first user outcomes, isolated from processes and inference."""
+"""Model-first user outcomes, isolated from processes and inference.
+
+Members join a runtime pool only when the caller targets it: an inline
+``pool`` specification creates the pool atomically with the first member, and
+``pool_id`` adds a member to an existing pool. Nothing is auto-assigned.
+"""
 
 import asyncio
 import time
@@ -24,20 +29,31 @@ async def test_process_pool_addition_review_apply_and_selected_load(tmp_path):
             "csrf_token"
         ]
 
+        pool_port = port()
+
         def setup_draft(name):
             return draft(name, port(), runtime_id="runtime") | {
                 "queue_timeout": 10,
             }
 
         try:
-            first = await save(client, setup_draft("Alpha"))
+            # The wizard creates the pool atomically with the first member.
+            first = await save(
+                client,
+                setup_draft("Alpha")
+                | {
+                    "pool": pool_spec("Alpha pool", pool_port, "runtime", queue_timeout=10)
+                },
+            )
             key = manager.unit(first["id"])["id"]
             assert manager.unit(key)["engine_pool"]
+            assert manager.unit(key)["port"] == pool_port
             plan = manager.plan([first["id"]])
             assert plan["errors"] == []
             await manager.load_model(first["id"], plan["plan_token"])
             owner = store.get("deployment", first["id"])
-            second = await save(client, setup_draft("Beta"))
+            # A second member targets the same pool by id, not by coincidence.
+            second = await save(client, setup_draft("Beta") | {"pool_id": key})
             assert second["changes_pending"]
             assert store.get("deployment", first["id"])["pid"] == owner["pid"]
             review = await client.post(
@@ -133,17 +149,38 @@ async def setup(tmp_path):
     await app.state.manager.client.aclose()
 
 
-def draft(name, port, artifact_id="weights", runtime_id="engine"):
+def pool_spec(name, pool_port, runtime_id="engine", **policy):
+    """An inline runtime-pool specification accepted by /api/model-setups.
+
+    The client supplies the pool identity and the shared engine/device/serving
+    settings; the backend fills the remaining policy defaults.
+    """
+    return {
+        "name": name,
+        "engine_pool": True,
+        "runtime_id": runtime_id,
+        "gpu": None,
+        "port": pool_port,
+        "residency": "on-demand",
+        "max_loaded": 4,
+        "priority": 50,
+        "idle_timeout": 300,
+        "allow_eviction": True,
+        "queue_timeout": 300,
+        **policy,
+    }
+
+
+def draft(name, port_value, artifact_id="weights", runtime_id="engine"):
     return {
         "name": name,
         "alias": name.lower(),
-        "port": port,
+        "port": port_value,
         "artifact_id": artifact_id,
         "runtime_id": runtime_id,
         "config": {},
         "raw_args": [],
         "catalog": {},
-        "runtime_assignment": "automatic",
         "allow_eviction": True,
     }
 
@@ -157,17 +194,19 @@ async def save(client, data, revision=None):
     return response.json()
 
 
-async def test_automatic_assignment_and_busy_addition_preserve_live_pool(setup):
+async def test_busy_addition_to_live_pool_preserves_live_members(setup):
     manager, store, client = setup
-    first = await save(client, draft("Alpha", 8130))
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
     pool = manager.unit(first["id"])
     assert pool["engine_pool"]
-    second = await save(client, draft("Beta", 8131))
+    second = await save(client, draft("Beta", port()) | {"pool_id": pool["id"]})
     assert manager.unit(second["id"])["id"] == pool["id"]
     for ident in (first["id"], second["id"]):
         store.put("deployment", store.get("deployment", ident) | {"state": "READY"})
     before = manager.unit(first["id"])
-    added = await save(client, draft("Gamma", 8132))
+    added = await save(client, draft("Gamma", port()) | {"pool_id": pool["id"]})
     assert added["changes_pending"]
     assert manager.unit(first["id"]) == before
     assert not store.get("deployment", added["id"])["enabled"]
@@ -178,10 +217,12 @@ async def test_automatic_assignment_and_busy_addition_preserve_live_pool(setup):
 
 async def test_active_rename_keeps_live_alias_and_discard_preserves_runtime(setup):
     manager, store, client = setup
-    first = await save(client, draft("Alpha", 8130))
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
     live = store.put("deployment", first | {"state": "READY"})
     changed = await save(
-        client, draft("Renamed", 8130) | {"id": first["id"]}, live["revision"]
+        client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"]
     )
     assert changed["alias"] == "renamed" and changed["active_alias"] == "alpha"
     assert store.get("deployment", first["id"])["alias"] == "alpha"
@@ -191,23 +232,40 @@ async def test_active_rename_keeps_live_alias_and_discard_preserves_runtime(setu
     assert store.get("deployment", first["id"])["alias"] == "alpha"
 
 
-async def test_incompatible_and_legacy_setups_stay_separate(setup):
+async def test_members_pool_only_on_explicit_targeting(setup):
     manager, store, client = setup
-    dedicated = await save(
-        client, draft("Legacy", 8130) | {"runtime_assignment": "dedicated"}
+    # No targeting: standalone, whatever its residency.
+    standalone = await save(client, draft("Standalone", port()))
+    assert not manager.unit(standalone["id"]).get("engine_pool")
+    # Explicit on-demand targeting: pooled.
+    pooled = await save(
+        client, draft("Pooled", port()) | {"pool": pool_spec("P", port())}
     )
-    automatic = await save(client, draft("Automatic", 8131))
-    pinned = await save(client, draft("Pinned", 8132) | {"residency": "pinned"})
-    assert not manager.unit(dedicated["id"])["multi_model"]
-    assert not manager.unit(pinned["id"])["multi_model"]
-    assert manager.unit(automatic["id"])["member_ids"] == [automatic["id"]]
+    assert manager.unit(pooled["id"])["engine_pool"]
+    # A pinned member cannot join an on-demand pool: the pool is never
+    # created (atomic rollback) and the change is a hard conflict.
+    pools_before = {s["id"] for s in store.list("deployment_set")}
+    members_before = {d["name"] for d in store.list("deployment")}
+    response = await client.post(
+        "/api/model-setups",
+        json=draft("Pinned", port())
+        | {"residency": "pinned", "pool": pool_spec("P2", port())},
+    )
+    assert response.status_code == 409
+    assert "pool" in response.text
+    assert {s["id"] for s in store.list("deployment_set")} == pools_before
+    assert {d["name"] for d in store.list("deployment")} == members_before
 
 
 async def test_cancel_during_drain_never_stops_live_model(setup, monkeypatch):
     manager, store, client = setup
-    first = await save(client, draft("Alpha", 8130))
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
     live = store.put("deployment", first | {"state": "READY"})
-    await save(client, draft("Renamed", 8130) | {"id": first["id"]}, live["revision"])
+    await save(
+        client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"]
+    )
     key = manager.unit(first["id"])["id"]
     monkeypatch.setattr(
         manager, "plan", lambda ids: {"errors": [], "stops": [], "plan_token": "base"}
@@ -239,9 +297,13 @@ async def test_failed_application_preserves_desired_configuration(
     setup, monkeypatch, change
 ):
     manager, store, client = setup
-    first = await save(client, draft("Alpha", 8130))
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
     live = store.put("deployment", first | {"state": "READY"})
-    await save(client, draft("Renamed", 8130) | {"id": first["id"]}, live["revision"])
+    await save(
+        client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"]
+    )
     key = manager.unit(first["id"])["id"]
     monkeypatch.setattr(
         manager, "plan", lambda ids: {"errors": [], "stops": [], "plan_token": "base"}
@@ -285,7 +347,11 @@ async def test_load_waits_for_selected_member_residency_without_inference(
     setup, monkeypatch
 ):
     manager, store, client = setup
-    first = await save(client, draft("Alpha", 8130))
+    # A pool member is what issues the router /models/load request; the
+    # standalone path would never reach it.
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
 
     async def activate(*args, **kwargs):
         assert kwargs["token"] == "reviewed"
@@ -329,9 +395,13 @@ async def test_reviewed_apply_updates_routing_and_clears_pending_only_after_read
     setup, monkeypatch
 ):
     manager, store, client = setup
-    first = await save(client, draft("Alpha", 8130))
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
     live = store.put("deployment", first | {"state": "READY"})
-    await save(client, draft("Renamed", 8130) | {"id": first["id"]}, live["revision"])
+    await save(
+        client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"]
+    )
     key = manager.unit(first["id"])["id"]
     assert [r["id"] for r in (await client.get("/v1/models")).json()["data"]] == [
         "alpha"
@@ -356,7 +426,9 @@ async def test_reviewed_apply_updates_routing_and_clears_pending_only_after_read
         assert model_setup.desired(store, key)
         assert apply_ops.find_op(store, key).state == "applying"
         for ident in ids:
-            store.put("deployment", store.get("deployment", ident) | {"state": "READY"})
+            store.put(
+                "deployment", store.get("deployment", ident) | {"state": "READY"}
+            )
 
     monkeypatch.setattr(manager, "_stop_unit_locked", stop)
     monkeypatch.setattr(manager, "_activate_locked", activate)
@@ -371,8 +443,12 @@ async def test_reviewed_apply_updates_routing_and_clears_pending_only_after_read
 
 async def test_member_disable_keeps_neighbor_available_and_runtime_running(setup):
     manager, store, client = setup
-    first = await save(client, draft("Alpha", 8130))
-    second = await save(client, draft("Beta", 8131))
+    pool_port = port()
+    first = await save(
+        client,
+        draft("Alpha", port()) | {"pool": pool_spec("Pair", pool_port)},
+    )
+    second = await save(client, draft("Beta", port()) | {"pool_id": manager.unit(first["id"])["id"]})
     for row in (first, second):
         store.put("deployment", row | {"state": "READY"})
     response = await client.post(
