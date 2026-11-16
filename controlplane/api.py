@@ -203,16 +203,15 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         saved = store.put("deployment_set", data, expected, c=c)
         for i in data["member_ids"]:
             d = store.get("deployment", i, c)
-            store.put(
-                "deployment",
-                d
-                | {
-                    k: saved[k]
-                    for k in deployment_sets.POLICY_KEYS
-                    if k != "enabled" or not saved.get("engine_pool")
-                },
-                c=c,
-            )
+            mirrored = d | {
+                k: saved[k]
+                for k in deployment_sets.POLICY_KEYS
+                if k != "enabled" or not saved.get("engine_pool")
+            }
+            # Only write a member that actually changed: adding or editing a
+            # sibling must not churn every member's revision.
+            if mirrored != d:
+                store.put("deployment", mirrored, c=c)
         store.event(
             "deployment_configuration",
             {"name": saved["name"], "members": saved["member_ids"]},
@@ -671,10 +670,11 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             with store.transaction() as c:
                 data = body.model_dump(exclude_none=True)
                 drafts = data.pop("members", None)
+                removed = set()
                 if drafts is not None:
-                    if data["member_ids"] or not drafts:
+                    if data["member_ids"]:
                         raise ValueError(
-                            "Provide one or more model configurations, not member IDs"
+                            "Provide model configurations, not member IDs"
                         )
                     previous = (
                         store.get("deployment_set", data["id"], c)
@@ -700,10 +700,21 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                         draft.update({k: data[k] for k in deployment_sets.POLICY_KEYS})
                         member = save_member(draft, c=c, owner_id=data.get("id"))
                         data["member_ids"].append(member["id"])
-                    for removed in owned - set(data["member_ids"]):
-                        d = store.get("deployment", removed, c)
-                        store.put("deployment", d | {"enabled": False}, c=c)
-                return save_set(data, expected, c)
+                    removed = owned - set(data["member_ids"])
+                saved = save_set(data, expected, c)
+                for ident in removed:
+                    # Members are never orphaned into standalone deployments:
+                    # removing one from the pool drops its deployment record.
+                    # Model files stay on disk.
+                    member = store.get("deployment", ident, c)
+                    store.delete("deployment", ident, c)
+                    store.event(
+                        "deployment_removed",
+                        {"name": member["name"], "pool": saved["name"]},
+                        ident,
+                        c,
+                    )
+                return saved
 
     @app.post("/api/serving-deployments/{ident}/validate")
     async def validate_serving(ident: str):
@@ -941,9 +952,34 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
         async with manager.lock:
             with store.transaction() as c:
                 data = body.model_dump(exclude_none=True)
-                data.pop("pool_id", None)
+                pool_id = data.pop("pool_id", None)
                 data.pop("pool", None)
-                saved = save_member(data, expected, c)
+                creating = not data.get("id")
+                if creating:
+                    # A model is always a pool member: the pool owns the shared
+                    # runtime, device and serving port. There are no standalone
+                    # deployments, so a new member must name its pool.
+                    if not pool_id:
+                        raise Conflict(
+                            "Models belong to a runtime pool; target one with pool_id"
+                        )
+                    pool = store.get("deployment_set", pool_id, c)
+                    if not pool.get("engine_pool"):
+                        raise Conflict("Models can only join a runtime pool")
+                    data.update(
+                        runtime_id=pool["runtime_id"],
+                        gpu=pool.get("gpu"),
+                        port=None,
+                    )
+                saved = save_member(data, expected, c, owner_id=pool_id)
+                if creating and pool_id:
+                    pool = store.get("deployment_set", pool_id, c)
+                    save_set(
+                        pool | {"member_ids": [*pool["member_ids"], saved["id"]]},
+                        pool["revision"],
+                        c=c,
+                    )
+                    return store.get("deployment", saved["id"], c)
                 owner = deployment_sets.unit_for(store, saved["id"])
                 if owner and owner["multi_model"]:
                     store.put(
@@ -1132,6 +1168,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     )["id"]
                 elif pool_id is not None:
                     pool_id_for_member = pool_id
+                else:
+                    raise Conflict(
+                        "Models belong to a runtime pool; choose one with pool_id or pool"
+                    )
                 if pool_id_for_member is not None and not data.get("id"):
                     pool = store.get("deployment_set", pool_id_for_member, c)
                     if not pool.get("engine_pool"):
@@ -1651,7 +1691,21 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             restored["port"] = next(
                 port for port in range(8120, 65536) if port not in used_ports
             )
-            return store.put("deployment", restored, c=c)
+            # A restored model is still a pool member: it is grouped with a set
+            # rather than left as a standalone deployment.
+            member = store.put("deployment", restored, c=c)
+            value = DeploymentSet(
+                name=saved["name"] + " pool",
+                member_ids=[member["id"]],
+                residency=restored.get("residency") or "on-demand",
+                priority=restored.get("priority", 50),
+                idle_timeout=restored.get("idle_timeout", 300),
+                allow_eviction=restored.get("allow_eviction", False),
+                queue_timeout=restored.get("queue_timeout", 300),
+                enabled=False,
+            ).model_dump(exclude_none=True)
+            save_set(value | {"restored_from_session": ident}, c=c)
+            return store.get("deployment", member["id"], c)
 
     @app.get("/api/history/activations")
     async def activations():

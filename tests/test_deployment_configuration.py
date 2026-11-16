@@ -28,7 +28,11 @@ async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
             "engine": "llama.cpp",
             "execution_kind": "native",
             "executable": "/unused",
-            "capabilities": {"formats": ["gguf"], "flags": ["ctx-size", "parallel"]},
+            "capabilities": {
+                "formats": ["gguf"],
+                "flags": ["ctx-size", "parallel"],
+                "mechanisms": {"router": True},
+            },
         },
     )
     settings = {
@@ -59,6 +63,22 @@ async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
                     "csrf_token"
                 ]
             }
+
+            pool = await client.post(
+                "/api/deployment-sets",
+                json={
+                    "name": "Gemma pool",
+                    "engine_pool": True,
+                    "runtime_id": "engine",
+                    "port": 8130,
+                    "residency": "on-demand",
+                    "enabled": True,
+                    "member_ids": [],
+                },
+                headers=headers,
+            )
+            assert pool.status_code == 200, pool.text
+            payload["pool_id"] = pool.json()["id"]
 
             async def save(body, expected=None):
                 return await client.post(

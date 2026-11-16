@@ -28,7 +28,7 @@ test('resource preview pairs stacked capacity and allocation selection without p
     lifecycle: { serving: true },
   });
   await page.goto('/#/deployments');
-  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
+  await page.locator('.page-head').getByRole('button', { name: 'Add model', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog

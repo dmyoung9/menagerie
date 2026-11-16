@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 import httpx
+import pytest
 from test_controlplane import baseline, port, seed
 
 from controlplane.api import create_app
@@ -157,9 +158,10 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
             )
             changed["members"] = changed["members"][:1] + [member("a-new", 8124)]
             assert (await save(changed, a["revision"])).status_code == 200
-            detached = store.get("deployment", a["member_ids"][1])
-            assert detached["enabled"] is False
-            assert detached["state"] == "STOPPED"
+            # Members are never orphaned into standalone deployments: removing
+            # one from the pool drops its deployment record.
+            with pytest.raises(KeyError):
+                store.get("deployment", a["member_ids"][1])
             assert store.list("job") == []
     finally:
         await app.state.manager.close()

@@ -6,12 +6,14 @@ test('new deployments leave tuning and device placement to the engine', async ({
   fixture,
 }) => {
   await page.goto('/#/deployments');
-  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
+  await page.locator('.page-head').getByRole('button', { name: 'Add model', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Model', { exact: true }).selectOption('model');
   await dialog.getByLabel('Engine', { exact: true }).selectOption('engine');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog.getByLabel('Name', { exact: true }).fill('Automatic');
+  await dialog.getByLabel('Pool name', { exact: true }).fill('Automatic pool');
+  await dialog.getByLabel('Serving port', { exact: true }).fill('8123');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog
     .getByRole('button', {
@@ -34,7 +36,7 @@ test('a native pool remains a pool even with one model and round-trips its polic
   fixture,
 }) => {
   await page.goto('/#/deployments');
-  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
+  await page.locator('.page-head').getByRole('button', { name: 'Add model', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Model', { exact: true }).selectOption('model');
   await dialog.getByLabel('Engine', { exact: true }).selectOption('engine');
@@ -134,7 +136,7 @@ test('native pool device visibility is edited once and saved for all members', a
   await expect(page.getByLabel('GPU', { exact: true })).toHaveCount(1);
   await page.getByLabel('GPU', { exact: true }).selectOption('0');
   await page
-    .getByRole('button', { name: 'Save deployment', exact: true })
+    .getByRole('button', { name: 'Save pool', exact: true })
     .click();
   await expect
     .poll(() =>

@@ -152,6 +152,22 @@ async def test_fresh_registry_stop_sources_snapshot_from_folded_fields(tmp_path)
         headers = {
             "X-Menagerie-Token": (await client.get("/api/status")).json()["csrf_token"]
         }
+        # Models live in a runtime pool; create the pool that owns the shared
+        # runtime installation and serving port.
+        pool = await client.post(
+            "/api/deployment-sets",
+            json={
+                "name": "Folded pool",
+                "engine_pool": True,
+                "runtime_id": "runtime",
+                "port": port(),
+                "residency": "on-demand",
+                "enabled": True,
+                "member_ids": [],
+            },
+            headers=headers,
+        )
+        assert pool.status_code == 200, pool.text
         response = await client.post(
             "/api/model-setups",
             json={
@@ -173,7 +189,8 @@ async def test_fresh_registry_stop_sources_snapshot_from_folded_fields(tmp_path)
                 },
                 "alias": "folded",
                 "port": port(),
-                "residency": "pinned",
+                "residency": "on-demand",
+                "pool_id": pool.json()["id"],
             },
             headers=headers,
         )

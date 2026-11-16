@@ -51,8 +51,16 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
   page,
   fixture,
 }) => {
+  // `idle` is a starter-pool member; pooled members lock their engine args and
+  // carry no port. Detach it so this standalone Configuration page stays
+  // editable, and give it the endpoint port a standalone deployment requires
+  // (the "Private port" field is required and empty otherwise).
+  fixture.sets[0].member_ids = fixture.sets[0].member_ids.filter(
+    (id) => id !== 'idle',
+  );
   const target = fixture.registry.deployments[1];
   if (!target) throw new Error('Expected fixture deployment');
+  target.port = 8121;
   target.catalog = contracts.modelCatalog({
     vendor: { retain: true },
     model: { compatibility: { reasoningField: 'reasoning_content' } },

@@ -18,6 +18,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Card,
+  CardTitle,
   CardHeader,
   CardDescription,
   CardContent,
@@ -35,6 +36,7 @@ import {
   mode,
   number,
   state,
+  api,
   Status,
   Tabs,
   Json,
@@ -84,128 +86,281 @@ import type {
   ServingDeployment,
 } from './types';
 
-export function ConfiguredModelsTable({
-  rows,
+export function PoolSection({
+  d,
+  data,
+  host,
   actions,
+  addModel,
+  changed,
 }: {
-  rows: Deployment[];
+  d: DeploymentSet;
+  data: Registry;
+  host: HostSnapshot;
   actions: DeploymentActions;
+  addModel: (poolId: string) => void;
+  changed: (text: string) => void;
 }) {
+  const { confirm, confirmation } = useConfirmation();
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  const members = d.members || [];
+  const runtime = (data.runtimes || []).find((r) => r.id === d.runtime_id);
+  const meta = [
+    `${members.length} model${members.length === 1 ? '' : 's'}`,
+    runtime?.name || d.runtime_id,
+    d.port != null ? `:${d.port}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const stale = telemetryStale(host);
+
+  async function remove(member: Deployment) {
+    if (
+      !(await confirm(
+        `Remove ${member.name} from ${d.name}? Model files and history are kept.`,
+      ))
+    )
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(
+        `/api/deployment-sets/${d.id}/members/${member.id}/remove?expected=${d.revision}`,
+        {},
+      );
+      changed(`${member.name} removed from ${d.name}`);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removePool() {
+    if (
+      !(await confirm(
+        `Delete ${d.name}? ${
+          members.length
+            ? `${members.length} model${members.length === 1 ? '' : 's'} leave the registry. `
+            : ''
+        }Model files and the engine installation are kept.`,
+      ))
+    )
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(
+        `/api/deployment-sets/${d.id}/delete?expected=${d.revision}`,
+        {},
+      );
+      changed(`${d.name} deleted`);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>API model ID</TableHead>
-          <TableHead>Availability</TableHead>
-          <TableHead>Residency</TableHead>
-          <TableHead>Active requests</TableHead>
-          <TableHead>Total requests</TableHead>
-          <TableHead>Actions</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((model) => (
-          <TableRow key={model.id}>
-            <TableCell>
-              <a href={`#/deployments/${model.id}`}>{model.name}</a>
-              {model.state === 'FAILED' && (
-                <p>
-                  <a href={`#/deployments/${model.id}/logs`}>View logs</a>
-                </p>
-              )}
-              {model.changes_pending && <p>Changes pending</p>}
-            </TableCell>
-            <TableCell>
-              <code>{model.alias}</code>
-              {model.active_alias && model.active_alias !== model.alias && (
-                <p>Currently serving: {model.active_alias}</p>
-              )}
-            </TableCell>
-            <TableCell>
-              {model.changes_pending
-                ? 'Changes pending'
-                : model.enabled
-                  ? 'Available'
-                  : 'Disabled'}
-            </TableCell>
-            <TableCell>
-              {model.state === 'FAILED'
-                ? 'Failed'
-                : model.runtime_observation?.residency === 'resident' ||
-                    (!model.engine_pool &&
-                      model.state === 'READY' &&
-                      !model.runtime_observation)
-                  ? 'Loaded'
-                  : model.runtime_observation?.residency === 'loading' ||
-                      ['STARTING', 'LOADING'].includes(model.state)
-                    ? 'Loading'
-                    : model.state === 'STOPPING'
-                      ? 'Unloading'
-                      : 'Not loaded'}
-            </TableCell>
-            <TableCell>{model.inflight || 0}</TableCell>
-            <TableCell>{model.historical_requests || 0}</TableCell>
-            <TableCell>
-              {model.member_availability !== false && (
-                <Button
-                  variant="outline"
-                  disabled={model.changes_pending}
-                  onClick={() =>
-                    model.enabled
-                      ? actions.load('deployments', model)
-                      : actions.enable(model, true)
-                  }
-                >
-                  {model.enabled ? 'Review and load' : 'Make available'}
-                </Button>
-              )}
-              <Menu label={'Actions for ' + model.name}>
-                <DropdownMenuItem
-                  render={
-                    <a href={`#/deployments/${model.id}/configuration`} />
-                  }
-                >
-                  Edit
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => actions.edit('deployments', model, true)}
-                >
-                  Duplicate
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  render={<a href={`#/deployments/${model.id}/logs`} />}
-                >
-                  Logs
-                </DropdownMenuItem>
-                {model.member_availability !== false && model.enabled && (
-                  <DropdownMenuItem
-                    disabled={model.changes_pending}
-                    onClick={() => actions.enable(model, false)}
-                  >
-                    Disable
-                  </DropdownMenuItem>
-                )}
-              </Menu>
-              {model.unit_id && model.unit_id !== model.id ? (
-                <a href={`#/deployments/${model.unit_id}`}>
-                  Advanced runtime controls
-                </a>
-              ) : (
-                active(model) && (
-                  <Button
-                    variant="outline"
-                    onClick={() => actions.stop('deployments', model)}
-                  >
-                    Unload model
-                  </Button>
-                )
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <Card className="mb-5 min-w-0 gap-0 p-0">
+      {confirmation}
+      <CardHeader className="flex flex-wrap items-start justify-between gap-3 p-5 pb-3">
+        <div className="min-w-0">
+          <CardTitle className="flex flex-wrap items-center gap-2">
+            <a href={`#/deployments/${d.id}`}>{d.name}</a>
+            <Status value={state(d)} />
+          </CardTitle>
+          <CardDescription>{meta}</CardDescription>
+          {d.changes_pending && <p className="muted">Changes pending</p>}
+        </div>
+        <div className="actions flex flex-wrap items-center gap-2">
+          {d.enabled && !active(d) && (
+            <Button
+              variant="default"
+              type="button"
+              disabled={busy}
+              onClick={() => actions.load('serving-deployments', d)}
+            >
+              Load
+            </Button>
+          )}
+          {active(d) && d.state !== 'STOPPING' && (
+            <Button
+              variant="outline"
+              type="button"
+              disabled={busy}
+              onClick={() => actions.stop('serving-deployments', d)}
+            >
+              Unload
+            </Button>
+          )}
+          {d.engine_pool !== false && (
+            <Button
+              variant="outline"
+              type="button"
+              disabled={busy}
+              onClick={() => addModel(d.id)}
+            >
+              Add model
+            </Button>
+          )}
+          <Menu label={'Actions for ' + d.name}>
+            <DropdownMenuItem
+              onClick={() => actions.edit('deployment_sets', d)}
+            >
+              Edit pool
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={busy || active(d)}
+              onClick={() => void removePool()}
+            >
+              Delete pool
+            </DropdownMenuItem>
+          </Menu>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        {error && (
+          <p role="alert" className="error-text px-5 pb-3">
+            {error}
+          </p>
+        )}
+        {members.length ? (
+          <div className="table-wrap">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Model</TableHead>
+                  <TableHead>Availability</TableHead>
+                  <TableHead className="numeric">
+                    VRAM (GiB)
+                    {stale && (
+                      <small
+                        className="muted"
+                        title="Telemetry has not updated"
+                      >
+                        {' '}
+                        · stale
+                      </small>
+                    )}
+                  </TableHead>
+                  <TableHead className="numeric">Active requests</TableHead>
+                  <TableHead>
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {members.map((member) => (
+                  <TableRow key={member.id}>
+                    <TableCell>
+                      <Status value={state(member)} />
+                    </TableCell>
+                    <TableCell>
+                      <a href={`#/deployments/${member.id}`}>{member.name}</a>
+                      <small className="muted">
+                        <code>{member.alias}</code>
+                      </small>
+                      {member.changes_pending && (
+                        <p className="muted">Changes pending</p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {member.member_availability === false
+                        ? 'Unavailable'
+                        : !member.enabled
+                          ? 'Disabled'
+                          : member.runtime_observation?.residency ===
+                                'resident' || member.state === 'READY'
+                            ? 'Loaded'
+                            : ['STARTING', 'LOADING', 'QUEUED'].includes(
+                                  member.state,
+                                )
+                              ? 'Loading'
+                              : member.state === 'STOPPING'
+                                ? 'Unloading'
+                                : 'Not loaded'}
+                    </TableCell>
+                    <TableCell className="numeric">
+                      {gib(host.deployments?.[member.id]?.gpu_mib)}
+                    </TableCell>
+                    <TableCell className="numeric">
+                      {member.inflight || 0}
+                    </TableCell>
+                    <TableCell>
+                      <div className="actions">
+                        {member.member_availability !== false && (
+                          <Button
+                            variant="outline"
+                            type="button"
+                            aria-label={
+                              (member.enabled ? 'Load ' : 'Enable ') +
+                              member.name
+                            }
+                            disabled={busy || member.changes_pending}
+                            onClick={() =>
+                              member.enabled
+                                ? actions.load('deployments', member)
+                                : actions.enable(member, true)
+                            }
+                          >
+                            {member.enabled ? 'Load' : 'Enable'}
+                          </Button>
+                        )}
+                        <Menu label={'Actions for ' + member.name}>
+                          <DropdownMenuItem
+                            render={
+                              <a
+                                href={`#/deployments/${member.id}/configuration`}
+                              />
+                            }
+                          >
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            render={
+                              <a href={`#/deployments/${member.id}/logs`} />
+                            }
+                          >
+                            Logs
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            aria-label={'Remove ' + member.name + ' from pool'}
+                            disabled={busy || active(member)}
+                            onClick={() => void remove(member)}
+                          >
+                            Remove from pool
+                          </DropdownMenuItem>
+                        </Menu>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : (
+          <div className="px-5 pb-5">
+            <p className="muted">No models in this pool yet.</p>
+            {d.engine_pool !== false && (
+              <Button
+                variant="outline"
+                type="button"
+                disabled={busy}
+                onClick={() => addModel(d.id)}
+              >
+                Add the first model
+              </Button>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -467,8 +622,8 @@ export function DeploymentSetEditor({
     reset,
   } = useDraftForm<DeploymentSetDraft>(
     {
-      name: 'New deployment',
-      engine_pool: false,
+      name: 'New pool',
+      engine_pool: true,
       max_loaded: 4,
       residency: 'on-demand',
       priority: 50,
@@ -640,27 +795,10 @@ export function DeploymentSetEditor({
     setBusy(true);
     setError('');
     try {
-      const single =
-        !initial && value.members.length === 1 && !value.engine_pool;
       const path =
-        (single ? '/api/deployments' : '/api/deployment-sets') +
+        '/api/deployment-sets' +
         (initial ? '?expected=' + (pendingRevision ?? initial.revision) : '');
-      const shared = {
-        residency: value.residency,
-        priority: value.priority,
-        idle_timeout: value.idle_timeout,
-        allow_eviction: value.allow_eviction,
-        enabled: value.enabled,
-        queue_timeout: value.queue_timeout,
-      };
-      const payload = single
-        ? {
-            ...value.members[0],
-            name: value.name,
-            ...shared,
-          }
-        : value;
-      const result = await readApi(path, contracts.identity, payload);
+      const result = await readApi(path, contracts.identity, value);
       saved(result.id);
     } catch (e) {
       const detail = message(e);
@@ -702,7 +840,7 @@ export function DeploymentSetEditor({
   const Shell = embedded ? EmbeddedEditor : Dialog;
   return (
     <Shell
-      title={initial ? initial.name : 'New deployment'}
+      title={initial ? initial.name : 'New pool'}
       close={close}
       busy={busy}
       wide
@@ -997,23 +1135,13 @@ export function DeploymentSetEditor({
               )}
               <Field
                 label="Lifecycle owner"
-                hint="Runtime pools share one native router and load models independently on request. Pinned and atomic groups use supervised processes. Pools require one compatible native runtime and shared device visibility."
+                hint="Runtime pools share one native router and load models independently on request. Pools require one compatible native runtime and shared device visibility."
               >
-                <NativeSelect
-                  value={value.engine_pool ? 'runtime' : 'supervisor'}
-                  onChange={(e) => {
-                    set('engine_pool', e.target.value === 'runtime');
-                    if (e.target.value === 'runtime')
-                      set('residency', 'on-demand');
-                  }}
-                >
-                  <NativeSelectOption value="supervisor">
-                    Menagerie — coordinated processes
-                  </NativeSelectOption>
-                  <NativeSelectOption value="runtime">
-                    Runtime — native model pool
-                  </NativeSelectOption>
-                </NativeSelect>
+                <p>
+                  {value.engine_pool
+                    ? 'Runtime — native model pool'
+                    : 'Menagerie — coordinated processes'}
+                </p>
               </Field>
               {value.engine_pool && value.allow_eviction && (
                 <Field label="Maximum resident models">
@@ -1166,12 +1294,11 @@ export function DeploymentSetEditor({
               type="submit"
               disabled={
                 busy ||
-                value.members.length < 1 ||
                 value.members.some(aliasError) ||
                 Object.values(invalid).some(Boolean)
               }
             >
-              {busy ? 'Saving…' : 'Save deployment'}
+              {busy ? 'Saving…' : 'Save pool'}
             </Button>
           </div>
         </form>
@@ -1188,6 +1315,7 @@ export function MultiDeploymentDetail({
   actions,
   events,
   saved,
+  addModel,
 }: {
   d: DeploymentSet;
   tab: string;
@@ -1196,6 +1324,7 @@ export function MultiDeploymentDetail({
   actions: DeploymentActions;
   events: OperationEvent[];
   saved: () => void;
+  addModel: (poolId: string) => void;
 }) {
   const logQuery = new URLSearchParams(window.location.hash.split('?')[1]);
   const logRun = logQuery.get('run');
@@ -1209,6 +1338,24 @@ export function MultiDeploymentDetail({
     ),
     [logs, setLogs] = useState(''),
     [error, setError] = useState('');
+  const { confirm, confirmation } = useConfirmation();
+  async function removeMember(member: Deployment) {
+    if (
+      !(await confirm(
+        `Remove ${member.name} from ${d.name}? Model files and history are kept.`,
+      ))
+    )
+      return;
+    try {
+      await api(
+        `/api/deployment-sets/${d.id}/members/${member.id}/remove?expected=${d.revision}`,
+        {},
+      );
+      saved();
+    } catch (e) {
+      setError(message(e));
+    }
+  }
   useEffect(() => {
     if (tab !== 'Logs') return;
     let alive = true;
@@ -1236,6 +1383,7 @@ export function MultiDeploymentDetail({
   }, [logMember, tab, logRun, requestedMember]);
   return (
     <>
+      {confirmation}
       <a className="back-link" href="#/deployments">
         <ArrowLeft size={16} />
         Deployments
@@ -1246,6 +1394,15 @@ export function MultiDeploymentDetail({
           <Status value={state(d)} />
         </div>
         <div className="actions">
+          {d.engine_pool !== false && (
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => addModel(d.id)}
+            >
+              Add model
+            </Button>
+          )}
           {!active(d) && d.enabled && (
             <Button
               variant="default"
@@ -1271,6 +1428,11 @@ export function MultiDeploymentDetail({
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3 whitespace-pre-line">
             {d.lifecycle.failure}
           </AlertDescription>
+        </Alert>
+      )}
+      {error && (
+        <Alert variant="destructive" role="alert" className="mb-5">
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
       <Tabs
@@ -1388,12 +1550,27 @@ export function MultiDeploymentDetail({
                       <Button
                         variant="outline"
                         type="button"
+                        onClick={() => go(`deployments/${m.id}/configuration`)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        type="button"
                         onClick={() => {
                           setLogMember(m.id);
                           go(`deployments/${d.id}/logs`);
                         }}
                       >
                         Logs
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        type="button"
+                        disabled={active(m)}
+                        onClick={() => void removeMember(m)}
+                      >
+                        Remove
                       </Button>
                     </div>
                   </CardContent>
@@ -1478,11 +1655,6 @@ export function MultiDeploymentDetail({
                 ))}
               </NativeSelect>
             </Field>
-            {error && (
-              <p role="alert" className="error-text">
-                {error}
-              </p>
-            )}
             <pre tabIndex={0}>{logs || 'Loading logs…'}</pre>
           </CardContent>
         </Card>

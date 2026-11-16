@@ -234,11 +234,18 @@ async def test_active_rename_keeps_live_alias_and_discard_preserves_runtime(setu
     assert store.get("deployment", first["id"])["alias"] == "alpha"
 
 
-async def test_members_pool_only_on_explicit_targeting(setup):
+async def test_members_join_a_pool_only_when_explicitly_targeted(setup):
     manager, store, client = setup
-    # No targeting: standalone, whatever its residency.
-    standalone = await save(client, draft("Standalone", port()))
-    assert not manager.unit(standalone["id"]).get("engine_pool")
+    # No targeting: rejected outright, nothing is created.
+    pools_before = {s["id"] for s in store.list("deployment_set")}
+    members_before = {d["name"] for d in store.list("deployment")}
+    response = await client.post(
+        "/api/model-setups", json=draft("Standalone", port())
+    )
+    assert response.status_code == 409
+    assert "pool" in response.text
+    assert {s["id"] for s in store.list("deployment_set")} == pools_before
+    assert {d["name"] for d in store.list("deployment")} == members_before
     # Explicit on-demand targeting: pooled.
     pooled = await save(
         client, draft("Pooled", port()) | {"pool": pool_spec("P", port())}

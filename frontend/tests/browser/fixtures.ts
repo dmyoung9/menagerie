@@ -53,12 +53,19 @@ export async function openIdentity(page: Page) {
 }
 
 export async function openCard(page: Page, name: string) {
-  const summary = page
-    .locator(
-      `[data-settings-section="${name}"] > [data-slot="card"] > details > summary, [data-settings-section="${name}"] [data-card-advanced] > summary`,
-    )
+  const section = page
+    .locator(`[data-settings-section="${name}"]`)
     .filter({ visible: true });
-  await expect(summary).toBeVisible();
+  await expect(section).toBeVisible();
+  // Collapsible sections expose a disclosure; non-collapsible sections and
+  // read-only "Pool policy" panels render their content without one, so
+  // "opening" is a no-op. Prefer the section's own disclosure over a nested
+  // CardAdvanced sub-card.
+  const summary = section
+    .locator('[data-slot="card"] > details > summary, [data-card-advanced] > summary')
+    .filter({ visible: true })
+    .first();
+  if (!(await summary.count())) return;
   if (
     !(await summary
       .locator('..')
@@ -154,9 +161,9 @@ export const test = base.extend<{ fixture: Fixture }>({
             },
           ],
           deployments: [
-            deployment('ready', 'READY'),
-            deployment('idle', 'STOPPED'),
-            deployment('inactive', 'STOPPED', false),
+            { ...deployment('ready', 'READY'), port: null },
+            { ...deployment('idle', 'STOPPED'), port: null },
+            { ...deployment('inactive', 'STOPPED', false), port: null },
           ],
           jobs: [],
         },
@@ -180,7 +187,29 @@ export const test = base.extend<{ fixture: Fixture }>({
           processes: [],
         },
         writes: [],
-        sets: [],
+        sets: [
+          {
+            id: 'pool',
+            revision: 1,
+            name: 'Example pool',
+            engine_pool: true,
+            runtime_id: 'engine',
+            gpu: 0,
+            port: 8129,
+            max_loaded: 4,
+            residency: 'on-demand',
+            priority: 50,
+            idle_timeout: 300,
+            allow_eviction: false,
+            queue_timeout: 300,
+            enabled: true,
+            state: 'STOPPED',
+            multi_model: true,
+            member_ids: ['ready', 'idle', 'inactive'],
+            members: [],
+            lifecycle: { serving: false },
+          },
+        ],
         unexpected: [],
         errors: [],
         failSave: false,
@@ -652,6 +681,38 @@ export const test = base.extend<{ fixture: Fixture }>({
             created_at: fixture.host.ts,
           });
           return send({ state: 'QUEUED' });
+        }
+        if (/^\/api\/deployment-sets\/[^/]+\/members\/[^/]+\/remove$/.test(path)) {
+          const [, , , poolId, , memberId] = path.split('/');
+          const group = fixture.sets.find((g) => g.id === poolId);
+          if (!group) return send({ error: 'Not found' }, 404);
+          fixture.sets = fixture.sets.map((g) =>
+            g.id === poolId
+              ? {
+                  ...g,
+                  revision: g.revision + 1,
+                  member_ids: g.member_ids.filter((id) => id !== memberId),
+                  members: g.members.filter((m) => m.id !== memberId),
+                }
+              : g,
+          );
+          fixture.registry.deployments = fixture.registry.deployments.filter(
+            (d) => d.id !== memberId,
+          );
+          return send({ ...group, revision: group.revision + 1 });
+        }
+        if (/^\/api\/deployment-sets\/[^/]+\/delete$/.test(path)) {
+          const poolId = path.split('/')[3];
+          const group = fixture.sets.find((g) => g.id === poolId);
+          if (!group) return send({ error: 'Not found' }, 404);
+          fixture.sets = fixture.sets.filter((g) => g.id !== poolId);
+          fixture.registry.deployments = fixture.registry.deployments.filter(
+            (d) => !group.member_ids.includes(d.id),
+          );
+          return send({
+            deleted: group.name,
+            members: group.members.map((m) => m.name),
+          });
         }
         if (/\/(stop|enabled)$/.test(path)) return send({ state: 'QUEUED' });
         if (path === '/api/downloads') {

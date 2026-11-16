@@ -446,35 +446,44 @@ test('deployment rows separate request counts, move failure links and remove dup
   const idle = fixture.registry.deployments.find((d) => d.id === 'idle')!;
   idle.state = 'FAILED';
   idle.inflight = 2;
-  idle.historical_requests = 17;
   await page.goto('/#/deployments');
-  const row = page.getByRole('row').filter({
-    has: page.getByRole('link', { name: 'Example idle', exact: true }),
-  });
-  await expect(page.getByRole('columnheader').first()).toHaveText('Name');
+  // The row table is now the per-pool member table: Status, Model, Availability,
+  // VRAM (GiB), Active requests, (sr-only) Actions.
+  await expect(
+    page.getByRole('columnheader', { name: 'Status', exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole('columnheader', { name: 'Active requests', exact: true }),
   ).toBeVisible();
-  await expect(row.getByRole('link', { name: 'View logs' })).toHaveAttribute(
-    'href',
-    '#/deployments/idle/logs',
-  );
+  const row = page
+    .getByRole('row')
+    .filter({
+      has: page.getByRole('link', { name: 'Example idle', exact: true }),
+    });
   await expect(row.getByRole('cell').nth(4)).toHaveText('2');
-  await expect(row.getByRole('cell').nth(5)).toHaveText('17');
+  // The failure log link now lives inside the member's Actions menu.
   await row.getByRole('button', { name: 'Actions for Example idle' }).click();
   const menu = page.getByRole('menu');
-  await expect(menu.getByRole('menuitem')).toHaveText([
-    'Edit',
-    'Duplicate',
-    'Logs',
-    'Disable',
-  ]);
   await expect(
-    menu.getByRole('menuitem', { name: 'Edit', exact: true }),
-  ).toHaveAttribute('href', '#/deployments/idle/configuration');
+    menu.locator('a[href="#/deployments/idle/configuration"]'),
+  ).toBeVisible();
+  await expect(
+    menu.locator('a[href="#/deployments/idle/logs"]'),
+  ).toBeVisible();
+  await expect(
+    menu.getByRole('menuitem', {
+      name: 'Remove Example idle from pool',
+      exact: true,
+    }),
+  ).toBeVisible();
+  // Members can't be duplicated; that action was removed from the row.
+  await expect(
+    menu.getByRole('menuitem', { name: 'Duplicate', exact: true }),
+  ).toHaveCount(0);
   await page.keyboard.press('Escape');
+  // Pool-level enabled state drives the tabs, not member state.
   await expect(
-    page.getByRole('button', { name: 'Disabled (1)', exact: true }),
+    page.getByRole('button', { name: 'Disabled (0)', exact: true }),
   ).toBeVisible();
   await row.getByRole('link', { name: 'Example idle', exact: true }).click();
   await expect(page).toHaveURL(/\/deployments\/idle$/);

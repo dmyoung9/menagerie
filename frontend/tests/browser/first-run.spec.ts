@@ -33,9 +33,11 @@ test('empty installation retains discover and local-model actions', async ({
   page,
   fixture,
 }) => {
+  // A truly empty installation also has no pools.
   fixture.registry.models = [];
   fixture.registry.runtimes = [];
   fixture.registry.deployments = [];
+  fixture.sets = [];
   await page.goto('/');
   await expect(
     page.getByRole('button', { name: 'Discover models', exact: true }),

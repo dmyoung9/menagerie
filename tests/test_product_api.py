@@ -82,6 +82,7 @@ async def test_wizard_configuration_saves_without_loading_and_preserves_snapshot
             "capabilities": {
                 "formats": ["gguf"],
                 "flags": ["ctx-size", "parallel", "gpu-layers"],
+                "mechanisms": {"router": True},
             },
         },
     )
@@ -112,7 +113,27 @@ async def test_wizard_configuration_saves_without_loading_and_preserves_snapshot
             "port": 8120,
             "residency": "on-demand",
         }
-        response = await client.post("/api/model-setups", json=payload, headers=headers)
+        # Models live in a runtime pool: create the pool that owns the shared
+        # runtime installation and serving port.
+        pool = await client.post(
+            "/api/deployment-sets",
+            json={
+                "name": "Example pool",
+                "engine_pool": True,
+                "runtime_id": "engine",
+                "port": 8121,
+                "residency": "on-demand",
+                "enabled": True,
+                "member_ids": [],
+            },
+            headers=headers,
+        )
+        assert pool.status_code == 200, pool.text
+        response = await client.post(
+            "/api/model-setups",
+            json=payload | {"pool_id": pool.json()["id"]},
+            headers=headers,
+        )
         assert response.status_code == 200, response.text
         deployment = response.json()
         assert deployment["catalog"]["model"]["limit"] == {

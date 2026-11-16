@@ -744,13 +744,28 @@ async def test_deployment_override_validation(tmp_path):
             "engine": "llama.cpp",
             "execution_kind": "native",
             "executable": "/not/executed",
-            "capabilities": {"formats": ["gguf"]},
+            "capabilities": {"formats": ["gguf"], "mechanisms": {"router": True}},
         },
     )
     async with await _client(app) as client:
         headers = {
             "X-Menagerie-Token": (await client.get("/api/status")).json()["csrf_token"]
         }
+        pool = await client.post(
+            "/api/deployment-sets",
+            json={
+                "name": "Template pool",
+                "engine_pool": True,
+                "runtime_id": "r1",
+                "port": 8130,
+                "residency": "on-demand",
+                "enabled": True,
+                "member_ids": [],
+            },
+            headers=headers,
+        )
+        assert pool.status_code == 200, pool.text
+        pool_id = pool.json()["id"]
         # Valid override accepted.
         r = await client.post(
             "/api/deployments",
@@ -764,6 +779,7 @@ async def test_deployment_override_validation(tmp_path):
                 "config": {},
                 "raw_args": [],
                 "catalog": {"catalog_id": "c"},
+                "pool_id": pool_id,
                 "template_override": {"source": "published", "asset_id": a["id"]},
             },
             headers=headers,
@@ -787,6 +803,7 @@ async def test_deployment_override_validation(tmp_path):
                 "config": {},
                 "raw_args": [],
                 "catalog": {"catalog_id": "c"},
+                "pool_id": pool_id,
                 "template_override": {"source": "published", "asset_id": other["id"]},
             },
             headers=headers,
@@ -805,6 +822,7 @@ async def test_deployment_override_validation(tmp_path):
                 "config": {},
                 "raw_args": [],
                 "catalog": {"catalog_id": "c"},
+                "pool_id": pool_id,
                 "template_override": {"source": "bogus", "asset_id": a["id"]},
             },
             headers=headers,
@@ -823,6 +841,7 @@ async def test_deployment_override_validation(tmp_path):
                 "config": {},
                 "raw_args": [],
                 "catalog": {"catalog_id": "c"},
+                "pool_id": pool_id,
                 "template_override": {"source": "published", "asset_id": "none"},
             },
             headers=headers,
@@ -841,6 +860,7 @@ async def test_deployment_override_validation(tmp_path):
                 "config": {},
                 "raw_args": [],
                 "catalog": {"catalog_id": "c"},
+                "pool_id": pool_id,
             },
             headers=headers,
         )
@@ -861,7 +881,7 @@ async def test_deployment_override_null_and_empty_source_rejected(tmp_path):
             "engine": "llama.cpp",
             "execution_kind": "native",
             "executable": "/not/executed",
-            "capabilities": {"formats": ["gguf"]},
+            "capabilities": {"formats": ["gguf"], "mechanisms": {"router": True}},
         },
     )
     a = _asset(store, name="a")
@@ -869,6 +889,21 @@ async def test_deployment_override_null_and_empty_source_rejected(tmp_path):
         headers = {
             "X-Menagerie-Token": (await client.get("/api/status")).json()["csrf_token"]
         }
+        pool = await client.post(
+            "/api/deployment-sets",
+            json={
+                "name": "Template pool",
+                "engine_pool": True,
+                "runtime_id": "r1",
+                "port": 8130,
+                "residency": "on-demand",
+                "enabled": True,
+                "member_ids": [],
+            },
+            headers=headers,
+        )
+        assert pool.status_code == 200, pool.text
+        pool_id = pool.json()["id"]
         r = await client.post(
             "/api/deployments",
             json={
@@ -881,6 +916,7 @@ async def test_deployment_override_null_and_empty_source_rejected(tmp_path):
                 "config": {},
                 "raw_args": [],
                 "catalog": {"catalog_id": "c"},
+                "pool_id": pool_id,
                 "template_override": {"source": "published", "asset_id": a["id"]},
             },
             headers=headers,
@@ -899,6 +935,7 @@ async def test_deployment_override_null_and_empty_source_rejected(tmp_path):
                 "config": {},
                 "raw_args": [],
                 "catalog": {"catalog_id": "c"},
+                "pool_id": pool_id,
                 "template_override": {"asset_id": a["id"]},
             },
             headers=headers,

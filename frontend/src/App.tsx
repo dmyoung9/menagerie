@@ -51,7 +51,7 @@ import {
   DeploymentSetEditor,
   MultiDeploymentDetail,
   ServingTable,
-  ConfiguredModelsTable,
+  PoolSection,
 } from './ServingDeployments';
 import {
   ActivityFeed,
@@ -77,6 +77,7 @@ import type {
   AppStatus,
   Artifact,
   Deployment,
+  DeploymentSet,
   EditableSource,
   HostSnapshot,
   Job,
@@ -473,9 +474,12 @@ export default function App() {
     members: [d],
     member_ids: [d.id],
   }));
-  const enabled = configured.filter((d) => d.enabled),
-    inactive = configured.filter((d) => !d.enabled),
-    running = deployments.filter((d) => d.state === 'READY');
+  const running = deployments.filter((d) => d.state === 'READY');
+  // Every model belongs to a pool, so the deployments destination is a list of
+  // pools with their member models rather than a flat model table.
+  const pools = serving.filter((d): d is DeploymentSet => d.multi_model),
+    enabledPools = pools.filter((d) => d.enabled),
+    inactivePools = pools.filter((d) => !d.enabled);
   // A slice is only "pending" before its first successful answer; once a slice
   // has responded, refreshes keep its last-good data and must not re-gate the
   // destination.
@@ -608,9 +612,10 @@ export default function App() {
   const [suspendedWizard, setSuspendedWizard] = useState<{
     type: 'wizard';
     modelId?: string;
+    poolId?: string;
   } | null>(null);
-  const newDeployment = (modelId?: string) => {
-    open({ type: 'wizard', modelId });
+  const newDeployment = (modelId?: string, poolId?: string) => {
+    open({ type: 'wizard', modelId, poolId });
   };
   const depView = route[1] === 'disabled' ? 'inactive' : route[1] || 'enabled',
     detail =
@@ -755,14 +760,23 @@ export default function App() {
                   </Button>
                 )}
                 {page === 'deployments' && (
-                  <Button
-                    variant="default"
-                    type="button"
-                    onClick={() => newDeployment()}
-                  >
-                    <Plus size={16} />
-                    Set up model
-                  </Button>
+                  <>
+                    <Button
+                      variant="outline"
+                      type="button"
+                      onClick={() => newDeployment()}
+                    >
+                      Add model
+                    </Button>
+                    <Button
+                      variant="default"
+                      type="button"
+                      onClick={() => open({ type: 'deployment-set' })}
+                    >
+                      <Plus size={16} />
+                      New pool
+                    </Button>
+                  </>
                 )}
                 {suspendedWizard && modal?.type !== 'wizard' && (
                   <Button
@@ -804,9 +818,9 @@ export default function App() {
                   </div>
                   <Card className="mb-5 min-w-0 gap-0 p-0">
                     <CardContent className="p-0">
-                      {enabled.length ? (
+                      {enabledPools.length ? (
                         <ServingTable
-                          rows={enabled}
+                          rows={enabledPools}
                           host={host}
                           actions={actions}
                           compact
@@ -816,7 +830,7 @@ export default function App() {
                         <Empty
                           title={
                             data.models?.length
-                              ? 'No enabled deployments'
+                              ? 'No enabled pools'
                               : 'Add your first model'
                           }
                         >
@@ -1016,6 +1030,7 @@ export default function App() {
                         saved={() =>
                           void refreshSlices(affectedSlices('deployment_set'))
                         }
+                        addModel={(poolId) => open({ type: 'wizard', poolId })}
                       />
                     ) : (
                       <DeploymentDetail
@@ -1056,13 +1071,13 @@ export default function App() {
                   <>
                     <Tabs
                       items={[
-                        `Enabled (${enabled.length})`,
-                        `Disabled (${inactive.length})`,
+                        `Enabled (${enabledPools.length})`,
+                        `Disabled (${inactivePools.length})`,
                       ]}
                       value={
                         depView === 'inactive'
-                          ? `Disabled (${inactive.length})`
-                          : `Enabled (${enabled.length})`
+                          ? `Disabled (${inactivePools.length})`
+                          : `Enabled (${enabledPools.length})`
                       }
                       onChange={(t) =>
                         go('deployments/' + t.split(' ')[0].toLowerCase())
@@ -1071,43 +1086,59 @@ export default function App() {
                     <Input
                       className="search"
                       type="search"
-                      aria-label="Search deployments"
-                      placeholder="Search deployments…"
+                      aria-label="Search pools"
+                      placeholder="Search pools and models…"
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                     />
-                    <Card className="mb-5 min-w-0 gap-0 p-0">
-                      <CardContent className="p-0">
-                        {(depView === 'inactive' ? inactive : enabled)
-                          .length ? (
-                          <ConfiguredModelsTable
-                            rows={(depView === 'inactive'
-                              ? inactive
-                              : enabled
-                            ).filter((d) =>
-                              (
-                                d.name +
-                                ' ' +
-                                (d.members || [d])
-                                  .map((m) => m.alias + ' ' + m.name)
-                                  .join(' ')
-                              )
-                                .toLowerCase()
-                                .includes(query.toLowerCase()),
-                            )}
+                    {(depView === 'inactive' ? inactivePools : enabledPools)
+                      .length ? (
+                      (depView === 'inactive' ? inactivePools : enabledPools)
+                        .filter((pool) =>
+                          (
+                            pool.name +
+                            ' ' +
+                            pool.members
+                              .map((m) => m.alias + ' ' + m.name)
+                              .join(' ')
+                          )
+                            .toLowerCase()
+                            .includes(query.toLowerCase()),
+                        )
+                        .map((pool) => (
+                          <PoolSection
+                            key={pool.id}
+                            d={pool}
+                            data={data}
+                            host={host}
                             actions={actions}
-                          />
-                        ) : (
-                          <Empty
-                            title={
-                              depView === 'inactive'
-                                ? 'No inactive deployments'
-                                : 'No enabled deployments'
+                            addModel={(poolId) =>
+                              open({ type: 'wizard', poolId })
+                            }
+                            changed={(text) =>
+                              completed(text, ['deployments', 'status'])
                             }
                           />
-                        )}
-                      </CardContent>
-                    </Card>
+                        ))
+                    ) : (
+                      <Empty
+                        title={
+                          pools.length
+                            ? depView === 'inactive'
+                              ? 'No disabled pools'
+                              : 'No enabled pools'
+                            : 'No pools yet'
+                        }
+                      >
+                        <Button
+                          variant="default"
+                          type="button"
+                          onClick={() => open({ type: 'deployment-set' })}
+                        >
+                          Create a pool
+                        </Button>
+                      </Empty>
+                    )}
                   </>
                 ))}
               {page === 'activity' && (
@@ -1177,6 +1208,9 @@ export default function App() {
           modelId={
             modal?.type === 'wizard' ? modal.modelId : suspendedWizard?.modelId
           }
+          poolId={
+            modal?.type === 'wizard' ? modal.poolId : suspendedWizard?.poolId
+          }
           suspended={modal?.type !== 'wizard'}
           close={() => {
             setSuspendedWizard(null);
@@ -1225,7 +1259,7 @@ export default function App() {
           data={data}
           close={close}
           saved={(id) => {
-            completed('Deployment saved', affectedSlices('deployment_set'));
+            completed('Pool saved', affectedSlices('deployment_set'));
             go(id ? 'deployments/' + id : 'deployments');
           }}
         />

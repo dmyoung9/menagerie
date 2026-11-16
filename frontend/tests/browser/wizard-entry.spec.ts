@@ -11,11 +11,19 @@ test.afterEach(({ page }) => {
   expect(errors.get(page), 'No React/browser errors').toEqual([]);
 });
 
+// Header "Add model" opens the wizard for a brand-new pool; the per-pool
+// "Add model" buttons join an existing pool, so scope to the page head.
+const addModelButton = (page: Page) =>
+  page.locator('.page-head').getByRole('button', {
+    name: 'Add model',
+    exact: true,
+  });
+
 test('Deployments entry opens model setup without an infrastructure choice', async ({
   page,
 }) => {
   await page.goto('/#/deployments');
-  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
+  await addModelButton(page).click();
   await expect(
     page.getByRole('button', { name: 'Single model', exact: true }),
   ).toHaveCount(0);
@@ -29,11 +37,11 @@ test('Deployments entry opens model setup without an infrastructure choice', asy
   await expect(dialog.getByLabel('Model', { exact: true })).toBeVisible();
 });
 
-test('New pool and join options are offered from the Set up model wizard', async ({
+test('New pool and join options are offered from the setup wizard', async ({
   page,
 }) => {
   await page.goto('/#/deployments');
-  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
+  await addModelButton(page).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Model', { exact: true }).selectOption('model');
   await dialog.getByLabel('Engine', { exact: true }).selectOption('engine');
@@ -53,11 +61,19 @@ test('default setup saves automatic assignment and waits for the model load job'
   fixture,
 }) => {
   await page.goto('/#/deployments');
-  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
+  await addModelButton(page).click();
   const dialog = page.getByRole('dialog');
+  // Step 0 (Choose model) is pre-filled; advance to Review setup.
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  // Step 1 (Review setup): name + new-pool name/port before the wizard lets on.
   await dialog.getByLabel('Name', { exact: true }).fill('Writing Assistant');
+  await dialog
+    .getByLabel('Placement', { exact: true })
+    .selectOption({ label: 'New pool…' });
+  await dialog.getByLabel('Pool name', { exact: true }).fill('Writing pool');
+  await dialog.getByLabel('Serving port', { exact: true }).fill('8126');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  // Step 2 (Make available): save + launch review + load.
   await dialog
     .getByRole('button', { name: 'Make available and load', exact: true })
     .click();
@@ -98,7 +114,7 @@ test('empty-library acquisition detour retains setup intent', async ({
 }) => {
   fixture.registry.models = [];
   await page.goto('/#/deployments');
-  await page.getByRole('button', { name: 'Set up model', exact: true }).click();
+  await addModelButton(page).click();
   await expect(
     page.getByRole('heading', { name: 'Add your first model' }),
   ).toBeVisible();

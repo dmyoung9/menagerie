@@ -6,21 +6,26 @@ test('standalone NumberControl also preserves clearing and commits before Enter 
   page,
   fixture,
 }) => {
-  await page.goto('/#/deployments/idle/configuration');
+  // Priority is a pool-level knob; members render a read-only "Pool policy"
+  // panel, so this control lives on the pool's Configuration tab.
+  await page.goto('/#/deployments/pool/configuration');
   const priority = page.getByLabel('Priority', { exact: true });
+  await expect(priority).toBeVisible();
   await priority.fill('');
   await priority.blur();
+  // Clearing is preserved (an empty required field stays empty and flagged);
+  // no default is substituted.
   await expect(priority).toHaveValue('');
   await priority.fill('15');
   await priority.press('Enter');
   await expect
-    .poll(
-      () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
+    .poll(() =>
+      fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1'),
     )
-    .toBe(2);
+    .toBeDefined();
   expect(
-    deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
+    deploymentSetDraft(
+      fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1')!
         .body,
     ).priority,
   ).toBe(15);
@@ -171,7 +176,7 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
   await remaining.fill('8');
   await remaining.blur();
   await page
-    .getByRole('button', { name: 'Save deployment', exact: true })
+    .getByRole('button', { name: 'Save pool', exact: true })
     .click();
   await expect
     .poll(() =>

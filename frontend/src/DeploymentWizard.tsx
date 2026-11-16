@@ -85,6 +85,7 @@ interface PendingStatus {
 export function DeploymentWizard({
   data,
   modelId,
+  poolId,
   close,
   created,
   setupEngine,
@@ -94,6 +95,7 @@ export function DeploymentWizard({
 }: {
   data: Registry;
   modelId?: string;
+  poolId?: string;
   close: () => void;
   created: (row: Deployment) => void;
   setupEngine: () => void;
@@ -135,9 +137,9 @@ export function DeploymentWizard({
   const [contextMode, setContextMode] = useState<ContextMode>('default');
   const [residency, setResidency] = useState('on-demand'),
     [idle, setIdle] = useState(300);
-  const [placement, setPlacement] = useState<
-    'standalone' | `pool:${string}` | 'new-pool'
-  >('standalone');
+  const [placement, setPlacement] = useState<`pool:${string}` | 'new-pool'>(
+    poolId ? `pool:${poolId}` : 'new-pool',
+  );
   const [poolName, setPoolName] = useState('');
   const [poolPort, setPoolPort] = useState<number | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalog>({
@@ -197,7 +199,7 @@ export function DeploymentWizard({
   const runtime = engines.find((r) => r.id === runtimeId) || engines[0];
   const schema = runtime?.capabilities?.schema || {};
   const availablePools = (data.serving || [])
-    .filter((d) => d.multi_model)
+    .filter((d) => d.multi_model && d.engine_pool !== false)
     .map((d) => ({
       id: d.id,
       name: d.name,
@@ -209,13 +211,18 @@ export function DeploymentWizard({
       allow_eviction: d.allow_eviction ?? false,
       queue_timeout: d.queue_timeout ?? 300,
     }))
-    .filter((p) => !p.runtime_id || p.runtime_id === runtime?.id);
-  const poolId =
-    placement && placement.startsWith('pool:') ? placement.slice(5) : null;
+    // Keep the pool this wizard was opened for, whether or not it matches the
+    // currently selected engine.
+    .filter(
+      (p) => p.id === poolId || !p.runtime_id || p.runtime_id === runtime?.id,
+    );
+  const selectedPoolId = placement.startsWith('pool:')
+    ? placement.slice(5)
+    : null;
   const placementIncomplete =
     placement === 'new-pool' && (!poolName.trim() || poolPort === null);
   const isEditing = Boolean(savedRow);
-  const joinedPool = availablePools.find((p) => p.id === poolId);
+  const joinedPool = availablePools.find((p) => p.id === selectedPoolId);
   const memberPolicy = (): {
     residency: string;
     priority: number;
@@ -325,10 +332,7 @@ export function DeploymentWizard({
     }
     return config;
   };
-  const previewGpu =
-    placement !== 'standalone'
-      ? (joinedPool?.gpu ?? null)
-      : (advanced.gpu ?? null);
+  const previewGpu = joinedPool?.gpu ?? null;
   const preview = useResourcePreview(
     runtime
       ? [
@@ -363,7 +367,6 @@ export function DeploymentWizard({
       setError('Enter a name for this model.');
       return;
     }
-    const pooled = placement !== 'standalone';
     const policy = memberPolicy();
     const poolSpec =
       placement === 'new-pool'
@@ -391,10 +394,9 @@ export function DeploymentWizard({
           ...(savedRow ? { id: savedRow.id } : {}),
           name: displayName,
           artifact_id: artifactId,
-          runtime_id: pooled
-            ? joinedPool?.runtime_id || runtime.id
-            : runtime.id,
-          gpu: pooled ? (joinedPool?.gpu ?? null) : (advanced.gpu ?? null),
+          // The pool owns the runtime installation, device and serving port.
+          runtime_id: joinedPool?.runtime_id || runtime.id,
+          gpu: joinedPool?.gpu ?? null,
           config: buildConfig(),
           raw_args: args,
           catalog,
@@ -402,14 +404,16 @@ export function DeploymentWizard({
           identifier_mode: identifierMode,
           runtime_assignment: advanced.runtime_assignment,
           ...policy,
-          port: pooled ? null : advanced.port,
+          port: null,
           template_override: templateOverride,
           enabled: mode !== 'disabled',
-          ...(placement.startsWith('pool:')
-            ? { pool_id: poolId }
-            : placement === 'new-pool'
-              ? { pool: poolSpec }
-              : {}),
+          // Placement is fixed once the member exists; the API only accepts
+          // pool targeting when creating one.
+          ...(savedRow
+            ? {}
+            : placement.startsWith('pool:')
+              ? { pool_id: selectedPoolId }
+              : { pool: poolSpec }),
         },
       );
       setSavedRow(saved);
@@ -709,44 +713,47 @@ export function DeploymentWizard({
                     onChange={(e) => setName(e.target.value)}
                   />
                 </Field>
-                <Field
-                  label="Placement"
-                  hint={
-                    isEditing
-                      ? 'Placement is fixed once the member is created.'
-                      : placement === 'standalone'
-                        ? 'The model gets its own serving port.'
+                {isEditing ? (
+                  <Field
+                    label="Placement"
+                    hint="Placement is fixed once the member is created."
+                  >
+                    <p>
+                      {joinedPool
+                        ? `Member of ${joinedPool.name}`
                         : placement === 'new-pool'
-                          ? 'Creates a pool that shares one engine, device and port.'
-                          : 'Joins the selected pool, including its runtime, port and policy.'
-                  }
-                >
-                  <NativeSelect
-                    disabled={isEditing}
-                    value={placement}
-                    onChange={(e) =>
-                      setPlacement(
-                        e.target.value as
-                          'standalone' | `pool:${string}` | 'new-pool',
-                      )
+                          ? 'Member of the new pool'
+                          : 'Pool member'}
+                    </p>
+                  </Field>
+                ) : (
+                  <Field
+                    label="Placement"
+                    hint={
+                      placement === 'new-pool'
+                        ? 'Creates a pool that shares one engine, device and port.'
+                        : 'Joins the selected pool, including its runtime, port and policy.'
                     }
                   >
-                    <NativeSelectOption value="standalone">
-                      Standalone deployment
-                    </NativeSelectOption>
-                    {!isEditing &&
-                      availablePools.map((p) => (
+                    <NativeSelect
+                      value={placement}
+                      onChange={(e) =>
+                        setPlacement(
+                          e.target.value as `pool:${string}` | 'new-pool',
+                        )
+                      }
+                    >
+                      {availablePools.map((p) => (
                         <NativeSelectOption key={p.id} value={'pool:' + p.id}>
                           Join pool: {p.name}
                         </NativeSelectOption>
                       ))}
-                    {!isEditing && (
                       <NativeSelectOption value="new-pool">
                         New pool…
                       </NativeSelectOption>
-                    )}
-                  </NativeSelect>
-                </Field>
+                    </NativeSelect>
+                  </Field>
+                )}
                 {!isEditing && placement === 'new-pool' && (
                   <div className="pool-new mb-5">
                     {!poolName && poolPort === null && (
@@ -1149,6 +1156,7 @@ export function DeploymentWizard({
                 disabled={
                   Object.values(invalid).some(Boolean) ||
                   !runtime ||
+                  step > 0 &&
                   placementIncomplete
                 }
               >

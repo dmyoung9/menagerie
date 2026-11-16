@@ -1,33 +1,63 @@
 # Multi-model deployments
 
-## Native runtime pools
+## Pools
 
-In Availability, choose **Runtime — native model pool** to delegate model routing
-and residency to a compatible native runtime. All members must share one installed
-runtime and device visibility. This mode is on-demand: starting the pool starts a
-router, not every model. Each model loads when requested. The router uses the
-first member's private port; the remaining member ports are retained configuration
-identities, not additional listeners. Stopping stops the entire pool.
+Every model is a member of a serving pool; there are no standalone deployments. The
+Deployment page lists pools as per-pool sections with their member models, and a model
+is always created into a pool.
+
+A pool delegates model routing and residency to one installed, compatible runtime and
+owns the settings shared by all its members: runtime, device visibility, serving port,
+loading policy, priority, idle timeout, client availability, eviction consent, queue
+timeout, and resident-model limit. Members keep their own API alias, per-model
+configuration, capabilities and variant catalog, raw arguments, process log, and session
+history.
+
+A runtime pool is on-demand: starting it starts a router, not every model. Each member
+loads when requested. The router listens on the pool's single shared private port; members
+do not have their own listeners. Stopping stops the whole pool.
 
 Eviction consent enables pool-local LRU limits and supported device-memory margin
-unloading. Without consent, those automatic eviction limits are disabled. Idle
-sleep still follows the pool's configured timeout when the runtime supports it.
-Use coordinated processes for pinned models or atomic model residency. Native
-pools currently support native llama.cpp-compatible builds, not containers or
-other runtime protocols. See [runtime behavior and limitations](releases/3.0.0.md).
+unloading. Without consent, those automatic eviction limits are disabled. Idle sleep
+still follows the pool's configured timeout when the runtime supports it. Use coordinated
+processes for pinned models or atomic model residency. Native pools currently support
+native llama.cpp-compatible builds, not containers or other runtime protocols. See
+[runtime behavior and limitations](releases/3.0.0.md).
 
-Use **Shared installed engine** and the shared GPU visibility control to change
-process settings for all pool members. Member engine selectors are read-only in
-this mode. Shared device changes preserve each member's API alias and private
-port. Model-server options remain child-preset settings; router limits, eviction
-consent and residency are pool-owned. Router settings cannot be independently
-inserted into member configuration JSON. Resource estimates are not individual
-shares of the aggregate pool process allocation.
+## Creation and management
 
-A serving deployment owns one or more models. Each member keeps its own API alias,
-runtime, configuration snapshot, port, process log, and session history. Loading mode,
-priority, idle timeout, client availability, and eviction
-permission belong to the deployment.
+- **New pool** (deployments page) opens the pool editor to create a pool and, if desired,
+  its members. Name the pool, pick a runtime and device visibility, add installed models,
+  and configure each member's engine and inference settings. No prior pool or standalone
+  deployment is needed; it works even when there are no existing deployments.
+- **Add model** (a pool's Actions menu, or the deployments page head) runs the setup
+  wizard: choose a model and engine, pick the runtime, then choose to **join** an
+  existing runtime pool (including its runtime, port, and policy) or create a **new
+  pool** (which shares one engine, device, and port). Review the member's settings and
+  make it available. A model is always created into a pool; no placement leaves it
+  standalone.
+- The **Configuration** tab of a pool shows the member composer (pick an installed model
+  and append it with common defaults) and, for the selected member, its Model & runtime
+  and Variants settings. Appending a member updates the local draft only; nothing is
+  written until the pool is saved.
+- **Edit pool** (a pool's Actions menu, or its Configuration tab) reopens the pool editor
+  for its members and shared policy. **Edit model** on a member exposes its engine and
+  inference settings directly. Unload the pool before editing members or shared policy.
+- **Delete pool** removes the pool and its members' deployment records.
+- **Remove model** on a member takes it out of the pool; the member's deployment record
+  is deleted after the pool save. Model files and installed weights stay on disk. A
+  member is never orphaned into a standalone configuration.
+
+The same installed weights can be used in any number of pools, with different context
+sizes, engines, capabilities, names, and policies. Each occurrence gets its own serving
+instance, configuration history, and unique API alias. Weights are referenced, not
+copied. Concurrently loaded instances still consume their own runtime memory and pass
+normal admission checks; they do not implicitly share a process or KV cache. Suggested
+aliases include the pool name but remain explicit and stable when the display name is
+later changed.
+
+Creating a pool and its members saves them atomically without loading. A failed or stale
+save rolls back all member changes.
 
 ## Coordinated-process operation
 
@@ -60,37 +90,11 @@ Manual launch review preserves consent to proposed unloads. A start can
 still fail if external memory use changes after admission, and that failure stays
 visible. Group membership does not bypass these safeguards.
 
-## Creation
-
-**Advanced → Create supervised group or runtime pool** adds models from the installed weights library.
-Name the deployment, add models, configure each engine and its inference settings,
-and choose the shared loading policy. No profile or standalone deployment is needed
-first. This works even when there are no existing deployments.
-
-The same installed weights can be used in any number of deployments, with different
-context sizes, engines, capabilities, names and policies. Each occurrence gets its
-own serving instance, configuration history, unique API alias and private port.
-Weights are referenced, not copied. Concurrently loaded instances still consume
-their own runtime memory and pass normal admission checks; they do not implicitly
-share a process or KV cache. Suggested aliases include the deployment name, but
-remain explicit and stable when the display name is later changed.
-
-Creation saves the complete deployment and its members atomically without loading.
-**Edit** configures all members and shared policy together; **Edit model** on a member
-also exposes its engine and inference settings directly. Unload the complete
-deployment before editing. A failed or stale save rolls back all member changes.
-Removing an existing member preserves it as an inactive standalone configuration.
-
-**Edit → Separate models** makes each member a standalone deployment again, retaining
-the current shared policies. It also requires an unloaded deployment. Membership
-cannot overlap or nest at the runtime-instance level: an instance has one lifecycle
-owner, but its installed model artifact is reusable across deployments.
-
 ## History and recovery
 
-Restoring launch history creates an inactive deployment with new aliases and ports
-for review; it does not restart the historical workload automatically. Backups
-retain configuration snapshots, not model weights. See
+Restoring launch history creates a pool with a single member (the restored model) with
+new aliases and ports for review; it does not restart the historical workload
+automatically. Backups retain configuration snapshots, not model weights. See
 [installation and recovery](installation.md#restore-a-registry-backup).
 
 Contributors: API and storage invariants are described in

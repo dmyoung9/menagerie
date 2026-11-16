@@ -286,8 +286,18 @@ test('new deployment members get common defaults and a nested Drawer without sub
   await page
     .getByRole('button', { name: 'Configuration', exact: true })
     .click();
-  // Add a new member; the draft gains it without a write.
-  await page.getByRole('button', { name: 'Add model', exact: true }).click();
+  // In the Configuration tab the editor renders the member composer. The page
+  // header "Add model" opens the standalone setup wizard; the composer's button
+  // appends a member to the local draft with common defaults (and does not
+  // write). Pick a model, append it, then inspect the new member's cards.
+  const composer = page.locator('fieldset.model-composer');
+  const modelSelect = composer.getByLabel('Add installed model');
+  await expect(modelSelect).toBeVisible();
+  await modelSelect.selectOption('model');
+  await composer
+    .getByRole('button', { name: 'Add model', exact: true })
+    .click();
+
   await openCard(page, 'model');
   await openCard(page, 'variants');
   await expect(

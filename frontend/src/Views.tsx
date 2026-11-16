@@ -327,9 +327,12 @@ export function DeploymentDetail({
       </div>
       {d.unit_id && d.unit_id !== d.id && (
         <p>
-          Shared runtime ·{' '}
-          <a href={`#/deployments/${d.unit_id}`}>Advanced runtime controls</a>.
-          Stopping the runtime affects all its models.
+          Member of{' '}
+          <a href={`#/deployments/${d.unit_id}`}>
+            {data.serving?.find((s) => s.id === d.unit_id)?.name || 'its pool'}
+          </a>
+          , which owns the shared engine, device and serving port. It affects
+          every model in the pool.
         </p>
       )}
       {d.lifecycle?.failure && (

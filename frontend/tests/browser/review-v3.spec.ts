@@ -95,9 +95,11 @@ test('interrupting requests requires an explicit unload action', async ({
   page,
   fixture,
 }) => {
+  // Unloading is now a pool-level action: force the pool active so its header
+  // exposes the Unload control (member rows only expose Load/Enable).
+  fixture.sets[0].state = 'LOADING';
   await page.goto('/#/deployments');
-  const row = page.getByRole('row').filter({ hasText: 'Example ready' });
-  await row.getByRole('button', { name: 'Unload model', exact: true }).click();
+  await page.getByRole('button', { name: 'Unload', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Active requests finish first');
   await dialog
@@ -105,6 +107,6 @@ test('interrupting requests requires an explicit unload action', async ({
     .click();
   await expect(dialog).toBeHidden();
   expect(
-    fixture.writes.find((write) => write.path.endsWith('/ready/stop'))!.body,
+    fixture.writes.find((write) => write.path.endsWith('/pool/stop'))!.body,
   ).toEqual({ cancel_requests: true });
 });

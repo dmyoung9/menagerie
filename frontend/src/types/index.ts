@@ -584,7 +584,7 @@ export type LaunchModal = {
   row: LaunchTarget;
 };
 export type ModalState =
-  | { type: 'wizard'; modelId?: string }
+  | { type: 'wizard'; modelId?: string; poolId?: string }
   | {
       type: 'deployment-set';
       row?: DeploymentSet;

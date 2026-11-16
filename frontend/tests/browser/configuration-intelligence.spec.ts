@@ -147,6 +147,14 @@ test('retired Advanced route redirects to cards with raw arguments and identity'
   page,
   fixture,
 }) => {
+  // Detach `idle` from the starter pool so its standalone Configuration page
+  // exposes editable engine args. A standalone deployment needs its own endpoint
+  // port (the "Private port" field is required), so give it one.
+  fixture.sets[0].member_ids = fixture.sets[0].member_ids.filter(
+    (id) => id !== 'idle',
+  );
+  const target = fixture.registry.deployments.find((d) => d.id === 'idle');
+  if (target) target.port = 8121;
   await page.goto('/#/deployments/idle/advanced');
   await expect(page).toHaveURL(/\/configuration$/);
   await expect(
