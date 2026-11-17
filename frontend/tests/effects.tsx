@@ -143,7 +143,7 @@ function WizardHarness() {
         }}
         close={() => {}}
         created={() => {}}
-        setupEngine={() => {}}
+        newPool={() => {}}
         onConnect={() => {}}
       />
     </>

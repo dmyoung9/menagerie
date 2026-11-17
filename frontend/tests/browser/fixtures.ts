@@ -62,7 +62,9 @@ export async function openCard(page: Page, name: string) {
   // "opening" is a no-op. Prefer the section's own disclosure over a nested
   // CardAdvanced sub-card.
   const summary = section
-    .locator('[data-slot="card"] > details > summary, [data-card-advanced] > summary')
+    .locator(
+      '[data-slot="card"] > details > summary, [data-card-advanced] > summary',
+    )
     .filter({ visible: true })
     .first();
   if (!(await summary.count())) return;
@@ -140,6 +142,7 @@ export const test = base.extend<{ fixture: Fixture }>({
               execution_kind: 'native',
               capabilities: {
                 formats: ['gguf'],
+                flags: ['models-preset'],
                 schema: {
                   'ctx-size': {
                     type: 'integer',
@@ -682,7 +685,9 @@ export const test = base.extend<{ fixture: Fixture }>({
           });
           return send({ state: 'QUEUED' });
         }
-        if (/^\/api\/deployment-sets\/[^/]+\/members\/[^/]+\/remove$/.test(path)) {
+        if (
+          /^\/api\/deployment-sets\/[^/]+\/members\/[^/]+\/remove$/.test(path)
+        ) {
           const [, , , poolId, , memberId] = path.split('/');
           const group = fixture.sets.find((g) => g.id === poolId);
           if (!group) return send({ error: 'Not found' }, 404);

@@ -20,15 +20,16 @@ test('curated sections preserve omission and separate explicit automatic context
       provenance: 'adapter',
     };
   await page.goto('/#/deployments/idle/configuration');
-  for (const title of [
-    'Model & runtime',
-    'Resources & context',
-    'Generation',
-    'Availability',
-  ])
+  for (const title of ['Model & runtime', 'Resources & context', 'Generation'])
     await expect(
       page.getByRole('heading', { name: title, exact: true }),
     ).toBeVisible();
+  // The member's availability is the shared pool policy, owned by the pool's
+  // Configuration page; the member editor no longer renders an Availability
+  // card.
+  await expect(
+    page.getByRole('heading', { name: 'Availability', exact: true }),
+  ).toHaveCount(0);
   const source = page.getByLabel('ctx-size', { exact: true });
   await expect(source).toHaveValue('');
   await expect(
@@ -274,7 +275,7 @@ for (const { width, components } of [1440, 576, 320].flatMap((width) =>
     });
     await page.goto('/#/deployments/idle/configuration');
     const cards = page.locator('.configuration-grid > [data-settings-section]');
-    await expect(cards).toHaveCount(7);
+    await expect(cards).toHaveCount(6);
     expect(
       await cards.evaluateAll((elements) =>
         elements.map((element) =>
@@ -287,7 +288,6 @@ for (const { width, components } of [1440, 576, 320].flatMap((width) =>
       'memory',
       'generation',
       'variants',
-      'lifecycle',
       'diagnostics',
     ]);
     const grid = page.locator('.configuration-grid');

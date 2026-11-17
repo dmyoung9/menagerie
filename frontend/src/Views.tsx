@@ -312,17 +312,15 @@ export function DeploymentDetail({
                 Unload
               </Button>
             )}
-          {!d.enabled &&
-            !d.changes_pending &&
-            d.member_availability !== false && (
-              <Button
-                variant="default"
-                type="button"
-                onClick={() => actions.enable(d, true)}
-              >
-                Enable for clients
-              </Button>
-            )}
+          {!d.changes_pending && d.member_availability !== false && (
+            <Button
+              variant={d.enabled ? 'outline' : 'default'}
+              type="button"
+              onClick={() => actions.enable(d, !d.enabled)}
+            >
+              {d.enabled ? 'Disable for clients' : 'Enable for clients'}
+            </Button>
+          )}
         </div>
       </div>
       {d.unit_id && d.unit_id !== d.id && (

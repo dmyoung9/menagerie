@@ -118,7 +118,7 @@ test('unsaved editor dismissal is accessible and busy submissions cannot be dism
 }) => {
   const opener = page
     .locator('.page-head')
-    .getByRole('button', { name: 'Add model', exact: true });
+    .getByRole('button', { name: 'New deployment', exact: true });
   await page.goto('/#/deployments');
 
   // No changes yet: Escape closes the wizard and returns focus to the trigger.
@@ -133,8 +133,11 @@ test('unsaved editor dismissal is accessible and busy submissions cannot be dism
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog.getByLabel('Name', { exact: true }).fill('Unsaved deployment');
-  await dialog.getByLabel('Pool name', { exact: true }).fill('Unsaved pool');
-  await dialog.getByLabel('Serving port', { exact: true }).fill('9121');
+  // Joins the starter pool; the pool owns the runtime/device/port, so there are
+  // no inline pool fields to fill in the wizard.
+  await dialog
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Example pool' });
   expect(
     await page.evaluate(() => {
       const event = new Event('beforeunload', { cancelable: true });
@@ -181,9 +184,36 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
   page,
   fixture,
 }) => {
-  // First run: create the pool with its first member (context 32K, tools on).
+  // Seed the pool the pair will share. The wizard joins it rather than
+  // creating one inline; the pool owns the runtime, device and port.
+  fixture.sets.push({
+    id: 'buffered-pair',
+    revision: 1,
+    name: 'Buffered pair',
+    engine_pool: true,
+    runtime_id: 'engine',
+    gpu: 0,
+    port: 9120,
+    max_loaded: 4,
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    allow_eviction: false,
+    queue_timeout: 300,
+    enabled: true,
+    state: 'STOPPED',
+    multi_model: true,
+    member_ids: [],
+    members: [],
+    lifecycle: { serving: false },
+  });
+
+  // First run: join the pool with the first member (context 32K, tools on).
   await page.goto('/#/deployments');
-  await page.locator('.page-head').getByRole('button', { name: 'Add model', exact: true }).click();
+  await page
+    .locator('.page-head')
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
 
@@ -199,15 +229,13 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
     dialog.getByRole('button', { name: 'Tools', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true');
 
-  // Placement: New pool — "Continue" is disabled until name and port exist.
-  await dialog
-    .getByLabel('Placement', { exact: true })
-    .selectOption('new-pool');
+  // "Continue" is disabled until the member is attached to a pool.
   await expect(
     dialog.getByRole('button', { name: 'Continue', exact: true }),
   ).toBeDisabled();
-  await dialog.getByLabel('Pool name', { exact: true }).fill('Buffered pair');
-  await dialog.getByLabel('Serving port', { exact: true }).fill('9120');
+  await dialog
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Buffered pair' });
   await expect(
     dialog.getByRole('button', { name: 'Continue', exact: true }),
   ).toBeEnabled();
@@ -249,8 +277,6 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
   await expect(
     dialog.getByText('Pair is available', { exact: true }),
   ).toBeVisible();
-  // The fixture ships a starter pool, so the freshly created one is the second
-  // entry; reference it by id rather than by position.
   await expect(fixture.sets).toHaveLength(2);
   let pool = fixture.sets.find((s) => s.id === 'buffered-pair')!;
 
@@ -259,7 +285,10 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
     .getByRole('button', { name: 'Open deployment', exact: true })
     .click();
   await navigate(page, 'Deployments');
-  await page.locator('.page-head').getByRole('button', { name: 'Add model', exact: true }).click();
+  await page
+    .locator('.page-head')
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
   const wizard = page.getByRole('dialog');
   await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
   await wizard.getByLabel('Name', { exact: true }).fill('Second member');
@@ -267,8 +296,8 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
     wizard.locator(`option[value="pool:${pool.id}"]`),
   ).toBeAttached();
   await wizard
-    .getByLabel('Placement', { exact: true })
-    .selectOption('pool:' + pool.id);
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Buffered pair' });
   await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
   await wizard
     .getByRole('button', {
@@ -464,9 +493,7 @@ test('engine-reset confirmation is cancellable and recovery retains its existing
   ).toBeDefined();
   expect(
     contracts.deploymentSetDraft(
-      fixture.writes.find(
-        (w) => w.path === '/api/deployment-sets?expected=1',
-      )!
+      fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1')!
         .body,
     ).runtime_id,
   ).toBe('engine-two');
@@ -531,7 +558,7 @@ test('empty installation and connection errors remain actionable', async ({
   ).toBeVisible();
 });
 
-test('Base UI Select, Switch, outside dismissal and discard actions preserve policy values', async ({
+test('wizard select and switch drafts are discarded without writes; outside dismissal closes dialogs', async ({
   page,
   fixture,
 }) => {
@@ -542,13 +569,16 @@ test('Base UI Select, Switch, outside dismissal and discard actions preserve pol
   await expect(page.getByRole('dialog')).toBeHidden();
 
   await navigate(page, 'Deployments');
-  await page.locator('.page-head').getByRole('button', { name: 'Add model', exact: true }).click();
+  await page
+    .locator('.page-head')
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-  // Base UI Select: choose "Pinned" through the value, not a DOM option click.
-  const mode = dialog.getByRole('combobox', { name: 'Mode', exact: true });
-  await mode.selectOption('Pinned');
-  await expect(mode).toContainText('Pinned');
+  // Wizard select: choose a pool through the value, not a DOM option click.
+  const poolSelect = dialog.getByLabel('Pool', { exact: true });
+  await poolSelect.selectOption({ label: 'Join pool: Example pool' });
+  await expect(poolSelect).toContainText('Join pool: Example pool');
   // Base UI toggle (ToggleGroupItem, aria-pressed) marks the wizard dirty.
   await dialog.getByRole('button', { name: 'Tools', exact: true }).click();
   await expect(
@@ -605,12 +635,14 @@ for (const width of [1440, 390])
     await navigate(page, 'Deployments');
     await page
       .locator('.page-head')
-      .getByRole('button', { name: 'Add model', exact: true })
+      .getByRole('button', { name: 'New deployment', exact: true })
       .click();
     const dialog = page.getByRole('dialog');
     await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-    await dialog.getByLabel('Pool name', { exact: true }).fill('Surface pool');
-    await dialog.getByLabel('Serving port', { exact: true }).fill('9125');
+    await dialog.getByLabel('Name', { exact: true }).fill('Surface');
+    await dialog
+      .getByLabel('Pool', { exact: true })
+      .selectOption({ label: 'Join pool: Example pool' });
     await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
     await expect(
       dialog.getByRole('heading', { name: 'Resource preview', exact: true }),

@@ -585,6 +585,7 @@ export type LaunchModal = {
 };
 export type ModalState =
   | { type: 'wizard'; modelId?: string; poolId?: string }
+  | { type: 'pool-wizard' }
   | {
       type: 'deployment-set';
       row?: DeploymentSet;

@@ -9,7 +9,7 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { FieldSet, FieldLegend, FieldGroup } from '@/components/ui/field';
+import { FieldSet, FieldGroup } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
   NativeSelect,
@@ -49,16 +49,11 @@ import { EmbeddedEditor } from '@/components/embedded-editor';
 import { RequestHistory } from '@/components/request-history';
 import { DeploymentPerformance } from '@/components/deployment-performance';
 import { go, repoPath } from './navigation';
-import { ConfigurationFields } from './Editors';
 import { DraftFormProvider, useDraftForm } from './use-draft-form';
-import { ChatTemplateSettings } from './ChatTemplateSettings';
-import { defaults, editable } from './editor-state';
+import { editable } from './editor-state';
 import { Duration, Placement } from './FormControls';
 import { NumberControl } from './NumberControl';
-import { DraftResources } from './Resources';
-import { useResourcePreview } from './hooks/use-resource-preview';
 import { useConfirmation } from '@/hooks/use-confirmation';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Select,
   SelectTrigger,
@@ -76,12 +71,10 @@ import { reconcileDeep, deploymentSetToDraft } from './reconcile';
 import type {
   Deployment,
   DeploymentActions,
-  DeploymentDraft,
   DeploymentSet,
   DeploymentSetDraft,
   HostSnapshot,
   OperationEvent,
-  ResourcePreviewDraft,
   Runtime,
   ServingDeployment,
 } from './types';
@@ -91,14 +84,12 @@ export function PoolSection({
   data,
   host,
   actions,
-  addModel,
   changed,
 }: {
   d: DeploymentSet;
   data: Registry;
   host: HostSnapshot;
   actions: DeploymentActions;
-  addModel: (poolId: string) => void;
   changed: (text: string) => void;
 }) {
   const { confirm, confirmation } = useConfirmation();
@@ -196,16 +187,6 @@ export function PoolSection({
               Unload
             </Button>
           )}
-          {d.engine_pool !== false && (
-            <Button
-              variant="outline"
-              type="button"
-              disabled={busy}
-              onClick={() => addModel(d.id)}
-            >
-              Add model
-            </Button>
-          )}
           <Menu label={'Actions for ' + d.name}>
             <DropdownMenuItem
               onClick={() => actions.edit('deployment_sets', d)}
@@ -298,17 +279,15 @@ export function PoolSection({
                             variant="outline"
                             type="button"
                             aria-label={
-                              (member.enabled ? 'Load ' : 'Enable ') +
+                              (member.enabled ? 'Disable ' : 'Enable ') +
                               member.name
                             }
                             disabled={busy || member.changes_pending}
                             onClick={() =>
-                              member.enabled
-                                ? actions.load('deployments', member)
-                                : actions.enable(member, true)
+                              actions.enable(member, !member.enabled)
                             }
                           >
-                            {member.enabled ? 'Load' : 'Enable'}
+                            {member.enabled ? 'Disable' : 'Enable'}
                           </Button>
                         )}
                         <Menu label={'Actions for ' + member.name}>
@@ -347,16 +326,6 @@ export function PoolSection({
         ) : (
           <div className="px-5 pb-5">
             <p className="muted">No models in this pool yet.</p>
-            {d.engine_pool !== false && (
-              <Button
-                variant="outline"
-                type="button"
-                disabled={busy}
-                onClick={() => addModel(d.id)}
-              >
-                Add the first model
-              </Button>
-            )}
           </div>
         )}
       </CardContent>
@@ -600,14 +569,12 @@ export function ServingTable({
 
 export function DeploymentSetEditor({
   initial,
-  modelId,
   data,
   close,
   saved,
   embedded = false,
 }: {
   initial?: DeploymentSet;
-  modelId?: string;
   data: Registry;
   close: () => void;
   saved: (id: string) => void;
@@ -656,142 +623,19 @@ export function DeploymentSetEditor({
     [error, setError] = useState(''),
     [pendingRevision, setPendingRevision] = useState<number | null>(null),
     [revisionConflict, setRevisionConflict] = useState(false);
-  const [artifactId, setArtifactId] = useState(
-      modelId || data.models?.[0]?.id || '',
-    ),
-    [invalid, setInvalid] = useState<Record<string, boolean>>({});
-  const [selected, setSelected] = useState(0);
-  const previewMembers: ResourcePreviewDraft[] = value.members.map((m) => ({
-    name: m.name,
-    gpu: m.gpu ?? null,
-    configuration: {
-      name: m.name,
-      artifact_id: m.artifact_id,
-      runtime_id: m.runtime_id,
-      config: m.config,
-      raw_args: m.raw_args,
-      catalog: m.catalog,
-    },
-  }));
-  const preview = useResourcePreview(previewMembers, data.host?.[0]?.ts);
-  const [epoch, setEpoch] = useState(0);
   // Mount-time set draft, the reference for touched-vs-adopted fields. It must
   // not follow the live initial, or untouched fields would adopt stale server
   // values during a conflict review.
   const mountSetRef = useRef<DeploymentSetDraft | null>(null);
   if (mountSetRef.current === null)
     mountSetRef.current = deploymentSetToDraft(initial);
-  const changed = draftChanged || Object.values(invalid).some(Boolean);
-  const aliasError = (m: DeploymentDraft) =>
-    value.members.some((other) => other !== m && other.alias === m.alias) ||
-    (data.deployments || []).some(
-      (other) =>
-        other.alias === m.alias &&
-        !value.members.some((member) => member.id === other.id),
-    );
+  const changed = draftChanged;
   const set = <K extends keyof DeploymentSetDraft>(
     key: K,
     v: DeploymentSetDraft[K],
   ) => setValue((s) => ({ ...s, [key]: v }));
-  const updateMember = (index: number, change: Partial<DeploymentDraft>) =>
-    setValue((v) => ({
-      ...v,
-      members: v.members.map((m, i) => (i === index ? { ...m, ...change } : m)),
-    }));
-  const idleMinutes =
-    value.idle_timeout && value.idle_timeout % 60 === 0
-      ? value.idle_timeout / 60
-      : undefined;
-  const sharedPolicy = [
-    value.residency === 'pinned'
-      ? 'Pinned'
-      : value.residency === 'evictable'
-        ? 'Evictable'
-        : 'On demand',
-    `priority ${value.priority}`,
-    value.residency === 'on-demand'
-      ? value.idle_timeout
-        ? `unload after ${idleMinutes ? `${idleMinutes} min` : `${value.idle_timeout}s`} idle`
-        : 'never unload'
-      : 'always resident',
-    value.allow_eviction ? 'may unload for others' : 'no eviction',
-    `queue ${value.queue_timeout}s`,
-    value.enabled ? 'enabled for clients' : 'disabled for clients',
-  ].join(' · ');
-  async function addModel() {
-    const model = data.models?.find((m) => m.id === artifactId);
-    if (!model) {
-      setError('Choose a model first.');
-      return;
-    }
-    setBusy(true);
-    let recommended: string | null = null;
-    try {
-      recommended =
-        (
-          await readApi(
-            `/api/models/${model.id}/engine-recommendation`,
-            contracts.engineRecommendation,
-          )
-        ).engine || null;
-    } catch {
-      /* Manual selection remains available. */
-    }
-    const compatible = (data.runtimes || []).filter(
-      (r) =>
-        model.format === 'unknown' ||
-        r.capabilities?.formats?.includes(model.format),
-    );
-    const runtime =
-      value.engine_pool && value.members.length
-        ? compatible.find((r) => r.id === value.members[0].runtime_id)
-        : compatible.find((r) => r.engine === recommended) || compatible[0];
-    if (value.engine_pool && value.members.length && !runtime) {
-      setError('This model is incompatible with the shared pool engine.');
-      setBusy(false);
-      return;
-    }
-    const used = [...(data.deployments || []), ...value.members];
-    const slug = (text: string) =>
-      text
-        .toLowerCase()
-        .replace(/[^a-z0-9_.-]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 100) || 'model';
-    const base = slug(value.name) + '-' + slug(model.name).slice(0, 40);
-    let alias = base,
-      suffix = 2;
-    while (used.some((m) => m.alias === alias)) alias = base + '-' + suffix++;
-    const port = Array.from({ length: 50000 }, (_, i) => 8120 + i).find(
-      (p) => !used.some((m) => m.port === p),
-    );
-    if (port === undefined) {
-      setError('No free private port is available.');
-      setBusy(false);
-      return;
-    }
-    const config: Record<string, import('./types').JsonValue> = {};
-    const member: DeploymentDraft = {
-      ...defaults.deployments,
-      name: model.name,
-      artifact_id: model.id,
-      runtime_id: value.engine_pool
-        ? value.runtime_id || ''
-        : runtime?.id || '',
-      config,
-      raw_args: [],
-      catalog: structuredClone(defaults.deployments.catalog),
-      alias,
-      port: value.engine_pool ? null : port,
-      gpu: value.engine_pool ? (value.gpu ?? null) : null,
-    };
-    set('members', [...value.members, member]);
-    setSelected(value.members.length);
-    setError('');
-    setBusy(false);
-  }
   const submit = async (value: DeploymentSetDraft) => {
-    if (busy || Object.values(invalid).some(Boolean)) return;
+    if (busy) return;
     setBusy(true);
     setError('');
     try {
@@ -858,18 +702,12 @@ export function DeploymentSetEditor({
       <DraftFormProvider value={form}>
         <form
           className="resource-editor"
-          onInvalidCapture={(e) => {
-            const target = e.target as HTMLElement;
-            const section = target.closest<HTMLElement>('[data-model-index]');
-            if (section) setSelected(Number(section.dataset.modelIndex));
-            target.closest('details')?.setAttribute('open', '');
-          }}
           onSubmit={(e) => {
             e.preventDefault();
             void form.handleSubmit();
           }}
         >
-          <FieldSet key={epoch} disabled={busy}>
+          <FieldSet disabled={busy}>
             <Field label="Name">
               <Input
                 required
@@ -877,178 +715,6 @@ export function DeploymentSetEditor({
                 onChange={(e) => set('name', e.target.value)}
               />
             </Field>
-            <FieldSet className="model-composer">
-              <FieldLegend>Models</FieldLegend>
-              <Field label="Add installed model">
-                <NativeSelect
-                  value={artifactId}
-                  onChange={(e) => setArtifactId(e.target.value)}
-                >
-                  {(data.models || []).map((m) => (
-                    <NativeSelectOption key={m.id} value={m.id}>
-                      {m.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <Button
-                variant="outline"
-                type="button"
-                disabled={!artifactId}
-                onClick={addModel}
-              >
-                Add model
-              </Button>
-              <div className="model-switcher">
-                <ToggleGroup
-                  variant="outline"
-                  aria-label="Models"
-                  value={[String(selected)]}
-                  onValueChange={(next) => {
-                    if (next.length) setSelected(Number(next[0]));
-                  }}
-                >
-                  {value.members.map((m, index: number) => (
-                    <ToggleGroupItem
-                      key={m.id || 'm' + index}
-                      value={String(index)}
-                    >
-                      {m.name || `Model ${index + 1}`}
-                      {invalid[m.id || 'm' + index] || aliasError(m)
-                        ? ' · Check settings'
-                        : ''}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-              {value.members.map((m, index: number) => (
-                <section
-                  hidden={selected !== index}
-                  data-model-index={index}
-                  className="model-edit-section"
-                  key={m.id || 'm' + index}
-                >
-                  <h3>{m.name}</h3>
-                  <p className="text-muted-foreground text-sm">
-                    Shared policy: {sharedPolicy}. Loading policy, priority,
-                    idle unload, eviction and the queue timeout belong to this
-                    deployment set; edit them once in Availability.
-                  </p>
-                  <Field label="Model display name">
-                    <Input
-                      required
-                      value={m.name}
-                      onChange={(e) =>
-                        updateMember(index, { name: e.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label="API model ID">
-                    <Input
-                      required
-                      aria-label="API model ID"
-                      aria-invalid={aliasError(m)}
-                      pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}"
-                      value={m.alias}
-                      onChange={(e) =>
-                        updateMember(index, { alias: e.target.value })
-                      }
-                    />
-                    {aliasError(m) && (
-                      <small className="error-text" role="alert">
-                        This API model ID is already in use.
-                      </small>
-                    )}
-                  </Field>
-                  <div className="configuration-grid">
-                    <ConfigurationFields
-                      formPath={`members[${index}].config`}
-                      value={m}
-                      deploymentId={m.id}
-                      templateOverride={m.template_override}
-                      runtimeLocked={Boolean(value.engine_pool)}
-                      observed={
-                        data.deployments?.find((entry) => entry.id === m.id)
-                          ?.runtime_observation?.resolved
-                      }
-                      observedAt={
-                        data.deployments?.find((entry) => entry.id === m.id)
-                          ?.runtime_observation?.observed_at
-                      }
-                      data={data}
-                      set={(member) => updateMember(index, member)}
-                      onValid={(valid) =>
-                        setInvalid((v) => ({
-                          ...v,
-                          [m.id || 'm' + index]: !valid,
-                        }))
-                      }
-                      recommendation={
-                        preview.data?.members?.[index]?.recommendation
-                      }
-                      modelFields={
-                        m && (
-                          <ChatTemplateSettings
-                            label="Chat template"
-                            model={data.models.find(
-                              (x) => x.id === m.artifact_id,
-                            )}
-                            override={m.template_override || null}
-                            onChange={(selection) =>
-                              updateMember(index, {
-                                template_override: selection,
-                              })
-                            }
-                          />
-                        )
-                      }
-                      placementFields={
-                        value.engine_pool ? (
-                          <p className="text-muted-foreground text-sm">
-                            Process visibility is shared by all{' '}
-                            {value.members.length} pool members. Edit shared
-                            devices in Availability. Model-server options below
-                            belong to this child preset; native routing and
-                            residency remain pool-controlled.
-                          </p>
-                        ) : (
-                          <Placement
-                            part="gpu"
-                            value={m}
-                            change={(v) => updateMember(index, v)}
-                            host={data.host?.[0]}
-                          />
-                        )
-                      }
-                    />
-                  </div>
-                  <Button
-                    variant="destructive"
-                    type="button"
-                    onClick={async () => {
-                      if (
-                        m.id &&
-                        !(await confirm(
-                          'Remove this model from the deployment? It will be kept as an inactive standalone configuration.',
-                        ))
-                      )
-                        return;
-                      set(
-                        'members',
-                        value.members.filter((_, i) => i !== index),
-                      );
-                      setSelected(Math.max(0, selected - 1));
-                      setInvalid((v) => ({
-                        ...v,
-                        [m.id || 'm' + index]: false,
-                      }));
-                    }}
-                  >
-                    Remove model
-                  </Button>
-                </section>
-              ))}
-            </FieldSet>
             <SettingsSection name="lifecycle" title="Availability">
               {value.engine_pool && (
                 <>
@@ -1219,18 +885,6 @@ export function DeploymentSetEditor({
                     change={(v) => set('queue_timeout', v ?? 0)}
                   />
                 </Field>
-                {!value.engine_pool &&
-                  value.members.map((member, index) => (
-                    <FieldSet key={member.id || 'member' + index}>
-                      <FieldLegend>{member.name} endpoint</FieldLegend>
-                      <Placement
-                        part="network"
-                        value={member}
-                        change={(placement) => updateMember(index, placement)}
-                        host={data.host?.[0]}
-                      />
-                    </FieldSet>
-                  ))}
               </CardAdvanced>
               <label className="check">
                 <Switch
@@ -1242,9 +896,6 @@ export function DeploymentSetEditor({
               </label>
             </SettingsSection>
           </FieldSet>
-          {value.members.length > 0 && (
-            <DraftResources preview={preview.data} error={preview.error} />
-          )}
           <details className="card-advanced">
             <summary className="card-advanced-summary">
               Raw deployment set
@@ -1281,23 +932,12 @@ export function DeploymentSetEditor({
               disabled={busy || !changed}
               onClick={() => {
                 reset();
-                setInvalid({});
-                setSelected(0);
-                setEpoch((v) => v + 1);
                 setError('');
               }}
             >
               Discard
             </Button>
-            <Button
-              variant="default"
-              type="submit"
-              disabled={
-                busy ||
-                value.members.some(aliasError) ||
-                Object.values(invalid).some(Boolean)
-              }
-            >
+            <Button variant="default" type="submit" disabled={busy}>
               {busy ? 'Saving…' : 'Save pool'}
             </Button>
           </div>
@@ -1315,7 +955,6 @@ export function MultiDeploymentDetail({
   actions,
   events,
   saved,
-  addModel,
 }: {
   d: DeploymentSet;
   tab: string;
@@ -1324,7 +963,6 @@ export function MultiDeploymentDetail({
   actions: DeploymentActions;
   events: OperationEvent[];
   saved: () => void;
-  addModel: (poolId: string) => void;
 }) {
   const logQuery = new URLSearchParams(window.location.hash.split('?')[1]);
   const logRun = logQuery.get('run');
@@ -1394,15 +1032,6 @@ export function MultiDeploymentDetail({
           <Status value={state(d)} />
         </div>
         <div className="actions">
-          {d.engine_pool !== false && (
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() => addModel(d.id)}
-            >
-              Add model
-            </Button>
-          )}
           {!active(d) && d.enabled && (
             <Button
               variant="default"

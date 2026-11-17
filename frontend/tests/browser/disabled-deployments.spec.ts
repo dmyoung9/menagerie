@@ -18,11 +18,9 @@ for (const width of [1440, 320]) {
     ).toBeVisible();
     // A disabled *member* stays in its enabled pool; it is flagged in the
     // member-table Availability column.
-    const inactiveRow = page
-      .getByRole('row')
-      .filter({
-        has: page.getByRole('link', { name: 'Example inactive', exact: true }),
-      });
+    const inactiveRow = page.getByRole('row').filter({
+      has: page.getByRole('link', { name: 'Example inactive', exact: true }),
+    });
     await expect(inactiveRow.getByRole('cell').nth(2)).toHaveText('Disabled');
     await expect(
       page

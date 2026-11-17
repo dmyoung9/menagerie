@@ -88,8 +88,8 @@ export function DeploymentWizard({
   poolId,
   close,
   created,
-  setupEngine,
   acquireModel,
+  newPool,
   suspended = false,
   onConnect,
 }: {
@@ -98,8 +98,8 @@ export function DeploymentWizard({
   poolId?: string;
   close: () => void;
   created: (row: Deployment) => void;
-  setupEngine: () => void;
   acquireModel: (local: boolean) => void;
+  newPool: () => void;
   suspended?: boolean;
   onConnect: () => void;
 }) {
@@ -135,13 +135,9 @@ export function DeploymentWizard({
   const [context, setContext] = useState(8192),
     [parallel, setParallel] = useState(1);
   const [contextMode, setContextMode] = useState<ContextMode>('default');
-  const [residency, setResidency] = useState('on-demand'),
-    [idle, setIdle] = useState(300);
-  const [placement, setPlacement] = useState<`pool:${string}` | 'new-pool'>(
-    poolId ? `pool:${poolId}` : 'new-pool',
+  const [placement, setPlacement] = useState<`pool:${string}` | ''>(
+    poolId ? `pool:${poolId}` : '',
   );
-  const [poolName, setPoolName] = useState('');
-  const [poolPort, setPoolPort] = useState<number | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalog>({
     model: {
       capabilities: {
@@ -196,8 +192,7 @@ export function DeploymentWizard({
       artifact !== undefined &&
       r.capabilities?.formats?.includes(artifact.format),
   );
-  const runtime = engines.find((r) => r.id === runtimeId) || engines[0];
-  const schema = runtime?.capabilities?.schema || {};
+
   const availablePools = (data.serving || [])
     .filter((d) => d.multi_model && d.engine_pool !== false)
     .map((d) => ({
@@ -211,18 +206,27 @@ export function DeploymentWizard({
       allow_eviction: d.allow_eviction ?? false,
       queue_timeout: d.queue_timeout ?? 300,
     }))
-    // Keep the pool this wizard was opened for, whether or not it matches the
-    // currently selected engine.
-    .filter(
-      (p) => p.id === poolId || !p.runtime_id || p.runtime_id === runtime?.id,
-    );
+    .filter((p) => {
+      if (p.id === poolId) return true;
+      const rt = (data.runtimes || []).find((r) => r.id === p.runtime_id);
+      return (
+        !artifact ||
+        !rt ||
+        (rt.capabilities?.formats || []).includes(artifact.format)
+      );
+    });
   const selectedPoolId = placement.startsWith('pool:')
     ? placement.slice(5)
     : null;
-  const placementIncomplete =
-    placement === 'new-pool' && (!poolName.trim() || poolPort === null);
+  const placementIncomplete = !selectedPoolId;
   const isEditing = Boolean(savedRow);
   const joinedPool = availablePools.find((p) => p.id === selectedPoolId);
+  const poolRuntime = joinedPool
+    ? (data.runtimes || []).find((r) => r.id === joinedPool.runtime_id)
+    : undefined;
+  const runtime =
+    poolRuntime || engines.find((r) => r.id === runtimeId) || engines[0];
+  const schema = runtime?.capabilities?.schema || {};
   const memberPolicy = (): {
     residency: string;
     priority: number;
@@ -238,10 +242,12 @@ export function DeploymentWizard({
         allow_eviction: joinedPool.allow_eviction,
         queue_timeout: joinedPool.queue_timeout,
       };
+    // New deployments always join an existing pool, so the fallback below is
+    // only a guard for a path the UI no longer reaches.
     return {
-      residency,
+      residency: 'on-demand',
       priority: advanced.priority ?? 50,
-      idle_timeout: idle,
+      idle_timeout: 300,
       allow_eviction: advanced.allow_eviction ?? false,
       queue_timeout: advanced.queue_timeout ?? 300,
     };
@@ -368,16 +374,6 @@ export function DeploymentWizard({
       return;
     }
     const policy = memberPolicy();
-    const poolSpec =
-      placement === 'new-pool'
-        ? {
-            name: poolName,
-            runtime_id: runtime.id,
-            port: poolPort,
-            ...policy,
-            enabled: true,
-          }
-        : undefined;
     setBusy(true);
     setError('');
     setOutcome(null);
@@ -409,11 +405,7 @@ export function DeploymentWizard({
           enabled: mode !== 'disabled',
           // Placement is fixed once the member exists; the API only accepts
           // pool targeting when creating one.
-          ...(savedRow
-            ? {}
-            : placement.startsWith('pool:')
-              ? { pool_id: selectedPoolId }
-              : { pool: poolSpec }),
+          ...(savedRow ? {} : { pool_id: selectedPoolId }),
         },
       );
       setSavedRow(saved);
@@ -567,24 +559,27 @@ export function DeploymentWizard({
 
   const showCompletion = outcome !== null && outcome !== 'launch';
   const needsAcceptance = Boolean(plan?.stops?.length);
+  const behaviorPolicy = memberPolicy();
   const behaviorSummary =
-    residency === 'on-demand'
-      ? idle
-        ? `Available to clients. Loads when requested and unloads after ${idle / 60} minutes without requests.`
+    behaviorPolicy.residency === 'on-demand'
+      ? behaviorPolicy.idle_timeout
+        ? `Available to clients. Loads when requested and unloads after ${
+            behaviorPolicy.idle_timeout / 60
+          } minutes without requests.`
         : 'Available to clients. Loads when requested; idle unloading is off.'
-      : residency === 'pinned'
+      : behaviorPolicy.residency === 'pinned'
         ? 'Pinned: never automatically unloaded to make room.'
         : 'Evictable: loads manually; can make room when idle and authorized.';
 
   if (suspended) return null;
   return (
     <Dialog
-      title={'Set up model'}
+      title={'New deployment'}
       close={close}
       busy={busy || launchBusy || testBusy}
       wide
     >
-      <ol className="steps" aria-label="Set up model">
+      <ol className="steps" aria-label="New deployment">
         {['Choose model', 'Review setup', 'Make available'].map((s, i) => (
           <li
             key={s}
@@ -656,38 +651,7 @@ export function DeploymentWizard({
                     ))}
                   </NativeSelect>
                 </Field>
-                {engines.length ? (
-                  <Field label="Engine">
-                    <NativeSelect
-                      value={runtime?.id}
-                      onChange={(e) => {
-                        setRuntimeId(e.target.value);
-                        setExtra({});
-                      }}
-                    >
-                      {engines.map((r) => (
-                        <NativeSelectOption key={r.id} value={r.id}>
-                          {r.name}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                ) : (
-                  <div className="empty">
-                    <h3>An engine is needed for this model</h3>
-                    <p className="muted">
-                      Choose a compatible engine to continue. Your setup will be
-                      kept.
-                    </p>
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={setupEngine}
-                    >
-                      Choose engine
-                    </Button>
-                  </div>
-                )}
+
                 {artifact && (
                   <ChatTemplateSettings
                     label="Chat template"
@@ -697,7 +661,7 @@ export function DeploymentWizard({
                   />
                 )}
                 <p className="muted">
-                  Engine settings will be used unless you customize them.
+                  The selected pool's runtime, device and policy are inherited.
                 </p>
               </>
             )}
@@ -721,80 +685,51 @@ export function DeploymentWizard({
                     <p>
                       {joinedPool
                         ? `Member of ${joinedPool.name}`
-                        : placement === 'new-pool'
-                          ? 'Member of the new pool'
-                          : 'Pool member'}
+                        : 'Pool member'}
                     </p>
                   </Field>
                 ) : (
                   <Field
-                    label="Placement"
+                    label="Pool"
                     hint={
-                      placement === 'new-pool'
-                        ? 'Creates a pool that shares one engine, device and port.'
-                        : 'Joins the selected pool, including its runtime, port and policy.'
+                      availablePools.length
+                        ? 'Joins the selected pool, including its runtime, device and policy.'
+                        : undefined
                     }
                   >
-                    <NativeSelect
-                      value={placement}
-                      onChange={(e) =>
-                        setPlacement(
-                          e.target.value as `pool:${string}` | 'new-pool',
-                        )
-                      }
-                    >
-                      {availablePools.map((p) => (
-                        <NativeSelectOption key={p.id} value={'pool:' + p.id}>
-                          Join pool: {p.name}
-                        </NativeSelectOption>
-                      ))}
-                      <NativeSelectOption value="new-pool">
-                        New pool…
-                      </NativeSelectOption>
-                    </NativeSelect>
-                  </Field>
-                )}
-                {!isEditing && placement === 'new-pool' && (
-                  <div className="pool-new mb-5">
-                    {!poolName && poolPort === null && (
-                      <div className="empty mb-3">
-                        <h3>Pool not set up yet</h3>
+                    {availablePools.length ? (
+                      <NativeSelect
+                        value={placement}
+                        onChange={(e) =>
+                          setPlacement(e.target.value as `pool:${string}`)
+                        }
+                      >
+                        {availablePools.map((p) => (
+                          <NativeSelectOption key={p.id} value={'pool:' + p.id}>
+                            Join pool: {p.name}
+                          </NativeSelectOption>
+                        ))}
+                      </NativeSelect>
+                    ) : (
+                      <div className="empty">
+                        <h3>No pools to join</h3>
                         <p className="muted">
-                          Give the pool a name and serving port. Models added to
-                          it share this engine, device and port.
+                          A model joins an existing runtime pool, which owns the
+                          shared runtime, device, port and policy. Create one
+                          first.
                         </p>
+                        <Button
+                          variant="outline"
+                          type="button"
+                          onClick={newPool}
+                        >
+                          Create a pool
+                        </Button>
                       </div>
                     )}
-                    <Field label="Pool name">
-                      <Input
-                        value={poolName}
-                        placeholder="e.g. LFM3"
-                        onChange={(e) => setPoolName(e.target.value)}
-                      />
-                    </Field>
-                    <Field
-                      label="Serving port"
-                      hint={
-                        poolPort === null
-                          ? 'Required. Avoid 8001 and 8017 (Menagerie itself).'
-                          : undefined
-                      }
-                    >
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        value={poolPort === null ? '' : String(poolPort)}
-                        onChange={(e) =>
-                          setPoolPort(
-                            e.target.value === ''
-                              ? null
-                              : Number(e.target.value),
-                          )
-                        }
-                      />
-                    </Field>
-                  </div>
+                  </Field>
                 )}
+
                 {identifierMode === 'generated' ? (
                   <Field label="API model ID" hint={generatedHint}>
                     <div className="flex items-center gap-2">
@@ -966,37 +901,6 @@ export function DeploymentWizard({
                     />
                   </Field>
                 )}
-                <Field label="Mode">
-                  <NativeSelect
-                    value={residency}
-                    onChange={(e) => setResidency(e.target.value)}
-                  >
-                    <NativeSelectOption value="on-demand">
-                      On demand
-                    </NativeSelectOption>
-                    <NativeSelectOption value="pinned">
-                      Pinned
-                    </NativeSelectOption>
-                    <NativeSelectOption value="evictable">
-                      Evictable
-                    </NativeSelectOption>
-                  </NativeSelect>
-                  <small>{behaviorSummary}</small>
-                </Field>
-                {residency === 'on-demand' && (
-                  <Field label="Unload after idle">
-                    <NativeSelect
-                      value={idle}
-                      onChange={(e) => setIdle(Number(e.target.value))}
-                    >
-                      {[60, 300, 900, 1800, 0].map((s) => (
-                        <NativeSelectOption key={s} value={s}>
-                          {s ? s / 60 + ' minutes' : 'Never'}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                )}
                 <SettingsSection
                   name="capabilities"
                   title="Modalities & capabilities"
@@ -1156,8 +1060,7 @@ export function DeploymentWizard({
                 disabled={
                   Object.values(invalid).some(Boolean) ||
                   !runtime ||
-                  step > 0 &&
-                  placementIncomplete
+                  (step > 0 && placementIncomplete)
                 }
               >
                 Continue

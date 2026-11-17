@@ -1,19 +1,24 @@
-import { test, expect } from './fixtures';
+import { test, expect, navigate } from './fixtures';
 import { deploymentDraft, deploymentSetDraft } from '../../src/contracts';
 
 test('new deployments leave tuning and device placement to the engine', async ({
   page,
   fixture,
 }) => {
+  // A model joins an existing pool; the pool owns the device, and the engine
+  // (not the member) decides the runtime tuning.
   await page.goto('/#/deployments');
-  await page.locator('.page-head').getByRole('button', { name: 'Add model', exact: true }).click();
+  await page
+    .locator('.page-head')
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Model', { exact: true }).selectOption('model');
-  await dialog.getByLabel('Engine', { exact: true }).selectOption('engine');
+  // Step 0 pre-fills the only model; the runtime is the joined pool's.
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  await dialog
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Example pool' });
   await dialog.getByLabel('Name', { exact: true }).fill('Automatic');
-  await dialog.getByLabel('Pool name', { exact: true }).fill('Automatic pool');
-  await dialog.getByLabel('Serving port', { exact: true }).fill('8123');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog
     .getByRole('button', {
@@ -27,26 +32,47 @@ test('new deployments leave tuning and device placement to the engine', async ({
   const saved = deploymentDraft(
     fixture.writes.find((w) => w.path === '/api/model-setups')!.body,
   );
-  expect(saved.gpu).toBeNull();
   expect(saved.config).toEqual({});
+  // The member inherits the pool's device rather than choosing its own.
+  expect(saved.gpu).toBe(0);
 });
 
 test('a native pool remains a pool even with one model and round-trips its policy', async ({
   page,
   fixture,
 }) => {
+  // Step 1: create the pool through the page-head "New pool" wizard.
   await page.goto('/#/deployments');
-  await page.locator('.page-head').getByRole('button', { name: 'Add model', exact: true }).click();
+  await page
+    .locator('.page-head')
+    .getByRole('button', { name: 'New pool', exact: true })
+    .click();
+  const wizard = page.getByRole('dialog');
+  await wizard.getByLabel('Name', { exact: true }).fill('Native pool');
+  await wizard
+    .getByLabel('Shared installed engine', { exact: true })
+    .selectOption('Example engine');
+  // NumberControl commits on blur/Enter, not on fill alone.
+  await wizard.getByLabel('Serving port', { exact: true }).fill('8125');
+  await wizard.getByLabel('Serving port', { exact: true }).blur();
+  await wizard
+    .getByRole('button', { name: 'Create pool', exact: true })
+    .click();
+  await expect(wizard).toBeHidden();
+  // Step 2: pool creation navigates to the pool's detail page, which has no
+  // page-level "New deployment" action. Members are added from the deployments
+  // list, so return to it before joining the new pool.
+  await navigate(page, 'Deployments');
+  await page
+    .locator('.page-head')
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Model', { exact: true }).selectOption('model');
-  await dialog.getByLabel('Engine', { exact: true }).selectOption('engine');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-  await dialog.getByLabel('Name', { exact: true }).fill('Native pool');
   await dialog
-    .getByLabel('Placement', { exact: true })
-    .selectOption({ label: 'New pool…' });
-  await dialog.getByLabel('Pool name', { exact: true }).fill('Native pool');
-  await dialog.getByLabel('Serving port', { exact: true }).fill('8125');
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Native pool' });
+  await dialog.getByLabel('Name', { exact: true }).fill('Native pool');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog
     .getByRole('button', {
@@ -135,9 +161,7 @@ test('native pool device visibility is edited once and saved for all members', a
   // One shared device edit; no per-member device controls exist in a pool.
   await expect(page.getByLabel('GPU', { exact: true })).toHaveCount(1);
   await page.getByLabel('GPU', { exact: true }).selectOption('0');
-  await page
-    .getByRole('button', { name: 'Save pool', exact: true })
-    .click();
+  await page.getByRole('button', { name: 'Save pool', exact: true }).click();
   await expect
     .poll(() =>
       fixture.writes.find((entry) =>

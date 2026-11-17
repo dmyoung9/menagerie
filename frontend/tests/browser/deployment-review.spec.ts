@@ -88,16 +88,19 @@ for (const width of [1440, 576, 320]) {
     const config = page.locator('form.configuration-editor');
     await openAdvanced(page);
     await openIdentity(page);
-    await openCard(page, 'lifecycle');
     await openCard(page, 'model');
     await openCard(page, 'generation');
     await openCard(page, 'diagnostics');
+    // Members inherit the pool's availability, which the pool owns; the member
+    // editor no longer shows an Availability card.
+    await expect(
+      config.getByRole('heading', { name: 'Availability', exact: true }),
+    ).toHaveCount(0);
     for (const title of [
       'Identity',
       'Model & runtime',
       'Resources & context',
       'Generation',
-      'Availability',
     ]) {
       await expect(
         config.getByRole('heading', { name: title, exact: true }),
@@ -455,11 +458,9 @@ test('deployment rows separate request counts, move failure links and remove dup
   await expect(
     page.getByRole('columnheader', { name: 'Active requests', exact: true }),
   ).toBeVisible();
-  const row = page
-    .getByRole('row')
-    .filter({
-      has: page.getByRole('link', { name: 'Example idle', exact: true }),
-    });
+  const row = page.getByRole('row').filter({
+    has: page.getByRole('link', { name: 'Example idle', exact: true }),
+  });
   await expect(row.getByRole('cell').nth(4)).toHaveText('2');
   // The failure log link now lives inside the member's Actions menu.
   await row.getByRole('button', { name: 'Actions for Example idle' }).click();
@@ -467,9 +468,7 @@ test('deployment rows separate request counts, move failure links and remove dup
   await expect(
     menu.locator('a[href="#/deployments/idle/configuration"]'),
   ).toBeVisible();
-  await expect(
-    menu.locator('a[href="#/deployments/idle/logs"]'),
-  ).toBeVisible();
+  await expect(menu.locator('a[href="#/deployments/idle/logs"]')).toBeVisible();
   await expect(
     menu.getByRole('menuitem', {
       name: 'Remove Example idle from pool',

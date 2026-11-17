@@ -1357,95 +1357,79 @@ export function Editor(props: EditorProps) {
     </SettingsSection>
   );
   const availability =
-    deployment && kind === 'deployments' ? (
+    deployment && kind === 'deployments' && !memberOnly ? (
       <SettingsSection
         name="lifecycle"
         title="Availability"
         description="Loading and client exposure."
         hidden={availabilityHidden}
-        summary={
-          memberOnly ? (
-            <Badge variant="secondary">Pool policy</Badge>
-          ) : undefined
-        }
       >
-        {memberOnly ? (
-          <>
-            <p className="text-muted-foreground text-sm">{policyLine}</p>
-            <p className="text-muted-foreground text-sm">
-              Loading policy, priority, idle unload, eviction and the endpoint
-              belong to the deployment set, not to this member. Change them once
-              at the top of the pool Configuration.
-            </p>
-          </>
-        ) : (
-          <>
-            <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Mode">
-                <NativeSelect
-                  value={deployment.residency}
-                  onChange={(e) => set('residency', e.target.value)}
-                >
-                  <NativeSelectOption value="on-demand">
-                    On demand
-                  </NativeSelectOption>
-                  <NativeSelectOption value="pinned">Pinned</NativeSelectOption>
-                  <NativeSelectOption value="evictable">
-                    Evictable
-                  </NativeSelectOption>
-                </NativeSelect>
-              </Field>
-              {input('priority', 'Priority', 'number', 0, 100)}
-              {deployment.residency === 'on-demand' && (
-                <Duration
-                  value={deployment.idle_timeout ?? 0}
-                  change={(v) => set('idle_timeout', v)}
-                />
-              )}
-            </FieldGroup>
-            {deployment.residency !== 'pinned' &&
-              check(
-                'allow_eviction',
-                'Can unload to make room for another deployment',
-              )}
-            {check('enabled', 'Enabled for clients')}
-            <CardAdvanced
-              title="Advanced availability"
-              overrides={['queue_timeout', 'port']}
-              defaultOpen={Boolean(
-                q &&
-                ['queue', 'timeout', 'port', 'private'].some((word) =>
-                  q.includes(word),
-                ),
-              )}
-            >
-              {input(
-                'queue_timeout',
-                'Queue timeout (seconds)',
-                'number',
-                1,
-                1800,
-              )}
-              <Field
-                label="Private port"
-                hint="Loopback port for this deployment's endpoint."
+        <>
+          <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Mode">
+              <NativeSelect
+                value={deployment.residency}
+                onChange={(e) => set('residency', e.target.value)}
               >
-                <NumberControl
-                  label="Private port"
-                  required
-                  min={1024}
-                  max={65535}
-                  value={
-                    typeof deployment.port === 'number'
-                      ? deployment.port
-                      : undefined
-                  }
-                  change={(v) => set('port', v ?? 0)}
-                />
-              </Field>
-            </CardAdvanced>
-          </>
-        )}
+                <NativeSelectOption value="on-demand">
+                  On demand
+                </NativeSelectOption>
+                <NativeSelectOption value="pinned">Pinned</NativeSelectOption>
+                <NativeSelectOption value="evictable">
+                  Evictable
+                </NativeSelectOption>
+              </NativeSelect>
+            </Field>
+            {input('priority', 'Priority', 'number', 0, 100)}
+            {deployment.residency === 'on-demand' && (
+              <Duration
+                value={deployment.idle_timeout ?? 0}
+                change={(v) => set('idle_timeout', v)}
+              />
+            )}
+          </FieldGroup>
+          {deployment.residency !== 'pinned' &&
+            check(
+              'allow_eviction',
+              'Can unload to make room for another deployment',
+            )}
+          {check('enabled', 'Enabled for clients')}
+          <CardAdvanced
+            title="Advanced availability"
+            overrides={['queue_timeout', 'port']}
+            defaultOpen={Boolean(
+              q &&
+              ['queue', 'timeout', 'port', 'private'].some((word) =>
+                q.includes(word),
+              ),
+            )}
+          >
+            {input(
+              'queue_timeout',
+              'Queue timeout (seconds)',
+              'number',
+              1,
+              1800,
+            )}
+            <Field
+              label="Private port"
+              hint="Loopback port for this deployment's endpoint."
+            >
+              <NumberControl
+                label="Private port"
+                required
+                min={1024}
+                max={65535}
+                value={
+                  typeof deployment.port === 'number'
+                    ? deployment.port
+                    : undefined
+                }
+                change={(v) => set('port', v ?? 0)}
+              />
+            </Field>
+          </CardAdvanced>
+        </>
       </SettingsSection>
     ) : null;
   const forecast = deployment && (

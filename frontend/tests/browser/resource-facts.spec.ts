@@ -28,12 +28,15 @@ test('resource preview pairs stacked capacity and allocation selection without p
     lifecycle: { serving: true },
   });
   await page.goto('/#/deployments');
-  await page.locator('.page-head').getByRole('button', { name: 'Add model', exact: true }).click();
+  await page
+    .locator('.page-head')
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog
-    .getByLabel('Placement', { exact: true })
-    .selectOption('pool:seed-pool');
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Seed pool' });
   const preview = dialog.getByRole('complementary', {
     name: 'Deployment resource preview',
   });

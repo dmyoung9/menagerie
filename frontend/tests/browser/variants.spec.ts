@@ -227,7 +227,7 @@ test('new deployment members get common defaults and a nested Drawer without sub
   page,
   fixture,
 }) => {
-  // Seed a single-member pool so the detail editor has a member to add from.
+  // Seed a single-member pool so the New deployment wizard can join it.
   const member = (id: string) => ({
     id,
     name: `Example ${id}`,
@@ -279,24 +279,51 @@ test('new deployment members get common defaults and a nested Drawer without sub
     members: [first],
     lifecycle: { serving: false },
   });
-  await page.goto('/#/deployments/shared');
-  await expect(
-    page.getByRole('heading', { name: 'Shared pool', exact: true }),
-  ).toBeVisible();
+  // The New deployment wizard joins an existing pool and creates the member.
+  // There is no longer a local, non-submitted composer in the pool editor.
+  await page.goto('/#/deployments');
   await page
-    .getByRole('button', { name: 'Configuration', exact: true })
+    .locator('.page-head')
+    .getByRole('button', { name: 'New deployment', exact: true })
     .click();
-  // In the Configuration tab the editor renders the member composer. The page
-  // header "Add model" opens the standalone setup wizard; the composer's button
-  // appends a member to the local draft with common defaults (and does not
-  // write). Pick a model, append it, then inspect the new member's cards.
-  const composer = page.locator('fieldset.model-composer');
-  const modelSelect = composer.getByLabel('Add installed model');
-  await expect(modelSelect).toBeVisible();
-  await modelSelect.selectOption('model');
-  await composer
-    .getByRole('button', { name: 'Add model', exact: true })
+  const wizard = page.getByRole('dialog');
+  await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
+  await wizard
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Shared pool' });
+  await wizard.getByLabel('Name', { exact: true }).fill('New variant member');
+  await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
+  await wizard
+    .getByRole('button', {
+      name: 'Make available without loading',
+      exact: true,
+    })
     .click();
+  await expect(
+    wizard.getByText('New variant member is available', { exact: true }),
+  ).toBeVisible();
+  // The wizard submitted the member; it joined the shared pool with common
+  // defaults (no member-specific tuning).
+  const added = fixture.registry.deployments.find(
+    (d) => d.name === 'New variant member',
+  )!;
+  expect(
+    fixture.sets.find((group) => group.id === 'shared')!.member_ids,
+  ).toContain(added.id);
+  expect(added.port).toBeNull();
+  // Close the wizard. Any form interaction marks the dialog "dirty", so
+  // Escape opens a "Discard unsavd changes?" guard instead of closing.
+  // Dismissing it unmounts the wizard, removing the beforeunload handler
+  // that would otherwise block page navigation.
+  await page.keyboard.press('Escape');
+  const discard = page
+    .getByRole('alertdialog')
+    .getByRole('button', { name: 'Discard changes', exact: true });
+  if ((await discard.count()) > 0) {
+    await discard.click();
+  }
+  await expect(wizard).toBeHidden();
+  await page.goto('/#/deployments/' + added.id + '/configuration');
 
   await openCard(page, 'model');
   await openCard(page, 'variants');
@@ -324,6 +351,14 @@ test('new deployment members get common defaults and a nested Drawer without sub
       }),
     ).not.toBeChecked();
   }
+  // The variant drawer is an editing buffer, not a submission. Snapshot the
+  // member-write count before opening it so the Low round-trip and the final
+  // Cancel are both verified to add no writes.
+  const memberWrite = (w: { path: string }) =>
+    w.path === '/api/model-setups' ||
+    w.path === '/api/deployment-sets' ||
+    w.path === '/api/deployments';
+  const writesBeforeDrawer = fixture.writes.filter(memberWrite).length;
   await section.getByRole('button', { name: 'Low', exact: true }).click();
   const drawer = page.getByRole('dialog', { name: 'Edit Low', exact: true });
   await drawer.getByLabel('Effort value', { exact: true }).fill('minimal');
@@ -334,14 +369,7 @@ test('new deployment members get common defaults and a nested Drawer without sub
     'minimal',
   );
   await drawer.getByRole('button', { name: 'Cancel', exact: true }).click();
-  expect(
-    fixture.writes.filter(
-      (w) =>
-        w.path === '/api/model-setups' ||
-        w.path === '/api/deployment-sets' ||
-        w.path === '/api/deployments',
-    ),
-  ).toEqual([]);
+  expect(fixture.writes.filter(memberWrite).length).toBe(writesBeforeDrawer);
 });
 
 test('guided destination changes and JSON preserve additional template controls', async ({

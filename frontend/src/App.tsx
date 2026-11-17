@@ -45,6 +45,7 @@ import { Downloads } from '@/components/downloads';
 import { ProcessResources } from '@/components/process-resources';
 import { TelemetrySeries } from '@/components/charts/telemetry-series';
 import { Editor } from './Editors';
+import { PoolWizard } from './PoolWizard';
 import { editable } from './editor-state';
 import { Connect, LaunchReview, PolicyEditor, SourceBuild } from './Operations';
 import {
@@ -224,6 +225,7 @@ const affectedSlices = (kind?: string): SliceKey[] => {
     case 'serving-deployments':
     case 'deployment_sets':
     case 'deployment-set':
+    case 'pool-wizard':
       return ['deployments', 'status'];
     case 'settings':
     case 'policy':
@@ -617,6 +619,7 @@ export default function App() {
   const newDeployment = (modelId?: string, poolId?: string) => {
     open({ type: 'wizard', modelId, poolId });
   };
+  const newPool = () => open({ type: 'pool-wizard' });
   const depView = route[1] === 'disabled' ? 'inactive' : route[1] || 'enabled',
     detail =
       page === 'deployments' && !['enabled', 'inactive'].includes(depView);
@@ -762,19 +765,19 @@ export default function App() {
                 {page === 'deployments' && (
                   <>
                     <Button
+                      variant="default"
+                      type="button"
+                      onClick={() => newPool()}
+                    >
+                      <Plus size={16} />
+                      New pool
+                    </Button>
+                    <Button
                       variant="outline"
                       type="button"
                       onClick={() => newDeployment()}
                     >
-                      Add model
-                    </Button>
-                    <Button
-                      variant="default"
-                      type="button"
-                      onClick={() => open({ type: 'deployment-set' })}
-                    >
-                      <Plus size={16} />
-                      New pool
+                      New deployment
                     </Button>
                   </>
                 )}
@@ -1030,7 +1033,6 @@ export default function App() {
                         saved={() =>
                           void refreshSlices(affectedSlices('deployment_set'))
                         }
-                        addModel={(poolId) => open({ type: 'wizard', poolId })}
                       />
                     ) : (
                       <DeploymentDetail
@@ -1112,9 +1114,6 @@ export default function App() {
                             data={data}
                             host={host}
                             actions={actions}
-                            addModel={(poolId) =>
-                              open({ type: 'wizard', poolId })
-                            }
                             changed={(text) =>
                               completed(text, ['deployments', 'status'])
                             }
@@ -1133,7 +1132,7 @@ export default function App() {
                         <Button
                           variant="default"
                           type="button"
-                          onClick={() => open({ type: 'deployment-set' })}
+                          onClick={() => newPool()}
                         >
                           Create a pool
                         </Button>
@@ -1216,16 +1215,15 @@ export default function App() {
             setSuspendedWizard(null);
             close();
           }}
-          setupEngine={() => {
-            if (modal?.type === 'wizard') setSuspendedWizard(modal);
-            close();
-            go('settings/engines');
-          }}
           acquireModel={(local) => {
             if (modal?.type === 'wizard') setSuspendedWizard(modal);
             close();
             go('models');
             if (local) open({ type: 'local-model', path: '' });
+          }}
+          newPool={() => {
+            close();
+            open({ type: 'pool-wizard' });
           }}
           created={(row) => {
             void refreshSlices(affectedSlices('deployments'));
@@ -1255,7 +1253,6 @@ export default function App() {
       {modal?.type === 'deployment-set' && (
         <DeploymentSetEditor
           initial={modal.row}
-          modelId={modal.modelId}
           data={data}
           close={close}
           saved={(id) => {
@@ -1264,10 +1261,25 @@ export default function App() {
           }}
         />
       )}
+      {modal?.type === 'pool-wizard' && (
+        <PoolWizard
+          data={data}
+          close={close}
+          saved={(id) => {
+            completed('Pool created', affectedSlices('deployment_set'));
+            go('deployments/' + id);
+          }}
+        />
+      )}
       {modal &&
-        !['wizard', 'launch', 'connect', 'source', 'deployment-set'].includes(
-          modal.type,
-        ) && (
+        ![
+          'wizard',
+          'launch',
+          'connect',
+          'source',
+          'deployment-set',
+          'pool-wizard',
+        ].includes(modal.type) && (
           <Dialog
             title={
               modal.type === 'edit'

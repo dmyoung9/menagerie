@@ -68,7 +68,7 @@ test('installed capability refresh preserves focused text and validates the new 
   await expect(input).toHaveValue('12');
 });
 
-test('multi-model removal keeps the remaining member numeric buffer and saves it through the shared form', async ({
+test('removing a member keeps the surviving generation flag and pool state', async ({
   page,
   fixture,
 }) => {
@@ -79,8 +79,10 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
     label: 'Top-k',
     default: 0,
   };
-  // Seed a two-member pool; pooled members carry a null member port. The pool's
-  // Configuration tab (not the wizard) reconciles both members in one shared form.
+  // Seed a two-member pool. Beta model carries an explicit Top-k override; Alpha
+  // model does not. Members are edited on their own configuration pages and removed
+  // from the pool's Models tab — the pool's Configuration tab holds only shared
+  // pool settings, so the flag lives on the member, not a shared form.
   const base = {
     artifact_id: 'model',
     runtime_id: 'engine',
@@ -106,9 +108,19 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
     revision: 1,
     lifecycle: { serving: true },
   };
-  const first = { ...base, id: 'pair-a', name: 'Alpha model', alias: 'alpha' };
-  const second = { ...base, id: 'pair-b', name: 'Beta model', alias: 'beta' };
-  fixture.registry.deployments.push(first, second);
+  const alpha = { ...base, id: 'pair-a', name: 'Alpha model', alias: 'alpha' };
+  const beta = {
+    ...base,
+    id: 'pair-b',
+    name: 'Beta model',
+    alias: 'beta',
+    config: { ...base.config, 'top-k': 8 },
+    profile_snapshot: {
+      ...base.profile_snapshot,
+      config: { ...base.profile_snapshot!.config, 'top-k': 8 },
+    },
+  };
+  fixture.registry.deployments.push(alpha, beta);
   fixture.sets.push({
     id: 'buffered-pair',
     name: 'Buffered pair',
@@ -125,71 +137,53 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
     state: 'STOPPED',
     revision: 1,
     member_ids: ['pair-a', 'pair-b'],
-    members: [first, second],
+    members: [alpha, beta],
     lifecycle: { serving: true },
   });
-  // The pool's Configuration tab renders the shared pool form, not a wizard.
-  await page.goto('/#/deployments/buffered-pair/configuration');
-  const switcher = page.locator('[aria-label="Models"]');
-  // Select the second member and add Top-k to its generation flags.
-  await switcher
-    .getByRole('button', { name: 'Beta model', exact: true })
-    .click();
+  // The pool's Models tab renders each member as a card with its own
+  // status, properties and Edit / Logs / Remove buttons.
+  await page.goto('/#/deployments/buffered-pair/models');
+  await expect(
+    page.getByRole('heading', { name: 'Alpha model', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Beta model', exact: true }),
+  ).toBeVisible();
+  // Remove Alpha model via the Remove button on its card (scoped to the card
+  // that holds the Alpha heading).
   await page
-    .locator(
-      '[data-model-index="1"] [data-settings-section="generation"] summary',
-    )
+    .locator('[data-slot="card"]')
+    .filter({
+      has: page.getByRole('heading', { name: 'Alpha model', exact: true }),
+    })
+    .getByRole('button', { name: 'Remove', exact: true })
     .click();
-  await page
-    .locator('[data-model-index="1"]')
-    .getByRole('button', { name: 'Add generation flags', exact: true })
-    .click();
-  const picker = page.getByRole('dialog', { name: 'Add generation flags' });
-  await picker.getByRole('checkbox', { name: 'Top-k', exact: true }).check();
-  await picker.getByRole('button', { name: 'Add (1)', exact: true }).click();
-  // Clear the second member's Top-k to leave an empty buffer that must survive
-  // the removal of the other member.
-  const topK = page
-    .locator('[data-model-index="1"]')
-    .getByLabel('Top-k', { exact: true });
-  await topK.fill('');
-  await topK.blur();
-  // Remove the first member.
-  await switcher
-    .getByRole('button', { name: 'Alpha model', exact: true })
-    .click();
-  await page
-    .locator('[data-model-index="0"]')
-    .getByRole('button', { name: 'Remove model', exact: true })
-    .click();
-  await page
-    .getByRole('alertdialog')
+  const confirmDialog = page.getByRole('alertdialog');
+  await expect(confirmDialog).toBeVisible();
+  await expect(
+    confirmDialog.getByText('Remove Alpha model from Buffered pair?'),
+  ).toBeVisible();
+  await confirmDialog
     .getByRole('button', { name: 'Continue', exact: true })
     .click();
-  // The remaining member is now the first row and still holds the empty buffer.
-  const remaining = page
-    .locator('[data-model-index="0"]')
-    .getByLabel('Top-k', { exact: true });
-  await expect(remaining).toBeVisible();
-  await expect(remaining).toHaveValue('');
-  // Commit a value and save through the shared form.
-  await remaining.fill('8');
-  await remaining.blur();
-  await page
-    .getByRole('button', { name: 'Save pool', exact: true })
-    .click();
-  await expect
-    .poll(() =>
-      fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1'),
-    )
-    .toBeDefined();
-  const saved = deploymentSetDraft(
-    fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1')!
-      .body,
-  );
-  expect(saved.members).toHaveLength(1);
-  expect(saved.members[0].config['top-k']).toBe(8);
-  expect(saved.members[0].name).toBe('Beta model');
+  // Alpha is gone; Beta remains.
+  await expect(
+    page.getByRole('heading', { name: 'Alpha model', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'Beta model', exact: true }),
+  ).toBeVisible();
+  // Beta's own configuration page still renders the saved Top-k override.
+  await page.goto('/#/deployments/pair-b/configuration');
+  await openCard(page, 'generation');
+  await expect(page.getByLabel('Top-k', { exact: true })).toHaveValue('8');
+  // Fixture: the pool now holds exactly one member, with its flag intact, and
+  // the removal bumped the pool revision.
+  const pool = fixture.sets.find((group) => group.id === 'buffered-pair')!;
+  expect(pool.members).toHaveLength(1);
+  expect(pool.members[0].name).toBe('Beta model');
+  expect(pool.members[0].config['top-k']).toBe(8);
+  expect(pool.revision).toBe(2);
 });
 
 test('clearing is an editing buffer; blur validates without substituting zero and Enter commits retyped text', async ({

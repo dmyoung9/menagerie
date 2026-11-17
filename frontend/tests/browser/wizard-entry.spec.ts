@@ -11,67 +11,123 @@ test.afterEach(({ page }) => {
   expect(errors.get(page), 'No React/browser errors').toEqual([]);
 });
 
-// Header "Add model" opens the wizard for a brand-new pool; the per-pool
-// "Add model" buttons join an existing pool, so scope to the page head.
-const addModelButton = (page: Page) =>
-  page.locator('.page-head').getByRole('button', {
-    name: 'Add model',
-    exact: true,
-  });
+const pageHead = (page: Page) => page.locator('.page-head');
+const dialogOf = (page: Page) => page.getByRole('dialog');
 
-test('Deployments entry opens model setup without an infrastructure choice', async ({
+// The deployments page head now offers two page-level actions that replace
+// the old single "Add model": "New pool" (PoolWizard) and "New deployment"
+// (model -> existing pool). There is no inline pool creation in the model wizard.
+test('Page head offers New pool and New deployment; New deployment opens the setup wizard', async ({
   page,
 }) => {
   await page.goto('/#/deployments');
-  await addModelButton(page).click();
   await expect(
-    page.getByRole('button', { name: 'Single model', exact: true }),
+    pageHead(page).getByRole('button', { name: 'New pool', exact: true }),
+  ).toBeVisible();
+  await expect(
+    pageHead(page).getByRole('button', { name: 'New deployment', exact: true }),
+  ).toBeVisible();
+  await expect(
+    pageHead(page).getByRole('button', { name: 'Add model', exact: true }),
   ).toHaveCount(0);
-  const dialog = page.getByRole('dialog');
-  await expect(dialog.getByText('Set up model', { exact: true })).toBeVisible();
+
+  await pageHead(page)
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
+  const dialog = dialogOf(page);
+  await expect(dialog).toBeVisible();
+  // The wizard title is "New deployment"; the old "Set up model" heading is gone.
+  await expect(
+    dialog.getByText('New deployment', { exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByText('Set up model', { exact: true })).toHaveCount(
+    0,
+  );
+  // Three steps, unchanged labels.
   const steps = dialog.locator('.steps li');
   await expect(steps).toHaveCount(3);
   await expect(steps.nth(0)).toContainText('Choose model');
   await expect(steps.nth(1)).toContainText('Review setup');
   await expect(steps.nth(2)).toContainText('Make available');
+  // Step 0 shows a Model select; the engine is inherited from the pool, so
+  // there is no Engine select in the model wizard.
   await expect(dialog.getByLabel('Model', { exact: true })).toBeVisible();
+  await expect(dialog.getByLabel('Engine', { exact: true })).toHaveCount(0);
 });
 
-test('New pool and join options are offered from the setup wizard', async ({
+test('New pool opens a pool wizard that lists the pool-ready engine', async ({
   page,
 }) => {
   await page.goto('/#/deployments');
-  await addModelButton(page).click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Model', { exact: true }).selectOption('model');
-  await dialog.getByLabel('Engine', { exact: true }).selectOption('engine');
-  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(dialog.getByLabel('Name', { exact: true })).toBeVisible();
+  await pageHead(page)
+    .getByRole('button', { name: 'New pool', exact: true })
+    .click();
+  const dialog = dialogOf(page);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('New pool', { exact: true })).toBeVisible();
+  // With the fixture runtime advertising models-preset, the engine dropdown
+  // is populated instead of "No pool-ready engines". Selecting the offered
+  // engine both verifies it is present and exercises the dropdown.
+  await expect(dialog.getByLabel('Shared installed engine')).toBeVisible();
+  await expect(dialog.getByText('No pool-ready engines')).toHaveCount(0);
   await dialog
-    .getByLabel('Placement', { exact: true })
-    .selectOption({ label: 'New pool…' });
-  await expect(dialog.getByLabel('Pool name', { exact: true })).toBeVisible();
+    .getByLabel('Shared installed engine')
+    .selectOption({ label: 'Example engine' });
   await expect(
-    dialog.getByLabel('Serving port', { exact: true }),
+    dialog.getByRole('button', { name: 'Create pool', exact: true }),
   ).toBeVisible();
 });
 
-test('default setup saves automatic assignment and waits for the model load job', async ({
+test('The model wizard joins an existing pool instead of creating one inline', async ({
+  page,
+}) => {
+  await page.goto('/#/deployments');
+  await pageHead(page)
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
+  const dialog = dialogOf(page);
+  await expect(dialog).toBeVisible();
+  // Step 0 (Choose model) is pre-filled; advance to Review setup.
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(dialog.getByLabel('Name', { exact: true })).toBeVisible();
+  await expect(dialog.getByLabel('Pool', { exact: true })).toBeVisible();
+  // No inline pool fields: the old "Pool name" / "Serving port" fields are
+  // gone; the wizard joins an existing pool instead.
+  await expect(dialog.getByLabel('Pool name', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel('Serving port', { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(dialog.getByText('New pool…', { exact: true })).toHaveCount(0);
+  // Selecting the existing pool verifies it is offered (selectOption throws
+  // if the option is absent) and advances the flow.
+  await dialog
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Example pool' });
+  await dialog.getByLabel('Name', { exact: true }).fill('Joining Member');
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(
+    dialog.getByRole('button', {
+      name: 'Make available and load',
+      exact: true,
+    }),
+  ).toBeVisible();
+});
+
+test('default setup saves a joined member, inherits pool policy, and waits for the load job', async ({
   page,
   fixture,
 }) => {
   await page.goto('/#/deployments');
-  await addModelButton(page).click();
-  const dialog = page.getByRole('dialog');
-  // Step 0 (Choose model) is pre-filled; advance to Review setup.
+  await pageHead(page)
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
+  const dialog = dialogOf(page);
+  // Step 0 -> Review setup (model is pre-filled).
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-  // Step 1 (Review setup): name + new-pool name/port before the wizard lets on.
   await dialog.getByLabel('Name', { exact: true }).fill('Writing Assistant');
   await dialog
-    .getByLabel('Placement', { exact: true })
-    .selectOption({ label: 'New pool…' });
-  await dialog.getByLabel('Pool name', { exact: true }).fill('Writing pool');
-  await dialog.getByLabel('Serving port', { exact: true }).fill('8126');
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Example pool' });
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   // Step 2 (Make available): save + launch review + load.
   await dialog
@@ -86,14 +142,25 @@ test('default setup saves automatic assignment and waits for the model load job'
       exact: true,
     }),
   ).toHaveCount(0);
-  const saved = fixture.writes.find(
-    (write) => write.path === '/api/model-setups',
-  )?.body;
+  const saved = fixture.writes.find((write) => {
+    return write.path.startsWith('/api/model-setups');
+  })?.body;
   expect(saved).toMatchObject({
-    runtime_assignment: 'automatic',
-    allow_eviction: true,
-    idle_timeout: 300,
+    pool_id: 'pool',
+    runtime_id: 'engine',
+    gpu: 0,
+    port: null,
+    name: 'Writing Assistant',
+    artifact_id: 'model',
     identifier_mode: 'generated',
+    runtime_assignment: 'automatic',
+    // Policy inherited from the joined "Example pool".
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    allow_eviction: false,
+    queue_timeout: 300,
+    enabled: true,
   });
   fixture.registry.jobs = fixture.registry.jobs.map((job) =>
     job.name === 'Load model' ? { ...job, state: 'SUCCEEDED' } : job,
@@ -114,7 +181,9 @@ test('empty-library acquisition detour retains setup intent', async ({
 }) => {
   fixture.registry.models = [];
   await page.goto('/#/deployments');
-  await addModelButton(page).click();
+  await pageHead(page)
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
   await expect(
     page.getByRole('heading', { name: 'Add your first model' }),
   ).toBeVisible();
