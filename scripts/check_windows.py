@@ -218,14 +218,18 @@ def check(installer, worker, baseline=None):
                     "trust": True,
                 },
             )
-            profile = request(
-                "/api/profiles",
+            # Models live in a runtime pool: the pool owns the runtime
+            # installation, device and serving port; the member targets it.
+            pool = request(
+                "/api/deployment-sets",
                 {
-                    "name": "Synthetic fixture",
-                    "artifact_id": artifact["id"],
+                    "name": "Synthetic fixture pool",
+                    "engine_pool": True,
                     "runtime_id": runtime["id"],
-                    "config": {"gpu-layers": 0},
-                    "raw_args": ["--spawn-child"],
+                    "port": free_port(),
+                    "residency": "on-demand",
+                    "enabled": True,
+                    "member_ids": [],
                 },
             )
             deployment = request(
@@ -233,9 +237,11 @@ def check(installer, worker, baseline=None):
                 {
                     "name": "Synthetic fixture",
                     "alias": "fixture",
-                    "profile_id": profile["id"],
-                    "port": free_port(),
-                    "residency": "on-demand",
+                    "artifact_id": artifact["id"],
+                    "runtime_id": runtime["id"],
+                    "config": {"gpu-layers": 0},
+                    "raw_args": ["--spawn-child"],
+                    "pool_id": pool["id"],
                 },
             )
             ident = deployment["id"]
