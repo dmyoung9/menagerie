@@ -673,9 +673,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 removed = set()
                 if drafts is not None:
                     if data["member_ids"]:
-                        raise ValueError(
-                            "Provide model configurations, not member IDs"
-                        )
+                        raise ValueError("Provide model configurations, not member IDs")
                     previous = (
                         store.get("deployment_set", data["id"], c)
                         if data.get("id")

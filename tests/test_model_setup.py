@@ -239,9 +239,7 @@ async def test_members_join_a_pool_only_when_explicitly_targeted(setup):
     # No targeting: rejected outright, nothing is created.
     pools_before = {s["id"] for s in store.list("deployment_set")}
     members_before = {d["name"] for d in store.list("deployment")}
-    response = await client.post(
-        "/api/model-setups", json=draft("Standalone", port())
-    )
+    response = await client.post("/api/model-setups", json=draft("Standalone", port()))
     assert response.status_code == 409
     assert "pool" in response.text
     assert {s["id"] for s in store.list("deployment_set")} == pools_before
