@@ -3,8 +3,8 @@
 ## Pools
 
 Every model is a member of a serving pool; there are no standalone deployments. The
-Deployment page lists pools as per-pool sections with their member models, and a model
-is always created into a pool.
+Deployments page lists pools as per-pool cards with their member models, and a model is
+always created into a pool.
 
 A pool delegates model routing and residency to one installed, compatible runtime and
 owns the settings shared by all its members: runtime, device visibility, serving port,
@@ -14,8 +14,8 @@ configuration, capabilities and variant catalog, raw arguments, process log, and
 history.
 
 A runtime pool is on-demand: starting it starts a router, not every model. Each member
-loads when requested. The router listens on the pool's single shared private port; members
-do not have their own listeners. Stopping stops the whole pool.
+loads when requested. The router listens on the pool's single shared private port;
+members do not have their own listeners. Stopping stops the whole pool.
 
 Eviction consent enables pool-local LRU limits and supported device-memory margin
 unloading. Without consent, those automatic eviction limits are disabled. Idle sleep
@@ -26,27 +26,35 @@ native llama.cpp-compatible builds, not containers or other runtime protocols. S
 
 ## Creation and management
 
-- **New pool** (deployments page) opens the pool editor to create a pool and, if desired,
-  its members. Name the pool, pick a runtime and device visibility, add installed models,
-  and configure each member's engine and inference settings. No prior pool or standalone
-  deployment is needed; it works even when there are no existing deployments.
-- **Add model** (a pool's Actions menu, or the deployments page head) runs the setup
-  wizard: choose a model and engine, pick the runtime, then choose to **join** an
-  existing runtime pool (including its runtime, port, and policy) or create a **new
-  pool** (which shares one engine, device, and port). Review the member's settings and
-  make it available. A model is always created into a pool; no placement leaves it
-  standalone.
-- The **Configuration** tab of a pool shows the member composer (pick an installed model
-  and append it with common defaults) and, for the selected member, its Model & runtime
-  and Variants settings. Appending a member updates the local draft only; nothing is
-  written until the pool is saved.
-- **Edit pool** (a pool's Actions menu, or its Configuration tab) reopens the pool editor
-  for its members and shared policy. **Edit model** on a member exposes its engine and
-  inference settings directly. Unload the pool before editing members or shared policy.
-- **Delete pool** removes the pool and its members' deployment records.
+The Deployments page head offers two page-level actions. There is no **Add model**
+button and no inline pool creation in the model wizard.
+
+- **New pool** (Deployments page head, or **Create a pool** in the zero-pool empty
+  state) opens the pool wizard to create an *empty* pool: name it, pick a shared
+  installed engine, a shared device, and a serving port. **Create pool** saves it. No
+  members are created; they are added separately through **New deployment**. It works
+  even when there are no existing deployments.
+- **New deployment** (Deployments page head) opens the setup wizard that *joins an
+  existing pool*. Choose a model, review the member's settings (inheriting the pool's
+  runtime, device, and policy), pick the pool from the **Pool** selector, then make it
+  available with **Make available and load**, **Make available without loading**, or
+  **Save disabled**. The wizard offers no **Pool name** or **Serving port** fields and
+  cannot create a pool inline; a pool must exist first.
+- A pool's card shows the pool's status, shared metadata, and a member table. The
+  pool's **Actions** menu offers **Edit pool** (reopens the pool editor for its shared
+  settings) and **Delete pool** (removes the pool and its members' deployment records).
+  **Edit model** on a member exposes its engine and inference settings directly.
+  Unload the pool before editing shared policy.
 - **Remove model** on a member takes it out of the pool; the member's deployment record
   is deleted after the pool save. Model files and installed weights stay on disk. A
   member is never orphaned into a standalone configuration.
+- Each member row in the pool's card table has an **Enable** / **Disable** button that
+  toggles that member's client availability without changing the pool's shared policy.
+  Disabling keeps the member's configuration and does not unload the pool.
+
+The pool editor is **pool settings only**: it edits the shared settings (name, engine,
+device, port, loading/availability policy) but not member settings. Members are
+configured through their own editor, which has no pool-level **Availability** section.
 
 The same installed weights can be used in any number of pools, with different context
 sizes, engines, capabilities, names, and policies. Each occurrence gets its own serving
@@ -56,8 +64,9 @@ normal admission checks; they do not implicitly share a process or KV cache. Sug
 aliases include the pool name but remain explicit and stable when the display name is
 later changed.
 
-Creating a pool and its members saves them atomically without loading. A failed or stale
-save rolls back all member changes.
+Creating a member saves it without loading; it joins the chosen pool and inherits that
+pool's shared policy. Saving a pool's shared policy preserves its existing members —
+member changes are not lost or cleared by a pool save.
 
 ## Coordinated-process operation
 

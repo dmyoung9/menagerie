@@ -1,10 +1,14 @@
 # Model-first UI: design and implementation plan
 
-Status: Stages 1–5 implemented and Stage 6 consolidated on `feat/model-first-ui`;
-verification is the fixture-based repository check contract. No live inference,
-downloads, or hardware acceptance was performed, so no model-fit, quantization,
-image-compatibility, or hardware claims are made in this document or the guides.
-The copy contract below is the shipped UI copy, not a proposal.
+Status: Stages 1–6 implemented on `feat/model-first-ui`; Stage 6 consolidated the
+pool-first entry model (**New pool** / **New deployment** on the Deployments page,
+pool-settings-only pool editor, per-member enable/disable, member editors without a
+pool-level Availability section, "Add model" retired) and updated the user guides to
+shipped behavior. Verification is the fixture-based repository check contract. No live
+inference, downloads, or hardware acceptance was performed, so no model-fit,
+quantization, image-compatibility, or hardware claims are made in this document or the
+guides. The copy contract below and the user guides (`forms.md`,
+`multi-model-deployments.md`) are the shipped UI copy, not a proposal.
 
 Date: 2026-11-11. Baseline: Menagerie 3.0.0, commit `6182e7e45`.
 Working branch: `feat/model-first-ui`.
@@ -13,12 +17,16 @@ This is the contributor design and acceptance reference. User-facing supported
 workflows and recovery are documented in `docs/forms.md`; conditional design copy
 must only be used where its underlying behavior exists.
 
-Implementation follow-through adds automatic compatible pool assignment, separate
+Implementation follow-through adds the pool-first entry model (a **New pool**
+wizard that creates an empty pool and a **New deployment** wizard that joins an
+existing pool; no inline pool creation, no **Add model** action, zero-pool empty
+state offering **Create a pool**), automatic compatible pool assignment, separate
 desired snapshots, reviewed bounded application and recovery, selected-model load
-completion, model-level availability, retained setup detours, companion inventory
-selection, and Stepperize transitions. Behavioral evidence includes isolated API
-tests, a synthetic runtime process flow, and fixture-based desktop/mobile browser
-checks. This does not establish acceptance against real runtime builds or hardware.
+completion, model-level availability (per-member enable/disable), retained setup
+detours, companion inventory selection, and Stepperize transitions. Behavioral
+evidence includes isolated API tests, a synthetic runtime process flow, a fixture-based
+multi-deployment smoke, and fixture-based desktop/mobile browser checks. This does
+not establish acceptance against real runtime builds or hardware.
 
 ## 1. Motivation and outcome
 
@@ -233,18 +241,22 @@ independent loading/routing and pool-local eviction, not the first form of switc
   produces another model entry without copying files.
 - Keep availability separate from residency: available on demand, disabled, loading,
   loaded, unloaded, and failed are not interchangeable states.
-- Assign new compatible configurations to an eligible default pool deterministically.
-  Compatibility includes runtime installation/build, device visibility/environment,
-  supported protocol, policy, and configuration constraints. Never silently change a
-  user's requested engine or settings to fit a pool.
+- Every model joins an existing pool; there are no standalone deployments. The pool
+  is the deployment unit, and members are always created through **New deployment**
+  joining a pool. Assign compatible configurations to an eligible existing pool
+  deterministically. Compatibility includes runtime installation/build, device
+  visibility/environment, supported protocol, policy, and configuration constraints.
+  Never silently change a user's requested engine or settings to fit a pool.
 - Multiple compatible/incompatible pools are infrastructure; expose details and explicit
   assignment under Advanced. Existing supervised groups keep their atomic semantics.
 - New default setups permit unloading eligible idle models to make room and use a
   five-minute idle timeout where supported. Display this policy in the final review;
   submitting the reviewed setup accepts it. Retain explicit choices, existing policies,
   and separate launch-review consent for proposed unloads.
-- Disabling one model should remove that model's client availability without disabling
-  neighbors. Current whole-unit behavior needs backend work before this action is shown.
+- Disabling one model removes that model's client availability without disabling or
+  unloading neighbors. This per-member enable/disable is implemented via the pool's
+  member enable endpoint; the member's configuration and the pool's shared policy are
+  preserved.
 - Model unload, pool stop, and client disable are separate actions. If the runtime cannot
   perform a requested member action independently, explain its actual scope; do not label
   a whole-pool stop as a per-model unload.
@@ -284,15 +296,22 @@ independent loading/routing and pool-local eviction, not the first form of switc
 
 ### Creation and editing
 
-- Three numbered decision steps: **Choose model**, **Review setup**, **Make available**.
-  A completion screen is an outcome, not another configuration step.
+- The Deployments page head offers two page-level actions that replace the old single
+  "Add model": **New pool** (PoolWizard, creates an empty pool) and **New deployment**
+  (the model wizard that joins an existing pool). The model wizard does not create
+  pools inline; a pool must already exist, and it offers a **Pool** selector to join.
+  The zero-pool empty state offers **Create a pool**. **Add model** is retired.
+- The **New deployment** wizard runs three numbered decision steps: **Choose model**,
+  **Review setup**, **Make available**. A completion screen is an outcome, not another
+  configuration step.
 - Entering from installed weights preselects the artifact. An empty library shows
   discovery/import actions and preserves return intent. Engine installation, if required,
   is another explicit detour with the draft retained.
-- Review setup defaults to inherited engine behavior. Show relevant companions and
-  context capacity directly, with Engine default selected and an optional Custom choice.
-  Keep the short memory tradeoff visible. Sampling, variants, raw arguments, placement,
-  pool assignment, priority, and pinning are advanced, not required milestones.
+- The model wizard has no engine select: the selected pool's runtime, device, and
+  policy are inherited. **Review setup** shows the name, API model, and the **Pool**
+  selector (options "Join pool: {pool name}"); joining inherits residency, priority,
+  idle timeout, eviction consent, and queue timeout. There is no **Pool name** or
+  **Serving port** field and no inline pool creation.
 - Use one shared draft/schema with the editor. Back/Next preserve values, text buffers,
   validation, and explicit/omitted distinctions. Step transitions focus the new heading;
   errors focus the first invalid control, not a label.
@@ -308,6 +327,12 @@ independent loading/routing and pool-local eviction, not the first form of switc
   on smaller screens place impact below the form. Only the current section header should
   occupy the sticky header position. Account for app chrome, focused controls, anchors,
   and validation messages so sticky elements do not obscure them.
+- The pool editor (**Edit pool**, or the pool's **Configuration** tab) is pool-settings-
+  only: name, shared engine, shared device, serving port, and the shared Availability
+  (mode, priority, idle timeout, eviction consent, client exposure, queue timeout).
+  It edits shared settings and preserves the pool's existing members on save. Member
+  settings are edited in the member's own editor, which has no pool-level
+  Availability section.
 
 ## 5. Guidance and impact design
 
@@ -340,6 +365,10 @@ specifically reviewed. New/changed flow copy is defined here.
 | Surface | Label or exact text | Display condition |
 | --- | --- | --- |
 | Primary navigation | Models; Deployments | Retain familiar destinations |
+| Deployments page head | New pool; New deployment | Page-level creation actions; no **Add model** |
+| New pool action | New pool | PoolWizard: Name, Shared installed engine, Shared device, Serving port |
+| New pool submit | Create pool | Save empty pool (no members) |
+| Zero-pool empty state | Create a pool | No pools yet; opens pool wizard |
 | Discovery action | Explore model | Opens repository page |
 | Model-card trigger | Model card | Opens side Drawer on desktop, bottom Drawer on mobile |
 | Drawer title/action | Model card; Close model card | Restore focus to trigger on close; preserve reading position |
@@ -382,7 +411,7 @@ specifically reviewed. New/changed flow copy is defined here.
 | Partial failure | {completed} files downloaded; {failed} failed. | Preserve successful files |
 | Download failure action | Retry failed files | Only failed/missing files |
 | Operation link | View downloads | Available throughout job lifecycle |
-| Setup continuation | Set up model | Only for deployable installed artifacts |
+| Setup continuation | Create deployment | Only for a single deployable installed artifact; opens the New deployment wizard |
 | Companion continuation | Return to setup | Return intent exists |
 | Installed source action | Browse repository files | Opens same repo/revision inventory |
 | Deployment source link | View model | Selects exact installed weights |
@@ -391,12 +420,17 @@ specifically reviewed. New/changed flow copy is defined here.
 
 | Surface | Label or exact text | Display condition |
 | --- | --- | --- |
-| Create action/title | Set up model | Entry from Deployments or installed model |
+| Create action/title | New deployment | Entry from Deployments page head or installed model card; joins an existing pool |
 | Steps | 1. Choose model; 2. Review setup; 3. Make available | Stepper labels |
 | Empty title | Add your first model | No installed deployable weights |
 | Empty description | Download a model or add files you already have, then continue setup. | Preserve setup intent |
 | Empty actions | Discover models; Add from file | Explicit detours |
 | Model field | Model | Installed artifact picker |
+| Inherited note | The selected pool's runtime, device and policy are inherited. | Choose model, after a model is chosen |
+| Pool field | Pool | Joins an existing pool; no inline pool creation |
+| Pool option | Join pool: {pool name} | One option per existing pool |
+| Pool hint | Joins the selected pool, including its runtime, device and policy. | When pools exist |
+| Placement (editing) | Member of {pool name} | Editing an existing member; fixed once created |
 | Missing engine title | An engine is needed for this model | No compatible installation |
 | Missing engine description | Choose a compatible engine to continue. Your setup will be kept. | Do not imply automatic install |
 | Engine action | Choose engine | Explicit install/select flow |
@@ -497,7 +531,7 @@ them in the final review. Do not expose temperature/top-p/batching as mandatory 
 | Review invalidated | The affected configuration changed. Review the update again before applying it. | Saved consent no longer matches current scope |
 | Availability states | Available; Disabled | Separate column/label from residency |
 | Residency states | Not loaded; Loading; Loaded; Unloading; Failed | Pool router readiness is not per-model loaded state |
-| Model availability actions | Disable; Make available | Per-model scope only when backend supports it |
+| Model availability actions | Disable; Enable | Per-member enable/disable on each member row; preserves config and pool policy |
 | Residency actions | Review and load; Unload model | Do not disguise a pool-wide stop |
 | Explicit pool action | Stop pool | Advanced shared-infrastructure action |
 | Editor status | Unsaved changes; Saving…; Saved | One inline status area |
@@ -515,12 +549,14 @@ them in the final review. Do not expose temperature/top-p/batching as mandatory 
 
 ### A. First installation, no models
 
-1. Deployments → Set up model → Add your first model.
-2. Discover models → Explore model → open the Model card Drawer beside the file table
-   on desktop, or as a bottom panel on mobile.
+1. Deployments → **Create a pool** (zero-pool empty state) or **New pool**; pick a
+   compatible native engine, device, and serving port → **Create pool**.
+2. **New deployment** → Choose model → **Discover models** → Explore model → open the
+   Model card Drawer beside the file table on desktop, or as a bottom panel on mobile.
 3. Compare quantizations by actual rows, select a model bundle and optional projector.
 4. Download selected; one notification tracks progress. Navigate elsewhere safely.
-5. Completion → Set up model; choose/install engine explicitly if necessary, then return.
+5. Return to the wizard; choose/install engine explicitly if necessary, then pick the
+   pool to join.
 6. Review the directly visible context control, accept engine defaults and suggested
    name → Make available and load → complete required launch review.
 7. Wait for the selected model to load, then Copy API model ID / Connect a client.
@@ -552,9 +588,11 @@ them in the final review. Do not expose temperature/top-p/batching as mandatory 
 
 ### E. Add a model to a busy installation
 
-1. Set up another installed model with default assignment.
-2. Backend selects a compatible pool, or a suitable separate runtime without discarding
-   requested settings. It does not move existing models or stop serving neighbors.
+1. **New deployment** → choose an installed model and join the compatible pool (or
+   create a pool first if none fits).
+2. The chosen pool's runtime, device, and policy are inherited. The backend does not
+   move existing models or stop serving neighbors; if a compatible pool is absent it
+   does not discard requested settings.
 3. If joining requires a restart, save desired changes as pending and present affected
    models for explicit review. Apply when idle queues the reviewed transition. Cancelling
    before application starts leaves pending changes saved and existing serving state intact.
@@ -709,8 +747,9 @@ state is needed for ordinary verification. No tests are required merely to add t
 
 ### Definition of done
 
-1. A first-time user completes the ordinary setup without choosing a pool, inventing an
-   API identifier, or tuning generation flags.
+1. A first-time user completes the ordinary setup without learning pool architecture or
+   inventing an API identifier, tuning generation flags, or creating pools by hand —
+   just creating a pool (or picking an existing one) and joining it.
 2. Any listed upstream file remains accessible regardless of classification.
 3. Downloading a companion later neither requires selecting weights nor transfers valid
    installed weights again.
