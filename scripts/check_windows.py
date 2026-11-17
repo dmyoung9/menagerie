@@ -240,7 +240,6 @@ def check(installer, worker, baseline=None):
                     "artifact_id": artifact["id"],
                     "runtime_id": runtime["id"],
                     "config": {"gpu-layers": 0},
-                    "raw_args": ["--spawn-child"],
                     "pool_id": pool["id"],
                 },
             )
@@ -273,7 +272,6 @@ def check(installer, worker, baseline=None):
             else:
                 raise AssertionError("Fake runtime readiness timed out")
             parent = row["pid"]
-            child = int(model.with_suffix(".child.pid").read_text())
             reply = request(
                 "/v1/chat/completions",
                 {
@@ -316,10 +314,10 @@ def check(installer, worker, baseline=None):
                 raise AssertionError(
                     "Disconnected fake stream retained an in-flight request"
                 )
-            # Authenticated, loopback shutdown runs Manager.close and kills descendants.
+            # Authenticated, loopback shutdown runs Manager.close; an engine
+            # pool is a single router process with no spawned children.
             execute(launch("stop"))
             wait_dead(parent)
-            wait_dead(child)
             assert model.exists()
             before = hashlib.sha256(model.read_bytes()).hexdigest()
             execute(launch())
@@ -359,7 +357,7 @@ def check(installer, worker, baseline=None):
                 app, state, root, env, lambda: install(installer), execute
             )
             print(
-                "PASS: native installer, isolated launch/duplicate/conflict, bundled dashboard, fake inference/streaming, process tree shutdown, restart/upgrade/uninstall/reinstall preservation"
+                "PASS: native installer, isolated launch/duplicate/conflict, bundled dashboard, fake inference/streaming, single-process shutdown, restart/upgrade/uninstall/reinstall preservation"
             )
         finally:
             if installed and (app / "Menagerie.exe").exists():
