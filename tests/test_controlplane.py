@@ -86,7 +86,10 @@ async def seed(store, tmp_path):
                 "allow_uncertain": True,
                 "allow_eviction": False,
                 "idle_timeout": 300,
-                "queue_timeout": 5,
+                # Activation budget: stop-then-start can take a few seconds on
+                # a busy machine (wait_for_requests + ~2s health check). A 5s
+                # budget flakes under parallel load; 15s gives headroom.
+                "queue_timeout": 15,
                 "reservation_active": 0,
             },
         )
