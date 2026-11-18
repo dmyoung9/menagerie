@@ -1,6 +1,13 @@
 # Model-first UI: design and implementation plan
 
-Status: Stages 1–6 implemented on `feat/model-first-ui`; Stage 6 consolidated the
+Status: **Under repair; not accepted for release.** The
+[repair contract](model-first-ui-repair.md) supersedes this plan wherever they
+conflict. In particular, automatic assignment, standalone/supervised creation,
+staged membership additions, and migration of old registries are no longer
+requirements. The sections below retain the original implementation history;
+their descriptions of shipped behavior are not current acceptance claims.
+
+Historical implementation summary: Stages 1–6 implemented on `feat/model-first-ui`; Stage 6 consolidated the
 pool-first entry model (**New pool** / **New deployment** on the Deployments page,
 pool-settings-only pool editor, per-member enable/disable, member editors without a
 pool-level Availability section, "Add model" retired) and updated the user guides to
