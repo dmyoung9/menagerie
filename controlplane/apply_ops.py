@@ -121,7 +121,6 @@ _VOLATILE = (
     "session_id",
     "log_path",
     "pid_started",
-    "pending_unit",
 )
 
 

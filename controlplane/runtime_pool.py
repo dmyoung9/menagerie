@@ -29,9 +29,7 @@ def validate(unit, store):
                 "Runtime pool requires a native installation advertising model routing"
             )
     if unit["residency"] != "on-demand":
-        errors.append(
-            "Runtime pools require on-demand policy; use supervised deployments for pinned or atomic residency"
-        )
+        errors.append("Native router pools require on-demand policy")
     for member in unit.get("members") or []:
         profile = member["profile_snapshot"]
         if profile.get("runtime_id") != unit.get("runtime_id") or member.get(

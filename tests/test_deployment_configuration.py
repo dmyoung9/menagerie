@@ -158,7 +158,9 @@ async def test_inline_configuration_identity_isolation_and_atomicity(tmp_path):
             assert restored.status_code == 200, restored.text
             recovery = restored.json()
             assert recovery["enabled"] is False and recovery["state"] == "STOPPED"
-            assert recovery["port"] not in {first["port"], second["port"]}
+            assert recovery["port"] is None
+            restored_pool = app.state.manager.unit(recovery["id"])
+            assert restored_pool["engine_pool"] and restored_pool["port"] != 8130
             assert recovery["alias"] != first["alias"]
             assert (
                 recovery["profile_snapshot"]["config"]

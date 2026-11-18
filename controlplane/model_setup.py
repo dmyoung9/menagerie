@@ -45,12 +45,6 @@ class PreviewStore:
 
 
 def unit_id(store, ident):
-    try:
-        row = store.get("deployment", ident)
-        if row.get("pending_unit"):
-            return row["pending_unit"]
-    except KeyError:
-        pass
     unit = deployment_sets.unit_for(store, ident)
     if unit is None:
         raise KeyError(ident)
@@ -102,9 +96,15 @@ def plan(manager, ident):
     preview = copy.copy(manager)
     preview.store = PreviewStore(manager.store, snap)
     affected = preview.unit(key)
+    live_unit = manager.unit(key)
+    from .manager import ACTIVE
+
+    loaded = any(m["state"] in ACTIVE for m in live_unit["members"])
     result = (
         preview.plan([key])
-        if affected["enabled"] and any(m["enabled"] for m in affected["members"])
+        if loaded
+        and affected["enabled"]
+        and any(m["enabled"] for m in affected["members"])
         else {"errors": [], "warnings": [], "stops": []}
     )
     # Bind consent to exact desired configuration and unload consequences.
@@ -139,6 +139,10 @@ def plan(manager, ident):
         manager.store.get("deployment", i)["name"] for i in result.get("stops", [])
     ]
     result["scope_fingerprint"] = apply_ops.scope_fingerprint(affected)
+    result["loaded"] = loaded
+    result["inflight"] = sum(
+        manager.inflight.get(i, 0) for i in live_unit["member_ids"]
+    )
     return result
 
 
@@ -158,8 +162,4 @@ def install(store, snap, c):
         row = apply_ops._strip(data) | {
             k: v for k, v in current.items() if k in apply_ops._VOLATILE
         }
-        if data.get("pending_unit"):
-            row["pending_unit"] = data["pending_unit"]
-        else:
-            row.pop("pending_unit", None)
         store.put(kind, row, c=c)

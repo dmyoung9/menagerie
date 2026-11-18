@@ -234,7 +234,7 @@ async def test_plan_expands_full_unit_and_pinned_units_are_not_automatic_victims
         await m.close()
 
 
-async def test_new_deployment_owns_shared_policy_and_ignores_unused_group_records(
+async def test_retired_supervised_group_endpoints_do_not_modify_records(
     tmp_path,
 ):
     app, store, m = await setup(tmp_path)
@@ -264,29 +264,9 @@ async def test_new_deployment_owns_shared_policy_and_ignores_unused_group_record
             response = await client.post(
                 "/api/deployment-sets", json=body, headers=headers
             )
-            assert response.status_code == 200, response.text
-            created = response.json()
-            units = (await client.get("/api/serving-deployments")).json()
-            assert len(units) == 1 and len(units[0]["members"]) == 2
-            for d in store.list("deployment"):
-                assert d["alias"] == original[d["id"]]["alias"]
-                assert d["profile_snapshot"] == original[d["id"]]["profile_snapshot"]
-                assert d["residency"] == "on-demand"
-            overlap = await client.post(
-                "/api/deployment-sets", json=body, headers=headers
-            )
-            assert overlap.status_code == 409
-            split_enable = await client.post(
-                "/api/deployments/a/enabled", json={"enabled": False}, headers=headers
-            )
-            assert split_enable.status_code == 409
-            enable = await client.post(
-                f"/api/serving-deployments/{created['id']}/enabled",
-                json={"enabled": False},
-                headers=headers,
-            )
-            assert enable.status_code == 200
-            assert not any(d["enabled"] for d in store.list("deployment"))
+            assert response.status_code == 400, response.text
+            assert {d["id"]: d for d in store.list("deployment")} == original
+            assert store.list("deployment_set") == []
             for path in (
                 "/api/groups",
                 "/api/groups/old-group/validate",
@@ -428,7 +408,15 @@ async def test_live_membership_changes_are_rejected_and_members_can_be_separated
                     "csrf_token"
                 ]
             }
-            body = {"name": "Pair", "member_ids": ["a", "b"], "residency": "on-demand"}
+            body = {
+                "name": "Pair",
+                "member_ids": ["a", "b"],
+                "residency": "on-demand",
+                "engine_pool": True,
+                "runtime_id": "runtime",
+                "port": port(),
+                "gpu": 0,
+            }
             response = await client.post(
                 "/api/deployment-sets", json=body, headers=headers
             )
@@ -551,6 +539,9 @@ async def test_public_api_launch_and_member_stop_control_the_complete_deployment
             assert restored.status_code == 200, restored.text
             assert len(restored.json()["member_ids"]) == 2
             restored_unit = m.unit(restored.json()["id"])
+            assert restored_unit["engine_pool"]
+            assert restored_unit["runtime_id"] == "runtime"
+            assert all(d["port"] is None for d in restored_unit["members"])
             assert not restored_unit["enabled"]
             assert all(d["state"] == "STOPPED" for d in restored_unit["members"])
     finally:

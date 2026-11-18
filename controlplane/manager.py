@@ -158,7 +158,7 @@ class Manager:
     def plan(self, ids):
         return self.validate(ids, self.automatic_stops(ids))
 
-    async def apply_desired(self, ident, progress):
+    async def apply_desired(self, ident, progress, mode="idle"):
         from . import apply_ops, model_setup
         from . import queued_apply as qa
 
@@ -189,7 +189,16 @@ class Manager:
                     self.apply_holds.add(ident)
                     held = True
                     unit = self.unit(ident)
-                    if not self.unit_busy(unit) and not any(
+                    if mode == "reload" and self.unit_busy(unit):
+                        raise Conflict(
+                            "Pool started serving requests; choose When Idle or confirm Reload Now"
+                        )
+                    loaded = any(m["state"] in ACTIVE for m in unit["members"])
+                    if mode == "apply" and loaded:
+                        raise Conflict(
+                            "Pool is now loaded; review a reload before applying"
+                        )
+                    if (mode == "now" or not self.unit_busy(unit)) and not any(
                         self.inflight.get(i, 0) for i in plan["stops"]
                     ):
                         apply_ops.save_op(
@@ -198,26 +207,21 @@ class Manager:
                         progress("Applying changes…")
                         snap = model_setup.desired(self.store, ident)
                         original = model_setup.snapshot(self.store, unit)
-                        original["rows"].extend(
-                            {
-                                "kind": "deployment",
-                                "data": self.store.get("deployment", r["data"]["id"]),
-                            }
-                            for r in snap["rows"]
-                            if r["kind"] == "deployment"
-                            and r["data"]["id"] not in unit["member_ids"]
-                        )
                         self.store.put("apply_recovery", original)
                         try:
                             await self._stop_unit_locked(
-                                ident, "Reviewed configuration update"
+                                ident,
+                                "Reviewed configuration update",
+                                force=mode == "now",
                             )
                             with self.store.transaction() as c:
                                 model_setup.install(self.store, snap, c)
                             self.apply_holds.discard(ident)
                             updated = self.unit(ident)
-                            if updated["enabled"] and any(
-                                m["enabled"] for m in updated["members"]
+                            if (
+                                loaded
+                                and updated["enabled"]
+                                and any(m["enabled"] for m in updated["members"])
                             ):
                                 await self._activate_locked(
                                     updated["member_ids"],
@@ -229,7 +233,9 @@ class Manager:
                                 ):
                                     raise Conflict("Runtime did not become ready")
                         except BaseException:
-                            await self._stop_unit_locked(ident, "Failed apply cleanup")
+                            await self._stop_unit_locked(
+                                ident, "Failed apply cleanup", force=mode == "now"
+                            )
                             with self.store.transaction() as c:
                                 model_setup.install(self.store, original, c)
                             self.store.delete("apply_recovery", ident)
@@ -388,6 +394,16 @@ class Manager:
         from .apply_ops import reconcile_all
 
         reconcile_all(self.store)
+        for record in self.store.list("downloaded_file"):
+            if record.get("status") == "downloading":
+                self.store.put(
+                    "downloaded_file",
+                    record
+                    | {
+                        "status": "failed",
+                        "error": "Daemon restarted during download; retry to resume cached bytes",
+                    },
+                )
         from . import model_setup
 
         for recovery in self.store.list("apply_recovery"):
@@ -782,8 +798,6 @@ class Manager:
             for ident in ids
         ):
             raise Conflict("Deployment is unloading; retry after it finishes")
-        if any(self.store.get("deployment", i).get("pending_unit") for i in ids):
-            raise Conflict("Apply the saved pool changes before loading this model")
         check = self.validate(ids, authorized_stops)
         if token and token != check["plan_token"]:
             raise Conflict("Launch plan changed; validate again")
@@ -813,6 +827,10 @@ class Manager:
                 "deployment_id": unit["id"],
                 "deployment_name": unit["name"],
                 "deployment_policy": {k: unit[k] for k in deployment_sets.POLICY_KEYS},
+                "pool_configuration": {
+                    k: unit.get(k)
+                    for k in ("engine_pool", "runtime_id", "gpu", "max_loaded")
+                },
                 "started_at": time.time(),
                 "deployments": [_member(i) for i in ids],
                 "authorized_stops": authorized_stops or [],
@@ -1343,10 +1361,6 @@ class Manager:
                         held = unit["id"] in self.apply_holds
                         if held:
                             self.request_changed.clear()
-                        if d.get("pending_unit"):
-                            raise Conflict(
-                                "Apply the saved pool changes before using this model"
-                            )
                         # An active member may need a sibling to finish its request.
                         # Without causal request identities, blanket group draining
                         # would deadlock that work. Explicit cancellation stops all.

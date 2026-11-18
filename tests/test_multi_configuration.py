@@ -30,7 +30,11 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
             "engine": "llama.cpp",
             "execution_kind": "native",
             "executable": "/unused",
-            "capabilities": {"formats": ["gguf"], "flags": ["ctx-size"]},
+            "capabilities": {
+                "formats": ["gguf"],
+                "flags": ["ctx-size"],
+                "mechanisms": {"router": True},
+            },
         },
     )
 
@@ -50,6 +54,7 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
         return {
             "id": unit["id"],
             "name": unit["name"],
+            "port": unit["port"],
             "members": [
                 member(m["alias"], m["port"]) | {"id": m["id"]} for m in unit["members"]
             ],
@@ -69,7 +74,13 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
                 return await client.post(
                     "/api/deployment-sets"
                     + (f"?expected={expected}" if expected is not None else ""),
-                    json=body,
+                    json={
+                        "engine_pool": True,
+                        "runtime_id": "engine",
+                        "port": port(),
+                        "residency": "on-demand",
+                    }
+                    | body,
                     headers=headers,
                 )
 
@@ -150,7 +161,9 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
                 store.get("deployment", a["member_ids"][0]) | {"state": "READY"},
                 historical=False,
             )
-            assert (await save(changed, a["revision"])).status_code == 409
+            assert (
+                await save(changed | {"members": changed["members"][:1]}, a["revision"])
+            ).status_code == 409
             store.put(
                 "deployment",
                 store.get("deployment", a["member_ids"][0]) | {"state": "STOPPED"},
@@ -200,6 +213,9 @@ async def test_reused_weights_have_independent_serving_lifecycles(tmp_path):
                     "/api/deployment-sets",
                     json={
                         "name": name,
+                        "engine_pool": True,
+                        "runtime_id": "runtime",
+                        "port": port(),
                         "residency": "on-demand",
                         "members": members,
                     },
