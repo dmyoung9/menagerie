@@ -549,6 +549,8 @@ async def test_shared_engine_edit_and_explicit_template_clear(setup):
     )
     assert public_pool["gpu"] == 1
     assert public_pool["proposed_configuration"]["gpu"] is None
+    assert public_pool["changes_pending"]
+    assert all(member["changes_pending"] for member in public_pool["members"])
     store.put("deployment", store.get("deployment", first["id"]) | {"state": "STOPPED"})
     response = await client.post(
         "/api/deployment-sets",

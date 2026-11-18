@@ -175,6 +175,16 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 pool = next(
                     r["data"] for r in proposal["rows"] if r["kind"] == "deployment_set"
                 )
+                proposed_members = {
+                    r["data"]["id"]
+                    for r in proposal["rows"]
+                    if r["kind"] == "deployment"
+                }
+                row["changes_pending"] = True
+                row["members"] = [
+                    m | {"changes_pending": True} if m["id"] in proposed_members else m
+                    for m in row["members"]
+                ]
                 row["proposed_configuration"] = {
                     k: v
                     for k, v in pool.items()
