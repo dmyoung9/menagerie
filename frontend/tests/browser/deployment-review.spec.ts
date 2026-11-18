@@ -338,7 +338,9 @@ for (const width of [1440, 576, 320]) {
       .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
       .analyze();
     expect(axe.violations).toEqual([]);
-    await config.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
+    await config
+      .getByRole('button', { name: /^Apply(?: and Reload)?$/ })
+      .click();
     await expect
       .poll(
         () =>

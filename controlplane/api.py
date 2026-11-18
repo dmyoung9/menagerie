@@ -144,11 +144,33 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
 
     def serving_rows():
         totals = store.request_totals()
-        return [
-            deployment_sets.describe(u, manager.settings(), manager.inflight, totals)
-            | {"draining": bool(manager.draining.get(u["id"]))}
-            for u in deployment_sets.units(store)
-        ]
+        rows = []
+        for unit in deployment_sets.units(store):
+            row = deployment_sets.describe(
+                unit, manager.settings(), manager.inflight, totals
+            ) | {"draining": bool(manager.draining.get(unit["id"]))}
+            proposal = model_setup.desired(store, unit["id"])
+            if proposal:
+                pool = next(
+                    r["data"] for r in proposal["rows"] if r["kind"] == "deployment_set"
+                )
+                row["proposed_configuration"] = {
+                    k: v
+                    for k, v in pool.items()
+                    if k in DeploymentSet.model_fields and k != "member_ids"
+                } | {
+                    "members": [
+                        {
+                            k: v
+                            for k, v in r["data"].items()
+                            if k in Deployment.model_fields
+                        }
+                        for r in proposal["rows"]
+                        if r["kind"] == "deployment"
+                    ]
+                }
+            rows.append(row)
+        return rows
 
     def save_set(data, expected=None, c=None):
         if data.get("id") and model_setup.desired(store, data["id"]):
@@ -678,17 +700,21 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     if data.get("id")
                     else None
                 )
-                if previous_pool and any(
-                    m["state"] in ACTIVE
-                    for m in manager.unit(previous_pool["id"])["members"]
+                if previous_pool and (
+                    model_setup.desired(store, previous_pool["id"])
+                    or any(
+                        m["state"] in ACTIVE
+                        for m in manager.unit(previous_pool["id"])["members"]
+                    )
                 ):
                     if expected != previous_pool["revision"]:
                         raise Conflict(
                             "Revision changed; review changes before applying"
                         )
-                    if model_setup.desired(store, previous_pool["id"]):
+                    operation = aops.find_op(store, previous_pool["id"])
+                    if operation and operation.state in qa.ApplyState.IN_FLIGHT:
                         raise Conflict(
-                            "Apply or discard the proposed configuration before editing pool settings"
+                            "Cancel the scheduled application before editing pool settings"
                         )
                     member_ids = (
                         [m.get("id") for m in drafts]

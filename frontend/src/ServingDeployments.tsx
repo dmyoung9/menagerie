@@ -597,6 +597,7 @@ export function DeploymentSetEditor({
     : 'apply';
   const selectedMode = useRef<ApplyMode | null>(null);
   const [proposed, setProposed] = useState(false);
+  const [applying, setApplying] = useState(false);
   const {
     form,
     value,
@@ -604,7 +605,7 @@ export function DeploymentSetEditor({
     changed: draftChanged,
     reset,
   } = useDraftForm<DeploymentSetDraft>(
-    {
+    initial?.proposed_configuration ?? {
       name: 'New pool',
       engine_pool: true,
       max_loaded: 4,
@@ -644,22 +645,23 @@ export function DeploymentSetEditor({
   // values during a conflict review.
   const mountSetRef = useRef<DeploymentSetDraft | null>(null);
   if (mountSetRef.current === null)
-    mountSetRef.current = deploymentSetToDraft(initial);
+    mountSetRef.current =
+      initial?.proposed_configuration ?? deploymentSetToDraft(initial);
   const changed = draftChanged;
   const set = <K extends keyof DeploymentSetDraft>(
     key: K,
     v: DeploymentSetDraft[K],
   ) => setValue((s) => ({ ...s, [key]: v }));
   const submit = async (value: DeploymentSetDraft) => {
-    if (busy) return;
+    if (busy || applying) return;
     setBusy(true);
     setError('');
     try {
       const path =
         '/api/deployment-sets' +
         (initial ? '?expected=' + (pendingRevision ?? initial.revision) : '');
-      const result = await readApi(path, contracts.identity, value);
-      if (loaded) {
+      const result = await readApi(path, contracts.configurationSave, value);
+      if (loaded || result.changes_pending) {
         setProposed(true);
         const accepted = await applyConfiguration(
           result.id,
@@ -733,7 +735,7 @@ export function DeploymentSetEditor({
             void form.handleSubmit();
           }}
         >
-          <FieldSet disabled={busy || proposed}>
+          <FieldSet disabled={busy || applying}>
             <Field label="Name">
               <Input
                 required
@@ -968,9 +970,11 @@ export function DeploymentSetEditor({
                 deploymentId={initial.id}
                 changed={() => saved(initial.id)}
                 onPendingChange={setProposed}
+                onBusyChange={setApplying}
+                hideApplyActions={changed}
               />
             )}
-            {!proposed && (
+            {(!proposed || changed) && (
               <>
                 {loaded && Boolean(activity?.inflight) && (
                   <Button

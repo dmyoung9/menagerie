@@ -541,6 +541,29 @@ async def test_shared_engine_edit_and_explicit_template_clear(setup):
     assert manager.unit(first["id"])["gpu"] == 1
     proposal = model_setup.desired(store, pool["id"])
     assert all(row["data"]["gpu"] is None for row in proposal["rows"])
+    public_pool = next(
+        row
+        for row in (await client.get("/api/serving-deployments")).json()
+        if row["id"] == pool["id"]
+    )
+    assert public_pool["gpu"] == 1
+    assert public_pool["proposed_configuration"]["gpu"] is None
+    store.put("deployment", store.get("deployment", first["id"]) | {"state": "STOPPED"})
+    response = await client.post(
+        "/api/deployment-sets",
+        params={"expected": pool["revision"]},
+        json=public_pool["proposed_configuration"] | {"member_ids": [], "gpu": 2},
+    )
+    assert response.status_code == 200, response.text
+    assert manager.unit(first["id"])["gpu"] == 1
+    assert (
+        next(
+            row["data"]
+            for row in model_setup.desired(store, pool["id"])["rows"]
+            if row["kind"] == "deployment_set"
+        )["gpu"]
+        == 2
+    )
 
 
 async def test_empty_pool_protects_runtime_dependency(setup):

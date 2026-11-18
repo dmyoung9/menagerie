@@ -1,4 +1,45 @@
 import { test, expect, openCard } from './fixtures';
+import { deploymentSetDraft } from '../../src/contracts';
+import { editable } from '../../src/editor-state';
+
+test('loaded shared settings reopen the retained proposal and remain editable after failure', async ({
+  page,
+  fixture,
+}) => {
+  fixture.sets[0].state = 'READY';
+  fixture.sets[0].proposed_configuration = deploymentSetDraft({
+    ...fixture.sets[0],
+    name: 'Proposed pool',
+    members: fixture.registry.deployments.map((row) =>
+      editable('deployments', row),
+    ),
+  });
+  await page.route('**/api/deployments/pool/pending', (route) =>
+    route.fulfill({
+      json: {
+        pending: true,
+        affected: ['Example pool'],
+        loaded: true,
+        inflight: 0,
+        op: { state: 'failed', error: 'Previous runtime restored' },
+      },
+    }),
+  );
+  await page.goto('/#/deployments/pool/configuration');
+  const name = page.getByLabel('Name', { exact: true });
+  await expect(name).toHaveValue('Proposed pool');
+  await expect(name).toBeEnabled();
+  await expect(page.getByText('Previous runtime restored')).toBeVisible();
+  await name.fill('Corrected pool');
+  await expect(
+    page.getByRole('button', { name: 'Apply and Reload', exact: true }),
+  ).toHaveCount(1);
+  expect(
+    fixture.writes.filter((write) =>
+      write.path.startsWith('/api/deployment-sets'),
+    ),
+  ).toEqual([]);
+});
 
 for (const activity of ['unloaded', 'idle', 'busy'] as const) {
   test(`editor application actions follow the whole pool when ${activity}`, async ({

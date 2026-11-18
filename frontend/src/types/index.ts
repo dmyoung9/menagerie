@@ -301,6 +301,7 @@ export type DeploymentSet = Omit<
   | 'catalog'
 > & {
   multi_model: true;
+  proposed_configuration?: DeploymentSetDraft;
   alias?: never;
   runtime_id?: string | null;
   port?: number | null;

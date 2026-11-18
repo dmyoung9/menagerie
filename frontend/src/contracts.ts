@@ -356,6 +356,7 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
   }
   const common = d.object({
     draining: opt(d.boolean),
+    proposed_configuration: opt(deploymentSetDraft),
     id: d.string,
     name: d.string,
     enabled: d.boolean,
@@ -791,6 +792,10 @@ export const integration = d.object<{ endpoint: string }>({
   endpoint: d.string,
 });
 export const identity = d.object<{ id: string }>({ id: d.string });
+export const configurationSave = d.object<{
+  id: string;
+  changes_pending?: boolean;
+}>({ id: d.string, changes_pending: opt(d.boolean) });
 export const sourceBuildPlan = d.object<T.SourceBuildPlan>({
   warning: d.string,
   commands: d.array(stringArray),
