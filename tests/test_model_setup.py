@@ -501,6 +501,7 @@ async def test_shared_engine_edit_and_explicit_template_clear(setup):
         first["revision"],
     )
     assert cleared.get("template_override") is None
+    cleared = store.put("deployment", cleared | {"enabled": False})
     pool = manager.unit(first["id"])
     store.put("runtime", store.get("runtime", "engine") | {"id": "replacement"})
     response = await client.post(
@@ -520,6 +521,7 @@ async def test_shared_engine_edit_and_explicit_template_clear(setup):
     member = store.get("deployment", first["id"])
     assert member["profile_snapshot"]["runtime_id"] == "replacement"
     assert member["gpu"] == 1 and member["port"] is None
+    assert not member["enabled"]
     store.put("deployment", member | {"state": "READY"})
     pool = manager.unit(first["id"])
     response = await client.post(

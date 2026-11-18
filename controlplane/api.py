@@ -760,7 +760,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                         )
                     data["member_ids"] = []
                     for draft in drafts:
-                        draft.update({k: data[k] for k in deployment_sets.POLICY_KEYS})
+                        draft.update(
+                            {
+                                k: data[k]
+                                for k in deployment_sets.POLICY_KEYS
+                                if k != "enabled"
+                            }
+                        )
                         member = save_member(
                             draft,
                             c=c,
