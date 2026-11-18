@@ -119,16 +119,20 @@ and notes "not available" if the chosen file is missing or failed to download.
 ## Loading policy
 
 Loading and client-exposure policy is owned by the pool and inherited by its members.
-Pinned members remain loaded until explicitly stopped or a failure occurs. On-demand
-members load when a client requests them. Allowing eviction permits an eligible member
+Native pools use on-demand residency: members load when a client requests them.
+Allowing eviction permits an eligible member
 to unload to make room for other work. Memory accounting is advisory for manual and
 on-demand loading; there is no uncertainty permission or capacity acknowledgment. Manual
 launch review asks for consent to proposed unloads.
 
 ## Saving and leaving
 
-Member configuration can be saved while a pool is running; the old configuration and API
-ID remain active until reviewed application. Pool settings require unloading the pool.
+Model and shared-pool settings remain editable while running. Unloaded pools offer
+**Apply**; loaded idle pools offer **Apply and Reload**. Busy pools offer
+**Apply and Reload when Idle**, or **Apply and Reload Now** with explicit confirmation
+of request interruption. The old configuration and API ID remain active until application.
+Reload affects the whole pool and loses cached context; models load again on demand.
+Membership changes require unloading first.
 Invalid input prevents saving; a failed save leaves the draft open. A stale revision
 offers **Review changes** without dropping edits.
 

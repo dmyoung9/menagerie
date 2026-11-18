@@ -10,7 +10,7 @@ A pool delegates model routing and residency to one installed, compatible runtim
 owns the settings shared by all its members: runtime, device visibility, serving port,
 loading policy, priority, idle timeout, client availability, eviction consent, queue
 timeout, and resident-model limit. Members keep their own API alias, per-model
-configuration, capabilities and variant catalog, raw arguments, process log, and session
+configuration, capabilities and variant catalog, process log, and session
 history.
 
 A runtime pool is on-demand: starting it starts a router, not every model. Each member
@@ -19,8 +19,8 @@ members do not have their own listeners. Stopping stops the whole pool.
 
 Eviction consent enables pool-local LRU limits and supported device-memory margin
 unloading. Without consent, those automatic eviction limits are disabled. Idle sleep
-still follows the pool's configured timeout when the runtime supports it. Use coordinated
-processes for pinned models or atomic model residency. Native pools currently support
+still follows the pool's configured timeout when the runtime supports it. Pinned and
+atomic residency are not supported. Native pools currently support
 native llama.cpp-compatible builds, not containers or other runtime protocols. See
 [runtime behavior and limitations](releases/3.0.0.md).
 
@@ -44,7 +44,7 @@ button and no inline pool creation in the model wizard.
   pool's **Actions** menu offers **Edit pool** (reopens the pool editor for its shared
   settings) and **Delete pool** (removes the pool and its members' deployment records).
   **Edit model** on a member exposes its engine and inference settings directly.
-  Unload the pool before editing shared policy.
+   Settings remain editable while loaded; applying them restarts the whole pool.
 - **Remove model** on a member takes it out of the pool; the member's deployment record
   is deleted after the pool save. Model files and installed weights stay on disk. A
   member is never orphaned into a standalone configuration.
@@ -68,41 +68,26 @@ Creating a member saves it without loading; it joins the chosen pool and inherit
 pool's shared policy. Saving a pool's shared policy preserves its existing members —
 member changes are not lost or cleared by a pool save.
 
-## Coordinated-process operation
+## Applying configuration
 
-- A request to either alias in an on-demand deployment loads all its members before
-  admitting the request. Concurrent cold requests are serialized through admission;
-  they do not launch duplicate processes.
-- Idle time starts when the last request across all members finishes. A busy member
-  protects every member from unloading and automatic eviction.
-- Making room for another deployment unloads the entire victim deployment. Only
-  explicitly evictable, non-pinned deployments of equal or lower priority qualify.
-  Victims are selected against per-GPU requirements, not summed free memory across GPUs.
-- Busy eligible victims are allowed to finish within the requesting deployment's
-  switch timeout. Waiting releases the admission lock so existing nested requests
-  can finish. New incoming traffic can delay the switch until its bounded timeout.
-- Manual unloading also waits for active requests. It does not disable on-demand
-  aliases; a later request can load the deployment again.
-- Admission reserves the complete launch before starting any process. Starts remain
-  ordered, not simultaneous. A failure rolls back newly started members and attempts
-  to restore any stopped predecessors. Restoration failures remain visible.
-- A deployment is Ready only when all members are Ready. A member failure while
-  another remains running makes it Degraded. Pinned deployments are not advertised
-  as ready with only part of the configuration healthy.
-- Pinned deployments restore their complete membership after a daemon restart when
-  they were running at shutdown. A manual unload clears that restart intent.
-
-For automatic switching in both directions, both deployments must permit eviction,
-have compatible priorities, and not be pinned. Observed history or file-size/KV
-accounting informs proposed switches, but never reserves memory or blocks a start.
-Manual launch review preserves consent to proposed unloads. A start can
-still fail if external memory use changes after admission, and that failure stays
-visible. Group membership does not bypass these safeguards.
+- An unloaded pool offers **Apply** and stays unloaded.
+- A loaded, idle pool offers **Apply and Reload**.
+- A busy pool offers **Apply and Reload when Idle**, which holds new gateway
+  requests while existing requests finish within a bounded wait. **Cancel scheduled
+  reload** cancels before application begins and retains the proposal for retry.
+- **Apply and Reload Now** requires confirmation that active requests will be
+  interrupted. Becoming busy after an idle review never silently authorizes this.
+- Reload affects every member of the pool and loses cached context. It restarts
+  the router; models load on demand instead of restoring previous residency.
+- A failed reload retains the proposal and reports whether the previous runtime
+  was restored or remains stopped. Review the error before retrying or discarding.
+- Adding or removing members always requires unloading first.
 
 ## History and recovery
 
-Restoring launch history creates a pool with a single member (the restored model) with
-new aliases and ports for review; it does not restart the historical workload
+Restoring model history creates a disabled native pool with one restored member;
+restoring a pool activation restores its members together. New aliases and a new
+pool port keep restoration independent; it does not restart the historical workload
 automatically. Backups retain configuration snapshots, not model weights. See
 [installation and recovery](installation.md#restore-a-registry-backup).
 

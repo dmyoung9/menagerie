@@ -1,11 +1,11 @@
 # Model-first UI repair contract
 
-Status: **Agreed design; implementation and acceptance pending.**
+Status: **Implemented; final CI acceptance in progress.**
 
 This document is the scope and acceptance reference for repairing PR #42. It
 supersedes conflicting requirements and shipped-status claims in
 [the original plan](model-first-ui.md). It describes the target, not a claim
-that the current implementation already behaves this way.
+that hardware or installed-client acceptance has been completed.
 
 ## Product decisions
 
@@ -155,3 +155,20 @@ Use the checks in `docs/development.md` and the isolation rules in
 `docs/testing.md`. Passing fixtures do not establish live inference, hardware,
 or installed-client acceptance. Do not broaden this repair into new deployment
 types, automatic assignment, general draft management, or resident-model recovery.
+
+### Implementation evidence
+
+- Layout-4 rejection preserves incompatible registries; migration runners were removed.
+- `tests/test_model_setup.py` exercises shared runtime/device edits, explicit template
+  clearing, dependency guards, unloaded-only membership, cancellation, timeout,
+  rollback, idle-to-busy races, and explicit force consent through isolated APIs.
+- History restoration creates disabled native pools with independent aliases and
+  ports. Public supervised creation and the old `save-desired` endpoint are retired.
+- Browser coverage exercises pool-aware editor actions, confirmation/cancellation,
+  sole-pool keyboard selection, terminal inventory refresh, and existing configuration
+  behavior: 138 passing browser checks at the implementation checkpoint.
+- Frontend build/type/lint/format and 78 unit checks passed; plugin checks and its
+  eight behavior checks passed. Final CI and artifact acceptance are tracked in PR #42.
+
+The retained low-level lifecycle regression suite includes synthetic standalone/group
+fixtures for shared internals; these do not represent supported public creation paths.

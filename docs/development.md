@@ -60,7 +60,8 @@ instances have a single lifecycle owner.
   instance `id`; new members omit it. `?expected=REV` guards updates.
 - `/api/serving-deployments/{id}/validate`, `/start`, `/stop`, and `/enabled`
   operate on complete serving units. User starts require the reviewed `plan_token`.
-- `/api/deployment-sets/{id}/dissolve?expected=REV` separates unloaded members.
+- Membership changes require the pool unloaded; removal deletes the member record,
+  retaining its installed weights. Only native router pools may be created.
 
 ### Desired changes and queued application
 
@@ -72,23 +73,21 @@ instances have a single lifecycle owner.
   `scope_fingerprint`, `affected_ids`, `affected`. Model setup stages separate
   desired rows while the live registry continues routing the applied configuration.
 - `POST /api/model-setups?expected=REV` creates or updates a model setup. New
-  automatic assignments join compatible automatically managed pools; legacy
-  assignments remain explicit. Active edits and additions to active pools stage
-  snapshots without mutating live membership or process ownership.
+  members explicitly target an unloaded pool. Active configuration edits stage
+  snapshots without mutating live routing or process ownership. Shared pool edits
+  use `/api/deployment-sets` and the same reviewed application lifecycle.
 - `POST /api/deployments/{ident}/review-apply` validates the desired overlay and
   binds consent to configuration, dependencies, affected scope and unload consequences.
-- `POST /api/deployments/{ident}/save-desired` is the legacy unloaded-edit path;
-  it cannot authorize a restart of an active unit.
 - `POST /api/deployments/{ident}/request-apply` queues a reviewed apply,
-  taking the `token` and `scope_fingerprint` captured during review. It
+  taking the `token`, `scope_fingerprint`, and mode (`apply`, `reload`, `idle`,
+  or `now`) captured during review. `now` also requires `confirm_interrupt: true`. It
   revalidates scope and the launch plan immediately before applying, so stale
   consent is never used, and returns the queued `op` plus a `job_id` for
   progress polling.
 - `POST /api/deployments/{ident}/cancel` cancels a queued apply before it
   begins; the saved change remains pending for a fresh review.
-- `POST /api/deployments/{ident}/discard` restores the last *applied*
-  configuration (or `null` when the unit was never activated) and clears the
-  operation.
+- `POST /api/deployments/{ident}/discard` deletes the proposed configuration and
+  its operation, preserving the authoritative live configuration.
 - `GET /api/deployments/{ident}/action-scope` returns
   `{is_whole_unit, multi_model, member_level, scope_label}` so a pool-level
   action is never labeled as a per-model action.
@@ -99,8 +98,8 @@ instances have a single lifecycle owner.
   consent-gated and never include the unit being loaded.
 
 Member stop actions expand to complete membership. Native-pool members can change
-client availability independently without stopping the process. Shared policy edits
-require the whole unit unloaded. `/api/deployments/{ident}/load-model` requires a
+client availability independently without stopping the process. Loaded shared-policy
+edits require reviewed pool reload. `/api/deployments/{ident}/load-model` requires a
 reviewed launch token and observes selected native-pool residency before completion.
 Review tokens include membership and policy revisions. Preserve atomic rollback,
 independent aliases/ports for reused weights, and inactive history restoration.

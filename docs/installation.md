@@ -1,6 +1,9 @@
 # Installation and recovery
 
-Version 3 requires fresh application state; there is no automatic 2.x migration.
+This pool-only build requires fresh application state (registry layout 4).
+Earlier layouts, including earlier version-3 builds, are rejected without migration.
+Preserve the previous application and state together for rollback, and choose an
+empty state directory for this build.
 Stop the application and back up its state and installed application for rollback
 before upgrading. Preserve model/runtime files and register them again by path.
 See [3.0 breaking changes and runtime behavior](releases/3.0.0.md).
