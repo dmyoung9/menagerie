@@ -92,6 +92,9 @@ export function deploymentSetToDraft(
   return {
     name: 'New deployment',
     engine_pool: false,
+    runtime_id: null,
+    gpu: null,
+    port: null,
     max_loaded: 4,
     residency: 'on-demand',
     priority: 50,

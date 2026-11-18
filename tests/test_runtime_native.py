@@ -243,6 +243,12 @@ async def test_pool_api_rejects_incompatible_policy_atomically(tmp_path):
                     "gpu": 0,
                     "port": port(),
                     "residency": "pinned",
+                    "max_loaded": 4,
+                    "priority": 50,
+                    "idle_timeout": 300,
+                    "allow_eviction": False,
+                    "queue_timeout": 300,
+                    "enabled": True,
                 },
             )
             assert response.status_code == 400

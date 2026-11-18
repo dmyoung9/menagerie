@@ -177,6 +177,7 @@ def pool_spec(name, pool_port, runtime_id="engine", **policy):
         "gpu": None,
         "port": pool_port,
         "residency": "on-demand",
+        "enabled": True,
         "max_loaded": 4,
         "priority": 50,
         "idle_timeout": 300,

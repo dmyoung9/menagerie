@@ -54,10 +54,14 @@ components, styling, contracts, or accessibility behavior.
 owns membership and shared policy. Installed model artifacts are reusable; runtime
 instances have a single lifecycle owner.
 
-- `GET /api/serving-deployments` provides the unified serving view.
+- `GET /api/serving-deployments` provides the unified serving view, including
+  `changes_pending` on a pool and each member that has a retained proposal.
 - `POST /api/deployment-sets` saves shared policy and inline `members`, with
   `name`, `alias`, `port`, and `configuration`. Existing members include their
-  instance `id`; new members omit it. `?expected=REV` guards updates.
+  instance `id`; new members omit it. `?expected=REV` guards updates. A pool save
+  replaces the whole shared configuration: send every shared field, and use an
+  explicit `null` (for example `gpu`) to clear an optional setting. An omitted
+  field is rejected rather than treated as unchanged.
 - `/api/serving-deployments/{id}/validate`, `/start`, `/stop`, and `/enabled`
   operate on complete serving units. User starts require the reviewed `plan_token`.
 - Membership changes require the pool unloaded; removal deletes the member record,

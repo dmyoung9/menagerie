@@ -50,6 +50,12 @@ from .version import VERSION
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# A pool save replaces the whole shared configuration. Every field must be
+# present so that an omitted device/port can never be mistaken for "unchanged".
+POOL_FIELDS = frozenset(
+    set(DeploymentSet.model_fields) - {"id", "member_ids", "members"}
+)
+
 
 def host_view(manager, sample_seconds):
     # Augment the raw host snapshot with client-facing staleness. `stale`
@@ -186,7 +192,8 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             data = previous | data
         if not data.get("engine_pool"):
             raise ValueError("Only native router pools are supported")
-        ident = data.setdefault("id", uid())
+        ident = data.get("id") or uid()
+        data["id"] = ident
         data.setdefault("gpu", None)
         if data.get("engine_pool"):
             if (
@@ -690,11 +697,21 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
 
     @app.post("/api/deployment-sets")
     async def save_deployment_set(body: DeploymentSet, expected: int | None = None):
+        missing = sorted(POOL_FIELDS - body.model_fields_set)
+        if missing:
+            raise ValueError(
+                "Send the complete pool configuration; missing: "
+                + ", ".join(missing)
+                + ". A pool save replaces every shared field, so an omitted field cannot mean unchanged."
+            )
         async with manager.lock:
             with store.transaction() as c:
-                data = body.model_dump(exclude_none=True)
-                drafts = data.pop("members", None)
-                data.setdefault("gpu", None)
+                data = body.model_dump(exclude={"members"})
+                drafts = (
+                    [m.model_dump(exclude_none=True) for m in body.members]
+                    if body.members is not None
+                    else None
+                )
                 previous_pool = (
                     store.get("deployment_set", data["id"], c)
                     if data.get("id")
@@ -726,7 +743,6 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     if not data.get("engine_pool"):
                         raise ValueError("Only native router pools are supported")
                     proposed = previous_pool | data | {"member_ids": member_ids}
-                    proposed.setdefault("gpu", None)
                     members = (
                         drafts
                         if drafts is not None

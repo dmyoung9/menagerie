@@ -416,6 +416,12 @@ async def test_live_membership_changes_are_rejected_and_members_can_be_separated
                 "runtime_id": "runtime",
                 "port": port(),
                 "gpu": 0,
+                "max_loaded": 4,
+                "priority": 50,
+                "idle_timeout": 300,
+                "allow_eviction": False,
+                "queue_timeout": 300,
+                "enabled": True,
             }
             response = await client.post(
                 "/api/deployment-sets", json=body, headers=headers
@@ -623,3 +629,64 @@ async def test_switch_timeout_does_not_interrupt_busy_predecessor(tmp_path):
         m.release(c)
     finally:
         await m.close()
+
+
+def pool_body(**overrides):
+    """A complete pool body; every shared field must be present."""
+    return {
+        "name": "Pair",
+        "engine_pool": True,
+        "runtime_id": "runtime",
+        "gpu": None,
+        "port": port(),
+        "max_loaded": 4,
+        "residency": "on-demand",
+        "priority": 50,
+        "idle_timeout": 300,
+        "allow_eviction": False,
+        "enabled": True,
+        "queue_timeout": 300,
+    } | overrides
+
+
+async def test_pool_save_rejects_partial_bodies_and_clears_only_explicit_nulls(
+    tmp_path,
+):
+    app, store, m = await setup(tmp_path)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            headers = {
+                "X-Menagerie-Token": (await client.get("/api/status")).json()[
+                    "csrf_token"
+                ]
+            }
+            body = pool_body()
+            partial = {k: v for k, v in body.items() if k != "gpu"}
+            response = await client.post(
+                "/api/deployment-sets", json=partial, headers=headers
+            )
+            assert response.status_code == 400, response.text
+            assert "complete pool configuration" in response.text
+            assert "gpu" in response.text
+            assert store.list("deployment_set") == []
+
+            response = await client.post(
+                "/api/deployment-sets", json=body | {"gpu": 0}, headers=headers
+            )
+            assert response.status_code == 200, response.text
+            saved = response.json()
+            assert saved["gpu"] == 0
+
+            response = await client.post(
+                f"/api/deployment-sets?expected={saved['revision']}",
+                json=body | {"id": saved["id"], "gpu": None},
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["gpu"] is None
+            assert store.get("deployment_set", saved["id"])["gpu"] is None
+    finally:
+        await m.close()
+

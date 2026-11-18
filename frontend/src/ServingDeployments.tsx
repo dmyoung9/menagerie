@@ -608,6 +608,11 @@ export function DeploymentSetEditor({
     initial?.proposed_configuration ?? {
       name: 'New pool',
       engine_pool: true,
+      // Whole-object pool saves require every shared field, including the
+      // ones that may legitimately be null.
+      runtime_id: null,
+      gpu: null,
+      port: null,
       max_loaded: 4,
       residency: 'on-demand',
       priority: 50,
