@@ -1,6 +1,6 @@
 # Model-first UI repair contract
 
-Status: **Implemented; final CI acceptance in progress.**
+Status: **Implemented; automated acceptance evidence tracked in PR #42.**
 
 This document is the scope and acceptance reference for repairing PR #42. It
 supersedes conflicting requirements and shipped-status claims in
@@ -166,7 +166,8 @@ types, automatic assignment, general draft management, or resident-model recover
   ports. Public supervised creation and the old `save-desired` endpoint are retired.
 - Browser coverage exercises pool-aware editor actions, confirmation/cancellation,
   sole-pool keyboard selection, terminal inventory refresh, and existing configuration
-  behavior: 138 passing browser checks at the implementation checkpoint.
+  behavior: 138 passing browser checks at the implementation checkpoint, followed
+  by an additional recovery regression for reopening and editing a retained pool proposal.
 - Frontend build/type/lint/format and 78 unit checks passed; plugin checks and its
   eight behavior checks passed. Final CI and artifact acceptance are tracked in PR #42.
 
