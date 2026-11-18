@@ -704,6 +704,9 @@ export function DeploymentWizard({
                           setPlacement(e.target.value as `pool:${string}`)
                         }
                       >
+                        <NativeSelectOption value="" disabled>
+                          Choose a pool…
+                        </NativeSelectOption>
                         {availablePools.map((p) => (
                           <NativeSelectOption key={p.id} value={'pool:' + p.id}>
                             Join pool: {p.name}

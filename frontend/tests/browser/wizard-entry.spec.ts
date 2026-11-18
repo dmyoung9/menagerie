@@ -100,9 +100,9 @@ test('The model wizard joins an existing pool instead of creating one inline', a
   await expect(dialog.getByText('New pool…', { exact: true })).toHaveCount(0);
   // Selecting the existing pool verifies it is offered (selectOption throws
   // if the option is absent) and advances the flow.
-  await dialog
-    .getByLabel('Pool', { exact: true })
-    .selectOption({ label: 'Join pool: Example pool' });
+  await dialog.getByLabel('Pool', { exact: true }).focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
   await dialog.getByLabel('Name', { exact: true }).fill('Joining Member');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(
