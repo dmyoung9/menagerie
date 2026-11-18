@@ -6,6 +6,7 @@ faked at the client / SDK boundaries, matching the Stage-1
 (repo, revision, name) identity contract.
 """
 
+import asyncio
 import hashlib
 from types import SimpleNamespace
 
@@ -64,6 +65,26 @@ def make_jobs(tmp_path, files, monkeypatch):
 
 def complete_ids(manifest):
     return [g["id"] for g in manifest["groups"] if g["complete"]]
+
+
+async def test_interrupted_file_can_be_retried(tmp_path, monkeypatch):
+    jobs, store = make_jobs(
+        tmp_path, [hf_file("weights.gguf", verified=False)], monkeypatch
+    )
+    job = store.put("job", {"id": "interrupted", "state": "RUNNING"})
+
+    def interrupt(**kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(jobs_module, "hf_hub_download", interrupt)
+    with pytest.raises(asyncio.CancelledError):
+        await jobs.download_files(job["id"], REPO, SHA, ["weights.gguf"])
+    assert store.list("downloaded_file")[0]["status"] == "failed"
+    monkeypatch.setattr(
+        jobs_module, "hf_hub_download", lambda **kwargs: str(tmp_path / "weights.gguf")
+    )
+    result = await jobs.download_files(job["id"], REPO, SHA, ["weights.gguf"])
+    assert result["downloaded"] == 1 and result["skipped"] == 0
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,38 @@ import type { Page } from '@playwright/test';
 
 const REPO = 'fixture/model';
 
+test('completed acquisition refreshes file inventory', async ({
+  page,
+  fixture,
+}) => {
+  await page.goto(`/#/models/repo/${REPO}?revision=main`);
+  await page
+    .getByRole('checkbox', { name: 'Select all visible files' })
+    .click();
+  const before = fixture.writes.filter(
+    (w) => w.path === '/api/downloads/manifest',
+  ).length;
+  await page
+    .getByRole('button', { name: 'Download selected', exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      fixture.registry.jobs.some((j) => j.operation === 'download_files'),
+    )
+    .toBe(true);
+  fixture.registry.jobs = fixture.registry.jobs.map((j) =>
+    j.operation === 'download_files' ? { ...j, state: 'SUCCEEDED' } : j,
+  );
+  await expect
+    .poll(
+      () =>
+        fixture.writes.filter((w) => w.path === '/api/downloads/manifest')
+          .length,
+      { timeout: 12000 },
+    )
+    .toBeGreaterThan(before);
+});
+
 function rows(page: Page) {
   return page.locator('tbody tr');
 }

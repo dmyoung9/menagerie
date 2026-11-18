@@ -341,10 +341,8 @@ export function RepositoryPage({
       revision: resolvedRevision,
       selected,
     })
-      .then((value) => {
-        const j = value as Job;
+      .then(() => {
         onJobFinished?.(repo);
-        processedJob.current = j.id;
       })
       .catch((err) => {
         setManifestError(message(err));
@@ -358,10 +356,8 @@ export function RepositoryPage({
       revision: resolvedRevision,
       selected: retryIds,
     })
-      .then((value) => {
-        const j = value as Job;
+      .then(() => {
         onJobFinished?.(repo);
-        processedJob.current = j.id;
       })
       .catch((err) => {
         setManifestError(message(err));

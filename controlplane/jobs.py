@@ -110,6 +110,8 @@ class Jobs:
     def __init__(self, manager):
         self.manager = manager
         self.store = manager.store
+        # Serialize overlapping acquisitions so each retry sees fresh inventory.
+        self.acquisition_lock = asyncio.Lock()
 
     def submit(self, name, action, **context):
         job = self.store.put(
@@ -518,6 +520,12 @@ class Jobs:
         return await attach_projector(artifact)
 
     async def download_files(self, ident, repo, revision, selected, bundle_map=None):
+        async with self.acquisition_lock:
+            return await self._download_files(
+                ident, repo, revision, selected, bundle_map
+            )
+
+    async def _download_files(self, ident, repo, revision, selected, bundle_map=None):
         """Stage 3 independent acquisition: download the selected groups' required
         files into the per-file inventory (``downloaded_file`` records) without
         creating a deployable artifact. Partial success: one file failing never
@@ -604,6 +612,15 @@ class Jobs:
                 )
                 results["downloaded"] += 1
                 results["files"].append({"name": name, "status": "downloaded"})
+            except asyncio.CancelledError:
+                self._set_file(
+                    repo,
+                    resolved,
+                    name,
+                    status="failed",
+                    error="Download interrupted; retry to resume cached bytes",
+                )
+                raise
             except Exception as exc:
                 error = redact(str(exc))
                 self._set_file(repo, resolved, name, status="failed", error=error)
