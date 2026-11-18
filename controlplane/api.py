@@ -6,6 +6,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import get_args
 from urllib.parse import urlsplit
 
 import httpx
@@ -55,6 +56,20 @@ ROOT = Path(__file__).resolve().parent.parent
 POOL_FIELDS = frozenset(
     set(DeploymentSet.model_fields) - {"id", "member_ids", "members"}
 )
+
+
+def explicit_nulls(model):
+    """Fields the client sent as null, restricted to genuinely nullable ones.
+
+    ``model_dump(exclude_none=True)`` cannot express "clear this setting", so
+    nested editors record presence separately from the merged row.
+    """
+    return {
+        name
+        for name in model.model_fields_set
+        if getattr(model, name) is None
+        and type(None) in get_args(type(model).model_fields[name].annotation)
+    }
 
 
 def host_view(manager, sample_seconds):
@@ -712,6 +727,11 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                     if body.members is not None
                     else None
                 )
+                cleared = (
+                    [explicit_nulls(m) for m in body.members]
+                    if body.members is not None
+                    else []
+                )
                 previous_pool = (
                     store.get("deployment_set", data["id"], c)
                     if data.get("id")
@@ -749,7 +769,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                         else [store.get("deployment", i, c) for i in member_ids]
                     )
                     rows = [{"kind": "deployment_set", "data": proposed}]
-                    for member in members:
+                    for index, member in enumerate(members):
                         member = member | {
                             k: proposed[k]
                             for k in deployment_sets.POLICY_KEYS
@@ -761,6 +781,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                             owner_id=proposed["id"],
                             prepare=True,
                             pool_settings=proposed,
+                            cleared=cleared[index] if drafts is not None else (),
                         )
                         rows.append({"kind": "deployment", "data": prepared})
                     snap = {"id": proposed["id"], "rows": rows}
@@ -801,7 +822,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                             "Unload the deployment before editing its models"
                         )
                     data["member_ids"] = []
-                    for draft in drafts:
+                    for index, draft in enumerate(drafts):
                         draft.update(
                             {
                                 k: data[k]
@@ -814,6 +835,7 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                             c=c,
                             owner_id=data.get("id"),
                             pool_settings=data if data.get("engine_pool") else None,
+                            cleared=cleared[index],
                         )
                         data["member_ids"].append(member["id"])
                     removed = owned - set(data["member_ids"])
@@ -1108,7 +1130,13 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
                 return saved
 
     def save_member(
-        data, expected=None, c=None, owner_id=None, prepare=False, pool_settings=None
+        data,
+        expected=None,
+        c=None,
+        owner_id=None,
+        prepare=False,
+        pool_settings=None,
+        cleared=(),
     ):
         data.setdefault("gpu", None)
         all_d = store.list("deployment", c)
@@ -1145,8 +1173,10 @@ def create_app(state=None, dashboard_address=None, gateway_port=8001):
             raise Conflict("Stop this deployment before changing its configuration")
         if previous is not None:
             # The body wins and the registry fills the gaps, so an edit never
-            # drops fields it did not touch.
+            # drops fields it did not touch. Explicit nulls are applied after
+            # the merge because they are deliberately absent from the dump.
             data = previous | data
+            data.update({key: None for key in cleared})
         settings = pool_settings or (
             owner if owner and owner.get("engine_pool") else None
         )

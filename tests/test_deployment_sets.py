@@ -8,6 +8,7 @@ from test_controlplane import baseline, port, seed
 from controlplane import deployment_sets
 from controlplane.api import create_app
 from controlplane.manager import Conflict, Manager
+from controlplane.schema import Deployment
 
 
 def link(store, ids=("a", "b"), **policy):
@@ -690,3 +691,52 @@ async def test_pool_save_rejects_partial_bodies_and_clears_only_explicit_nulls(
     finally:
         await m.close()
 
+
+async def test_pool_member_save_applies_explicit_nested_nulls(tmp_path):
+    app, store, m = await setup(tmp_path)
+    store.put("template", {"id": "custom", "kind": "custom", "artifact_id": "weights"})
+    draft = {
+        k: v
+        for k, v in store.get("deployment", "a").items()
+        if k in Deployment.model_fields and k != "id"
+    } | {"name": "Pooled", "alias": "pooled", "port": port()}
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            headers = {
+                "X-Menagerie-Token": (await client.get("/api/status")).json()[
+                    "csrf_token"
+                ]
+            }
+            body = pool_body(
+                name="Solo",
+                members=[
+                    draft
+                    | {"template_override": {"source": "custom", "asset_id": "custom"}}
+                ],
+            )
+            response = await client.post(
+                "/api/deployment-sets", json=body, headers=headers
+            )
+            assert response.status_code == 200, response.text
+            unit = response.json()
+            member_id = unit["member_ids"][0]
+            assert store.get("deployment", member_id)["template_override"] == {
+                "source": "custom",
+                "asset_id": "custom",
+            }
+
+            response = await client.post(
+                f"/api/deployment-sets?expected={unit['revision']}",
+                json=body
+                | {
+                    "id": unit["id"],
+                    "members": [draft | {"id": member_id, "template_override": None}],
+                },
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            assert store.get("deployment", member_id)["template_override"] is None
+    finally:
+        await m.close()
