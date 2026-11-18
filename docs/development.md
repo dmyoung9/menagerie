@@ -21,8 +21,9 @@ a supplier is a declaration, not a new engine literal or adapter branch.
 mechanisms. `runtime_pool.py` renders explicit native model presets and validates
 pool policy. Capabilities are tied to executable hashes, not repository names.
 Native pools use one process owner, pool-local routing/residency, and aggregate
-process telemetry. Supervised groups retain atomic residency. Version 3 opens only
-schema-3 registries; a 2.x state directory must be preserved for rollback, not migrated.
+process telemetry. This pool-only build opens only layout-4 registries. Older
+state must be preserved together with its application for rollback; choose a
+fresh state directory instead of migrating it.
 
 The hardened user service only grants writes inside its state directory. Keep
 registry migrations independent of writable system temporary directories: stream
