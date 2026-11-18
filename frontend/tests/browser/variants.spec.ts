@@ -46,7 +46,7 @@ for (const enabled of [true, false]) {
     await drawer
       .getByRole('button', { name: 'Apply changes', exact: true })
       .click();
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await expect
       .poll(
         () =>
@@ -100,7 +100,7 @@ test('selecting legacy blank Instant as default persists its configured thinking
   await page
     .getByLabel('Default reasoning level', { exact: true })
     .selectOption('instant');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -417,7 +417,7 @@ test('guided destination changes and JSON preserve additional template controls'
     ),
   );
   await drawer.getByRole('button', { name: 'Apply changes' }).click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -614,7 +614,7 @@ for (const width of [1440, 576, 320]) {
     await page
       .getByLabel('Default reasoning level', { exact: true })
       .selectOption('research');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await expect
       .poll(
         () =>
@@ -739,7 +739,7 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Preserved variants');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await page
     .getByRole('button', {
       name: 'Rename and update API model ID',

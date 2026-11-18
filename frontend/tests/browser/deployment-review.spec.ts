@@ -338,7 +338,7 @@ for (const width of [1440, 576, 320]) {
       .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
       .analyze();
     expect(axe.violations).toEqual([]);
-    await config.getByRole('button', { name: 'Save', exact: true }).click();
+    await config.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await expect
       .poll(
         () =>
@@ -408,20 +408,20 @@ test('discard resets typed controls, invalid raw edits and the navigation guard'
     .getByLabel('Runtime options (JSON)', { exact: true })
     .fill('{broken');
   await expect(
-    page.getByRole('button', { name: 'Save', exact: true }),
+    page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }),
   ).toBeDisabled();
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
   await expect(page.getByLabel('Display name', { exact: true })).toHaveValue(
     'Example idle',
   );
   await expect(
-    page.getByRole('button', { name: 'Save', exact: true }),
+    page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }),
   ).toBeEnabled();
   await page.getByRole('button', { name: 'Activity', exact: true }).click();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
 });
 
-test('resource tooltips use allocation names and loaded configuration accepts staged edits', async ({
+test('resource tooltips use allocation names and loaded configuration offers reload', async ({
   page,
 }) => {
   await page.goto('/#/deployments/idle/configuration');
@@ -438,7 +438,7 @@ test('resource tooltips use allocation names and loaded configuration accepts st
   await page.goto('/#/deployments/ready/configuration');
   await expect(page.getByLabel('Display name', { exact: true })).toBeEnabled();
   await expect(
-    page.getByRole('button', { name: 'Save', exact: true }),
+    page.getByRole('button', { name: 'Apply and Reload', exact: true }),
   ).toBeEnabled();
 });
 

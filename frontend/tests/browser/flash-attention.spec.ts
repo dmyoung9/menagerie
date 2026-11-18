@@ -53,7 +53,7 @@ for (const width of [1440, 576, 320]) {
           .analyze()
       ).violations,
     ).toEqual([]);
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await expect
       .poll(
         () =>
@@ -95,7 +95,7 @@ for (const selected of ['auto', 'on', 'off']) {
     await expect(attention).toHaveValue(selected);
     await openIdentity(page);
     await page.getByLabel('Display name', { exact: true }).fill('Renamed');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await page
       .getByRole('button', {
         name: 'Rename and update API model ID',

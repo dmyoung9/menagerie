@@ -1,6 +1,12 @@
 import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
+  applyConfiguration,
+  applyLabels,
+  type ApplyMode,
+} from './configuration-apply';
+import { PendingChanges } from '@/components/pending-changes';
+import {
   Table,
   TableHeader,
   TableRow,
@@ -581,6 +587,16 @@ export function DeploymentSetEditor({
   embedded?: boolean;
 }) {
   const { confirm, confirmation } = useConfirmation();
+  const activity =
+    data.serving?.find((unit) => unit.id === initial?.id) ?? initial;
+  const loaded = activity?.members.some((m) => active(m));
+  const mode: ApplyMode = loaded
+    ? activity?.inflight
+      ? 'idle'
+      : 'reload'
+    : 'apply';
+  const selectedMode = useRef<ApplyMode | null>(null);
+  const [proposed, setProposed] = useState(false);
   const {
     form,
     value,
@@ -643,6 +659,16 @@ export function DeploymentSetEditor({
         '/api/deployment-sets' +
         (initial ? '?expected=' + (pendingRevision ?? initial.revision) : '');
       const result = await readApi(path, contracts.identity, value);
+      if (loaded) {
+        setProposed(true);
+        const accepted = await applyConfiguration(
+          result.id,
+          selectedMode.current ?? mode,
+          confirm,
+        );
+        selectedMode.current = null;
+        if (!accepted) return;
+      }
       saved(result.id);
     } catch (e) {
       const detail = message(e);
@@ -707,7 +733,7 @@ export function DeploymentSetEditor({
             void form.handleSubmit();
           }}
         >
-          <FieldSet disabled={busy}>
+          <FieldSet disabled={busy || proposed}>
             <Field label="Name">
               <Input
                 required
@@ -937,9 +963,43 @@ export function DeploymentSetEditor({
             >
               Discard
             </Button>
-            <Button variant="default" type="submit" disabled={busy}>
-              {busy ? 'Saving…' : 'Save pool'}
-            </Button>
+            {initial && (
+              <PendingChanges
+                deploymentId={initial.id}
+                changed={() => saved(initial.id)}
+                onPendingChange={setProposed}
+              />
+            )}
+            {!proposed && (
+              <>
+                {loaded && Boolean(activity?.inflight) && (
+                  <Button
+                    type="submit"
+                    variant="destructive"
+                    disabled={busy}
+                    onClick={() => {
+                      selectedMode.current = 'now';
+                    }}
+                  >
+                    Apply and Reload Now
+                  </Button>
+                )}
+                <Button
+                  variant="default"
+                  type="submit"
+                  disabled={busy}
+                  onClick={() => {
+                    selectedMode.current = mode;
+                  }}
+                >
+                  {busy
+                    ? 'Applying…'
+                    : initial
+                      ? applyLabels[mode]
+                      : 'Save pool'}
+                </Button>
+              </>
+            )}
           </div>
         </form>
       </DraftFormProvider>
@@ -1071,18 +1131,14 @@ export function MultiDeploymentDetail({
       />
       {(tab === 'Configuration' || tab === 'Policy') && (
         <>
-          {active(d) ? (
-            <p>Unload this deployment before changing its configuration.</p>
-          ) : (
-            <DeploymentSetEditor
-              key={`${d.id}-${d.revision}`}
-              initial={d}
-              data={data}
-              close={() => {}}
-              saved={saved}
-              embedded
-            />
-          )}
+          <DeploymentSetEditor
+            key={`${d.id}-${d.revision}`}
+            initial={d}
+            data={data}
+            close={() => {}}
+            saved={saved}
+            embedded
+          />
         </>
       )}
       {tab === 'Requests' && (

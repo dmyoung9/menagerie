@@ -588,21 +588,15 @@ export const test = base.extend<{ fixture: Fixture }>({
             affected_ids: [],
             affected: [],
           });
-        if (/^\/api\/deployments\/[^/]+\/save-desired$/.test(path))
+        if (/^\/api\/deployments\/[^/]+\/review-apply$/.test(path))
           return send({
-            op: {
-              state: 'PENDING',
-              token: (body as { token?: string })?.token || 'save-token',
-              scope_fingerprint:
-                (body as { scope_fingerprint?: string })?.scope_fingerprint ||
-                '',
-              drain_deadline: null,
-              created_at: fixture.host.ts,
-              ended_at: null,
-              error: null,
-              rolled_back: null,
-              needs_revalidation: false,
-            },
+            plan_token: 'reviewed-fixture',
+            scope_fingerprint: 'fixture-scope',
+            affected: ['Example pool'],
+            stop_names: [],
+            errors: [],
+            loaded: true,
+            inflight: 0,
           });
         if (/^\/api\/deployments\/[^/]+\/request-apply$/.test(path)) {
           fixture.registry.jobs.push({

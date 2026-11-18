@@ -82,7 +82,7 @@ for (const width of [1440, 576, 320]) {
     await page
       .getByLabel('Display name', { exact: true })
       .fill('Capability review');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await page
       .getByRole('button', {
         name: 'Rename and update API model ID',
@@ -161,7 +161,7 @@ test('variants can be edited, enabled and selected as default while Reasoning st
   await page
     .getByLabel('Default reasoning level', { exact: true })
     .selectOption('ultra');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,

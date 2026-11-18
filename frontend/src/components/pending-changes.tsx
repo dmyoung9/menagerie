@@ -1,88 +1,83 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { api, readApi, message } from '@/ui';
+import {
+  applyConfiguration,
+  applyLabels,
+  type ApplyMode,
+} from '@/configuration-apply';
+import { useConfirmation } from '@/hooks/use-confirmation';
 import * as d from '@/decode';
 
 const statusDecoder = d.object({
   pending: d.boolean,
   affected: d.array(d.string),
+  loaded: d.optional(d.boolean),
+  inflight: d.optional(d.number),
   op: d.nullable(d.object({ state: d.string, error: d.nullable(d.string) })),
 });
-const reviewDecoder = d.object({
-  plan_token: d.string,
-  scope_fingerprint: d.string,
-  affected: d.array(d.string),
-  stop_names: d.array(d.string),
-  errors: d.array(d.string),
-});
 
+/** One compact editor status/action bar for a scheduled or interrupted reload. */
 export function PendingChanges({
   deploymentId,
   changed,
+  onBusyChange,
+  onPendingChange,
+  hideApplyActions,
 }: {
   deploymentId: string;
   changed: () => void;
+  onBusyChange?: (busy: boolean) => void;
+  onPendingChange?: (pending: boolean) => void;
+  hideApplyActions?: boolean;
 }) {
   const [status, setStatus] = useState<ReturnType<typeof statusDecoder> | null>(
     null,
   );
-  const [review, setReview] = useState<ReturnType<typeof reviewDecoder> | null>(
-    null,
-  );
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const base = `/api/deployments/${deploymentId}`;
-  const onChanged = useRef(changed);
+  const { confirm, confirmation } = useConfirmation();
+  const callbacks = useRef({ changed, onBusyChange, onPendingChange });
   useEffect(() => {
-    onChanged.current = changed;
-  }, [changed]);
+    callbacks.current = { changed, onBusyChange, onPendingChange };
+  }, [changed, onBusyChange, onPendingChange]);
+  const base = `/api/deployments/${deploymentId}`;
   useEffect(() => {
     let alive = true;
     let wasPending = false;
-    const refresh = () =>
-      void readApi(`${base}/pending`, statusDecoder)
-        .then((value) => {
-          if (alive) {
-            setStatus(value);
-            if (wasPending && !value.pending) onChanged.current();
-            wasPending = value.pending;
-          }
-        })
-        .catch((e: unknown) => {
-          if (alive) setError(message(e));
-        });
-    refresh();
-    const timer = setInterval(refresh, 1000);
+    const refresh = async () => {
+      try {
+        const next = await readApi(`${base}/pending`, statusDecoder);
+        if (!alive) return;
+        setStatus(next);
+        callbacks.current.onPendingChange?.(next.pending);
+        callbacks.current.onBusyChange?.(
+          ['queued', 'applying'].includes(next.op?.state || ''),
+        );
+        if (wasPending && !next.pending) callbacks.current.changed();
+        wasPending = next.pending;
+      } catch (e) {
+        if (alive) setError(message(e));
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 1000);
     return () => {
       alive = false;
       clearInterval(timer);
     };
   }, [base]);
-  async function action(
-    kind: 'review-apply' | 'request-apply' | 'cancel' | 'discard',
-  ) {
+  async function action(kind: ApplyMode | 'cancel' | 'discard') {
     setBusy(true);
     setError('');
     try {
-      if (kind === 'review-apply')
-        setReview(await readApi(`${base}/${kind}`, reviewDecoder, {}));
-      else {
-        await api(
-          `${base}/${kind}`,
-          kind === 'request-apply'
-            ? {
-                token: review?.plan_token,
-                scope_fingerprint: review?.scope_fingerprint,
-              }
-            : {},
-        );
-        setReview(null);
-        setStatus(await readApi(`${base}/pending`, statusDecoder));
-        changed();
-      }
+      if (kind === 'cancel' || kind === 'discard')
+        await api(`${base}/${kind}`, {});
+      else await applyConfiguration(deploymentId, kind, confirm);
+      setStatus(await readApi(`${base}/pending`, statusDecoder));
+      changed();
     } catch (e) {
       setError(message(e));
-      setReview(null);
     } finally {
       setBusy(false);
     }
@@ -90,72 +85,64 @@ export function PendingChanges({
   if (!status?.pending && !error) return null;
   const queued = status?.op?.state === 'queued';
   const applying = status?.op?.state === 'applying';
+  const mode: ApplyMode =
+    status?.loaded === false ? 'apply' : status?.inflight ? 'idle' : 'reload';
   return (
-    <section aria-label="Pending changes" className="warning">
-      <h3>Changes pending</h3>
-      <p>
-        Your changes are saved. The runtime is still using the previous
-        configuration.
-      </p>
-      <p>Affected models: {status?.affected.join(', ')}</p>
-      {status?.op?.error && <p role="status">{status.op.error}</p>}
-      {error && <p role="alert">{error}</p>}
+    <div
+      className="flex flex-wrap items-center gap-2"
+      aria-label="Configuration application"
+    >
+      {confirmation}
+      <span role="status">
+        {queued
+          ? `Reload scheduled — waiting for ${status?.inflight ?? 'active'} requests`
+          : applying
+            ? 'Applying configuration…'
+            : 'Configuration not applied'}
+      </span>
+      {status?.op?.error && <span role="status">{status.op.error}</span>}
+      {error && <span role="alert">{error}</span>}
       {queued ? (
-        <>
-          <p>Waiting for active requests to finish…</p>
-          <Button disabled={busy} onClick={() => void action('cancel')}>
-            Cancel scheduled apply
-          </Button>
-        </>
-      ) : applying ? (
-        <p>Applying changes…</p>
-      ) : review ? (
-        <>
-          <h4>Apply changes when idle?</h4>
-          <p>
-            Current requests will finish first. New requests will wait briefly
-            while the shared runtime restarts.
-          </p>
-          <p>Restart affects: {review.affected.join(', ')}</p>
-          {review.stop_names.length > 0 && (
-            <p>
-              Will also unload: {review.stop_names.join(', ')}. KV caches will
-              be lost.
-            </p>
-          )}
-          {review.errors.map((e) => (
-            <p role="alert" key={e}>
-              {e}
-            </p>
-          ))}
-          <Button
-            disabled={busy || review.errors.length > 0}
-            onClick={() => void action('request-apply')}
-          >
-            Apply when idle
-          </Button>
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() => setReview(null)}
-          >
-            Keep editing
-          </Button>
-        </>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy}
+          onClick={() => void action('cancel')}
+        >
+          Cancel scheduled reload
+        </Button>
       ) : (
-        <>
-          <Button disabled={busy} onClick={() => void action('review-apply')}>
-            Review restart
-          </Button>
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={() => void action('discard')}
-          >
-            Discard pending changes
-          </Button>
-        </>
+        !applying &&
+        !hideApplyActions && (
+          <>
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={() => void action(mode)}
+            >
+              {applyLabels[mode]}
+            </Button>
+            {Boolean(status?.inflight) && (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={busy}
+                onClick={() => void action('now')}
+              >
+                Apply and Reload Now
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void action('discard')}
+            >
+              Discard proposed configuration
+            </Button>
+          </>
+        )
       )}
-    </section>
+    </div>
   );
 }

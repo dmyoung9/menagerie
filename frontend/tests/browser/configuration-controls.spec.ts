@@ -93,7 +93,7 @@ test('projectors and MTP heads use matching inventory and None clears both draft
     page.getByLabel('Minimum draft tokens', { exact: true }),
   ).toBeDisabled();
   await projector.selectOption('');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -234,7 +234,7 @@ test('numeric flags are absent until added and seed engine rather than policy de
   await expect(page.getByLabel('Batch threads', { exact: true })).toHaveValue(
     '-1',
   );
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -365,7 +365,7 @@ for (const width of [1440, 576, 320]) {
     const writesBefore = fixture.writes.filter(
       (w) => w.path === '/api/model-setups?expected=1',
     ).length;
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     expect(
       fixture.writes.filter((w) => w.path === '/api/model-setups?expected=1'),
     ).toHaveLength(writesBefore);
@@ -396,7 +396,7 @@ for (const width of [1440, 576, 320]) {
     await expect(
       page.getByRole('slider', { name: 'Min-p range', exact: true }),
     ).toHaveCount(1);
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await expect
       .poll(
         () =>

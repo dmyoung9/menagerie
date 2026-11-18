@@ -39,7 +39,7 @@ test('curated sections preserve omission and separate explicit automatic context
     .getByRole('button', { name: 'Automatic (0)', exact: true })
     .click();
   await expect(source).toHaveValue('0');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () =>
@@ -130,7 +130,7 @@ test('capability warnings retain manual controls and recommendations need explic
   await expect(page.getByLabel('Temperature', { exact: true })).toHaveValue(
     '0.6',
   );
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () =>
@@ -171,7 +171,7 @@ test('retired Advanced route redirects to cards with raw arguments and identity'
   await page
     .getByLabel('Engine arguments', { exact: true })
     .fill('["--vendor-option", "synthetic"]');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () =>
@@ -219,7 +219,7 @@ test('filter reveals advanced matches without clearing edits; unsupported overri
     page.getByRole('heading', { name: 'Unsupported saved overrides' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Reset retired-option' }).click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -244,7 +244,7 @@ test('invalid identity inside a collapsed card opens and receives focus on submi
   await name.fill('');
   await page.locator('[data-settings-section="identity"] summary').click();
   await expect(name).toBeHidden();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect(name).toBeVisible();
   await expect(name).toBeFocused();
   await expect(

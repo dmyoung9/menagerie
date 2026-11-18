@@ -161,7 +161,7 @@ test('native pool device visibility is edited once and saved for all members', a
   // One shared device edit; no per-member device controls exist in a pool.
   await expect(page.getByLabel('GPU', { exact: true })).toHaveCount(1);
   await page.getByLabel('GPU', { exact: true }).selectOption('0');
-  await page.getByRole('button', { name: 'Save pool', exact: true }).click();
+  await page.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect
     .poll(() =>
       fixture.writes.find((entry) =>

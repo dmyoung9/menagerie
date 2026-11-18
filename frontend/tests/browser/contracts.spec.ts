@@ -75,7 +75,7 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
   await args.fill('{"not":"an array"}');
   await expect(args).toHaveAttribute('aria-invalid', 'true');
   await expect(
-    dialog.getByRole('button', { name: 'Save', exact: true }),
+    dialog.getByRole('button', { name: 'Apply', exact: true }),
   ).toBeDisabled();
   expect(
     fixture.writes.filter((write) =>
@@ -83,7 +83,7 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
     ),
   ).toEqual([]);
   await args.fill('["--fixture-control"]');
-  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,

@@ -308,7 +308,7 @@ test('removing an invalid flag clears its errors and unrelated omitted batch def
   await page
     .getByRole('button', { name: 'Remove Top-k override', exact: true })
     .click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -352,7 +352,7 @@ test('advanced JSON replaces numeric buffers and a failed Save preserves the cor
   await json.focus();
   await expect(json).toHaveValue('{\n  "top-k": 41,\n  "extension": false\n}');
   fixture.failSave = true;
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect(
     page.getByText('Alias already exists', { exact: false }),
   ).toBeVisible();
@@ -361,7 +361,7 @@ test('advanced JSON replaces numeric buffers and a failed Save preserves the cor
     page.getByRole('button', { name: 'Discard', exact: true }),
   ).toBeEnabled();
   fixture.failSave = false;
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -397,7 +397,7 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
   await expect(
     page.getByRole('button', { name: 'Discard', exact: true }),
   ).toBeEnabled();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   expect(
     fixture.writes.filter((w) => w.path.startsWith('/api/model-setups?')),
   ).toHaveLength(0);
@@ -408,7 +408,7 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Renamed fixture');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await page
     .getByRole('button', {
       name: 'Rename and update API model ID',
@@ -446,7 +446,7 @@ test('saved thread counts above host concurrency remain editable and save unchan
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Oversubscribed fixture');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await page
     .getByRole('button', {
       name: 'Rename and update API model ID',
@@ -675,7 +675,7 @@ for (const width of [1440, 576, 320]) {
     await input.fill('');
     await expect(input).toHaveValue('');
     await expect(input).toBeFocused();
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     expect(
       fixture.writes.filter((w) => w.path.startsWith('/api/model-setups?')),
     ).toHaveLength(0);
@@ -712,7 +712,7 @@ for (const width of [1440, 576, 320]) {
           .analyze()
       ).violations,
     ).toEqual([]);
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await expect
       .poll(
         () =>

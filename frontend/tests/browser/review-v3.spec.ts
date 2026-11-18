@@ -36,7 +36,7 @@ test('advanced memory controls are quiet by default, explain themselves and pres
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Unchanged defaults');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await page
     .getByRole('button', {
       name: 'Rename and update API model ID',

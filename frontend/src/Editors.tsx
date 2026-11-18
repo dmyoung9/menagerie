@@ -39,6 +39,7 @@ import {
 import { recordValue } from './decode';
 import { reconcileDeep } from './reconcile';
 import { editable } from './editor-state';
+import { applyLabels, type ApplyMode } from './configuration-apply';
 import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { artifactLimits } from './artifact-metadata';
 import type {
@@ -1034,7 +1035,10 @@ function OverrideBadge({ keys }: { keys: string[] }) {
 
 type EditorProps = {
   initial: EditorState;
-  save: (value: EditorState) => void;
+  save: (value: EditorState, mode?: ApplyMode) => void;
+  applicationStatus?: (dirty: boolean) => ReactNode;
+  applyActions?: boolean;
+  applicationOwnsActions?: boolean;
   data: Registry;
   remove?: () => void;
   busy: boolean;
@@ -1060,6 +1064,17 @@ export function Editor(props: EditorProps) {
         )
       : undefined;
   const memberOnly = props.memberOnly || Boolean(owner);
+  const applicationMode = useRef<ApplyMode | null>(null);
+  const loaded = owner?.members.some((m) =>
+    ['READY', 'DEGRADED', 'LOADING', 'STARTING', 'QUEUED', 'STOPPING'].includes(
+      m.state,
+    ),
+  );
+  const defaultApplyMode: ApplyMode = loaded
+    ? owner?.inflight
+      ? 'idle'
+      : 'reload'
+    : 'apply';
   const { confirm: confirmRename, confirmation: renameConfirmation } =
     useConfirmation();
   const [namingError, setNamingError] = useState('');
@@ -1114,7 +1129,11 @@ export function Editor(props: EditorProps) {
         ))
       )
         return;
-      props.save({ kind, value: { ...draft, alias } });
+      props.save(
+        { kind, value: { ...draft, alias } },
+        applicationMode.current ?? defaultApplyMode,
+      );
+      applicationMode.current = null;
     } else props.save({ kind, value: runtimeDraft(value) });
   });
   // The mount-time draft is the reference for "touched vs adopted" fields.
@@ -1648,7 +1667,9 @@ export function Editor(props: EditorProps) {
                   ? `${issues} issue${issues === 1 ? '' : 's'} · check highlighted fields`
                   : changed
                     ? 'Unsaved changes'
-                    : 'All changes saved'}
+                    : props.applicationOwnsActions
+                      ? 'Proposed configuration'
+                      : 'All changes saved'}
               </span>
               <Button
                 variant="outline"
@@ -1678,15 +1699,42 @@ export function Editor(props: EditorProps) {
               </DropdownMenuItem>
             </Menu>
           )}
-          <Button
-            variant="default"
-            type="submit"
-            disabled={
-              busy || props.disabled || Object.values(invalid).some(Boolean)
-            }
-          >
-            {busy ? 'Saving…' : 'Save'}
-          </Button>
+          {props.applicationStatus?.(changed)}
+          {(!props.applicationOwnsActions || changed) &&
+            props.applyActions &&
+            loaded &&
+            Boolean(owner?.inflight) && (
+              <Button
+                type="submit"
+                variant="destructive"
+                disabled={
+                  busy || props.disabled || Object.values(invalid).some(Boolean)
+                }
+                onClick={() => {
+                  applicationMode.current = 'now';
+                }}
+              >
+                Apply and Reload Now
+              </Button>
+            )}
+          {(!props.applicationOwnsActions || changed) && (
+            <Button
+              variant="default"
+              type="submit"
+              onClick={() => {
+                applicationMode.current = defaultApplyMode;
+              }}
+              disabled={
+                busy || props.disabled || Object.values(invalid).some(Boolean)
+              }
+            >
+              {busy
+                ? 'Applying…'
+                : props.applyActions
+                  ? applyLabels[defaultApplyMode]
+                  : 'Save'}
+            </Button>
+          )}
         </div>
       </form>
     </DraftFormProvider>

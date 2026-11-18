@@ -11,7 +11,7 @@ test("revision conflict merges fresh server fields with the user's edits and re-
   await openIdentity(page);
   await page.getByLabel('Display name', { exact: true }).fill('Merged name');
   fixture.conflictSave = true;
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await page
     .getByRole('button', {
       name: 'Rename and update API model ID',
@@ -26,7 +26,7 @@ test("revision conflict merges fresh server fields with the user's edits and re-
     .getByRole('button', { name: 'Review changes', exact: true })
     .click();
   await expect(page.getByText(conflictText, { exact: false })).toBeHidden();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await page
     .getByRole('button', {
       name: 'Rename and update API model ID',
@@ -70,7 +70,7 @@ test('conflict review preserves an in-progress numeric buffer the fresh value di
   const input = page.getByLabel('Top-k', { exact: true });
   await input.fill('40');
   fixture.conflictSave = true;
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect(page.getByText(conflictText, { exact: false })).toBeVisible();
   await page
     .getByRole('button', { name: 'Review changes', exact: true })

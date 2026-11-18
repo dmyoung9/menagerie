@@ -487,7 +487,9 @@ test('engine-reset confirmation is cancellable and recovery retains its existing
   await engine.selectOption('engine-two');
   await confirm.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(engine).toHaveValue('engine-two');
-  await page.getByRole('button', { name: 'Save pool', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Apply and Reload', exact: true })
+    .click();
   await expect(
     fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1'),
   ).toBeDefined();
@@ -497,9 +499,9 @@ test('engine-reset confirmation is cancellable and recovery retains its existing
         .body,
     ).runtime_id,
   ).toBe('engine-two');
-  // The pool save re-normalizes the set, so the editor still reports unsaved
-  // changes; leaving it raises the route-guard prompt. Accept it to proceed
-  // to Settings (the write was already asserted above).
+  await expect(confirm).toContainText('Cached context will be lost');
+  await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
+  // Cancelling reload preserves the draft; leaving still uses the route guard.
   await page
     .getByRole('navigation', { name: 'Main navigation' })
     .getByRole('link', { name: 'Settings', exact: true })

@@ -46,6 +46,8 @@ import { ProcessResources } from '@/components/process-resources';
 import { TelemetrySeries } from '@/components/charts/telemetry-series';
 import { Editor } from './Editors';
 import { PoolWizard } from './PoolWizard';
+import { applyConfiguration } from './configuration-apply';
+import { useConfirmation } from '@/hooks/use-confirmation';
 import { editable } from './editor-state';
 import { Connect, LaunchReview, PolicyEditor, SourceBuild } from './Operations';
 import {
@@ -278,6 +280,8 @@ function initSlice<T>(data: T): Slice<T> {
 }
 
 export default function App() {
+  const { confirm: confirmApply, confirmation: applyConfirmation } =
+    useConfirmation();
   const { route, hashQuery } = useRoute(),
     page = route[0] || 'overview';
   const [slices, setSlices] = useState<Slices>({
@@ -686,6 +690,7 @@ export default function App() {
   }, [jobs, refreshSlices]);
   return (
     <SidebarProvider>
+      {applyConfirmation}
       <a
         className="skip-link"
         href="#main"
@@ -1330,6 +1335,7 @@ export default function App() {
                 initial={modal}
                 data={data}
                 busy={busy}
+                applyActions={modal.kind === 'deployments'}
                 memberOnly={modal.memberOnly}
                 revisionConflict={revisionConflict}
                 onReconciled={(fresh) =>
@@ -1339,10 +1345,10 @@ export default function App() {
                       : current,
                   )
                 }
-                save={(editor) =>
+                save={(editor, mode = 'apply') =>
                   void perform(
-                    () =>
-                      api(
+                    async () => {
+                      const result = await api(
                         modal.pull
                           ? '/api/runtimes/pull'
                           : '/api/' +
@@ -1353,7 +1359,14 @@ export default function App() {
                                 ? '?expected=' + modal.expected
                                 : ''),
                         editor.value,
-                      ),
+                      );
+                      if (editor.kind === 'deployments') {
+                        const row = contracts.deployment(result);
+                        if (row.changes_pending)
+                          await applyConfiguration(row.id, mode, confirmApply);
+                      }
+                      return result;
+                    },
                     modal.pull ? 'Image pull queued' : 'Saved',
                     true,
                     affectedSlices(modal.pull ? 'runtimes' : editor.kind),
