@@ -5,7 +5,7 @@ import time
 
 import httpx
 import pytest
-from test_controlplane import baseline, seed
+from test_controlplane import baseline, port, seed
 
 from controlplane import adapters, lifecycle, runtime_pool, runtime_protocol
 from controlplane.api import create_app
@@ -116,14 +116,22 @@ async def test_pool_routes_models_with_one_process_and_stops_as_one_unit(tmp_pat
     store, manager = app.state.store, app.state.manager
     await seed(store, tmp_path)
     manager.host = baseline()
+    # Pooled members carry no port of their own; the single serving port and
+    # the runtime/device are the pool's.
     for member in store.list("deployment"):
-        store.put("deployment", member | {"residency": "on-demand", "gpu": None})
+        store.put(
+            "deployment",
+            member | {"residency": "on-demand", "gpu": None, "port": None},
+        )
     unit = store.put(
         "deployment_set",
         {
             "id": "pool",
             "name": "Pool",
             "engine_pool": True,
+            "runtime_id": "runtime",
+            "gpu": None,
+            "port": port(),
             "max_loaded": 2,
             "member_ids": ["a", "b"],
             "residency": "on-demand",
@@ -144,7 +152,7 @@ async def test_pool_routes_models_with_one_process_and_stops_as_one_unit(tmp_pat
         assert a["pid"] == b["pid"]
         assert a["log_path"] == b["log_path"]
         assert len(manager.processes) == 1
-        assert manager.runtime_port(b) == a["port"]
+        assert manager.runtime_port(b) == unit["port"]
         assert runtime_protocol.observation(store, b)["residency"] == "unloaded"
         session = store.get("session", a["session_id"])
         assert session["pool_aggregate"]
@@ -231,7 +239,16 @@ async def test_pool_api_rejects_incompatible_policy_atomically(tmp_path):
                     "name": "Invalid pool",
                     "member_ids": ["a", "b"],
                     "engine_pool": True,
+                    "runtime_id": "runtime",
+                    "gpu": 0,
+                    "port": port(),
                     "residency": "pinned",
+                    "max_loaded": 4,
+                    "priority": 50,
+                    "idle_timeout": 300,
+                    "allow_eviction": False,
+                    "queue_timeout": 300,
+                    "enabled": True,
                 },
             )
             assert response.status_code == 400

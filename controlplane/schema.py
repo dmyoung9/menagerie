@@ -56,6 +56,27 @@ class Record(BaseModel):
         return value
 
 
+# Acquisition status for a single file in a downloaded repository snapshot.
+AcquisitionStatus = Literal[
+    "not_downloaded", "downloading", "downloaded", "failed", "missing"
+]
+# Structural kind of an expandable download bundle.
+FileGroupKind = Literal["gguf_split", "safetensors", "companion", "standalone"]
+
+
+class FileGroup(Record):
+    """An expandable bundle of files acquired as one unit. The bundle's main row
+    carries the selection checkbox and selects every member in ``required``; expanded
+    members are inspectable and are never independently selectable. A group is
+    usable (selectable) only while ``complete`` — every required file is present at
+    the selected revision. Incomplete groups stay visible to explain missing bytes."""
+
+    name: str
+    kind: FileGroupKind
+    required: list[str] = Field(default_factory=list)
+    complete: bool = True
+
+
 class Artifact(Record):
     name: str
     local_path: str
@@ -72,6 +93,28 @@ class Artifact(Record):
     # is the backwards-compatible initial default); asset_id identifies which
     # template asset satisfies the source when source != "automatic".
     template_default: dict | None = None
+
+
+class DownloadedFile(Record):
+    """A single file acquired from a repository snapshot.
+
+    The acquired-file record, kept distinct from the deployable :class:`Artifact`
+    and from deployment configuration: acquiring a file neither creates nor
+    enables a model. One record per repository file path; the same file may be
+    shared across many deployments without copying bytes. Revision identity is
+    part of the key, so changing revisions never silently applies old selection
+    to new bytes. (The store-injected row ``revision`` is a separate integer and
+    is not a field here, matching every other record.)"""
+
+    repo: str
+    source_revision: str
+    name: str
+    group_id: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+    status: AcquisitionStatus = "not_downloaded"
+    local_path: str | None = None
+    error: str | None = None
 
 
 class TemplateAsset(Record):
@@ -105,19 +148,20 @@ class Runtime(Record):
     trust: bool = False
 
 
-class Profile(Record):
-    name: str
-    artifact_id: str
-    runtime_id: str
-    config: dict = Field(default_factory=dict)
-    raw_args: list[str] = Field(default_factory=list)
-    catalog: dict = Field(default_factory=dict)
-
-
 class CapabilityPreview(BaseModel):
-    configuration: Profile
+    configuration: dict
     template_override: dict | None = None
     deployment_id: str | None = None
+
+
+# The five configuration fields a deployment carries directly (the collapsed
+# profile). Kept in one place so writers and readers stay in sync.
+PROFILE_FIELDS = ("artifact_id", "runtime_id", "config", "raw_args", "catalog")
+
+
+def profile_view(d: dict) -> dict:
+    """The five configuration keys of a deployment-shaped dict."""
+    return {k: d.get(k, {}) for k in PROFILE_FIELDS}
 
 
 class DeploymentPolicy(Record):
@@ -131,11 +175,29 @@ class DeploymentPolicy(Record):
 
 class Deployment(DeploymentPolicy):
     name: str
-    profile_id: str | None = None
-    configuration: Profile | None = None
+    artifact_id: str
+    # When the member sits in a pool the pool owns its runtime installation,
+    # device and serving port; the member mirrors them (with the port null
+    # while pooled). A standalone member carries them directly.
+    runtime_id: str | None = None
+    config: dict = Field(default_factory=dict)
+    raw_args: list[str] = Field(default_factory=list)
+    catalog: dict = Field(default_factory=dict)
     alias: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,159}$")
-    port: int = Field(ge=1024, le=65535)
+    # How the API identifier (alias) is derived. In "generated" mode the
+    # identifier follows the display name (deterministic slug); in "custom"
+    # mode it is user-controlled and stable across renames. Existing deployments
+    # load with this default and keep their stored alias; the identifier is
+    # regenerated only when the name actually changes.
+    identifier_mode: Literal["generated", "custom"] = "generated"
+    runtime_assignment: Literal["automatic", "dedicated"] = "dedicated"
+    port: int | None = Field(default=None, ge=1024, le=65535)
     gpu: int | None = Field(default=None, ge=0, le=31)
+    # Member targeting for /api/model-setups: an existing pool id, or an
+    # inline specification of a pool created atomically with the member.
+    # Never persisted on the member itself.
+    pool_id: str | None = None
+    pool: dict | None = None
     # Per-deployment template override. None means "use model default";
     # an explicit {source: embedded|published|custom, asset_id} wins over the
     # model default. The source "automatic" is not stored at the deployment level
@@ -147,6 +209,13 @@ class Deployment(DeploymentPolicy):
 class DeploymentSet(DeploymentPolicy):
     name: str
     engine_pool: bool = False
+    # A runtime pool serves all of its members from one router process on one
+    # port; the installation and device are the pool's, not each member's.
+    # Members mirror runtime_id/gpu from the pool and never carry a port
+    # while pooled.
+    runtime_id: str | None = None
+    gpu: int | None = Field(default=None, ge=0, le=31)
+    port: int | None = Field(default=None, ge=1024, le=65535)
     max_loaded: int = Field(default=4, ge=1, le=128)
     member_ids: list[str] = Field(default_factory=list)
     members: list[Deployment] | None = None
@@ -175,7 +244,7 @@ class Settings(BaseModel):
 class ResourceDraft(BaseModel):
     name: str = "Draft model"
     gpu: int | None = Field(default=None, ge=0, le=31)
-    configuration: Profile
+    configuration: dict
 
 
 class ResourcePreview(BaseModel):

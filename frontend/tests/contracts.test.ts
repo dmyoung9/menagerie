@@ -144,10 +144,7 @@ test('absent fields and nullable telemetry remain distinct', () => {
 });
 
 test('catalog extension fields survive decoding and editor projection without server-owned revision fields', () => {
-  const saved = contracts.profile({
-    id: 'profile',
-    revision: 4,
-    name: 'Profile',
+  const snapshot = {
     artifact_id: 'm',
     runtime_id: 'r',
     config: { 'vendor-control': { enabled: true } },
@@ -159,24 +156,33 @@ test('catalog extension fields survive decoding and editor projection without se
         variants: [{ id: 'custom', body: { vendor_budget: 123 } }],
       },
     },
-  });
-  const draft = editable('profiles', saved);
-  assert.deepEqual(draft.catalog, saved.catalog);
-  assert.deepEqual(draft.config, saved.config);
-  assert.equal('revision' in draft, false);
-  const deployment = contracts.deployment({
+  };
+  const saved = contracts.deployment({
     id: 'd',
-    revision: 1,
-    name: 'Deployment',
+    revision: 4,
+    name: 'Profile deployment',
     enabled: true,
     state: 'STOPPED',
     alias: 'model',
-    profile_snapshot: saved,
+    artifact_id: snapshot.artifact_id,
+    runtime_id: snapshot.runtime_id,
+    config: snapshot.config,
+    raw_args: snapshot.raw_args,
+    catalog: snapshot.catalog,
+    profile_snapshot: snapshot,
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    queue_timeout: 300,
+    port: 8120,
+    gpu: null,
+    allow_eviction: false,
   });
-  const edited = editable('deployments', deployment);
-  assert.equal('revision' in edited.configuration!, false);
-  assert.equal('id' in edited.configuration!, false);
-  assert.deepEqual(edited.configuration?.catalog, saved.catalog);
+  const edited = editable('deployments', saved);
+  assert.deepEqual(edited.catalog, saved.catalog);
+  assert.deepEqual(edited.config, saved.config);
+  assert.deepEqual(edited.raw_args, saved.raw_args);
+  assert.equal('revision' in edited, false);
   assert.equal(saved.revision, 4);
 });
 
@@ -188,6 +194,11 @@ test('serving groups have a distinct contract from single-model deployments', ()
     alias: 'model',
     state: 'STOPPED',
     enabled: true,
+    artifact_id: 'm',
+    runtime_id: 'r',
+    config: {},
+    raw_args: [],
+    catalog: {},
   };
   const group = contracts.servingDeployment({
     id: 'g',
@@ -203,7 +214,16 @@ test('serving groups have a distinct contract from single-model deployments', ()
   assert.equal('alias' in group, false);
   assert.equal(group.members[0].alias, 'model');
   assert.throws(
-    () => contracts.servingDeployment({ ...group, multi_model: false }),
+    () =>
+      contracts.servingDeployment({
+        ...group,
+        multi_model: false,
+        artifact_id: 'm',
+        runtime_id: 'r',
+        config: {},
+        raw_args: [],
+        catalog: {},
+      }),
     /alias/,
   );
 });
@@ -223,6 +243,11 @@ test('deployment editing and duplication preserve template override selections',
       enabled: true,
       state: 'STOPPED',
       template_override,
+      artifact_id: 'm',
+      runtime_id: 'r',
+      config: {},
+      raw_args: [],
+      catalog: {},
     });
     assert.deepEqual(
       editable('deployments', saved).template_override,

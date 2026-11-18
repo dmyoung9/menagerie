@@ -1,26 +1,31 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, openAdvanced, openIdentity, openCard } from './fixtures';
-import { deploymentDraft } from '../../src/contracts';
+import { deploymentDraft, deploymentSetDraft } from '../../src/contracts';
 
 test('standalone NumberControl also preserves clearing and commits before Enter submission', async ({
   page,
   fixture,
 }) => {
-  await page.goto('/#/deployments/idle/configuration');
+  // Priority is a pool-level knob; members render a read-only "Pool policy"
+  // panel, so this control lives on the pool's Configuration tab.
+  await page.goto('/#/deployments/pool/configuration');
   const priority = page.getByLabel('Priority', { exact: true });
+  await expect(priority).toBeVisible();
   await priority.fill('');
   await priority.blur();
+  // Clearing is preserved (an empty required field stays empty and flagged);
+  // no default is substituted.
   await expect(priority).toHaveValue('');
   await priority.fill('15');
   await priority.press('Enter');
   await expect
-    .poll(
-      () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
+    .poll(() =>
+      fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1'),
     )
-    .toBe(2);
+    .toBeDefined();
   expect(
-    deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+    deploymentSetDraft(
+      fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1')!
         .body,
     ).priority,
   ).toBe(15);
@@ -63,7 +68,7 @@ test('installed capability refresh preserves focused text and validates the new 
   await expect(input).toHaveValue('12');
 });
 
-test('multi-model removal keeps the remaining member numeric buffer and saves it through the shared form', async ({
+test('removing a member keeps the surviving generation flag and pool state', async ({
   page,
   fixture,
 }) => {
@@ -74,40 +79,111 @@ test('multi-model removal keeps the remaining member numeric buffer and saves it
     label: 'Top-k',
     default: 0,
   };
-  await page.goto('/#/deployments');
+  // Seed a two-member pool. Beta model carries an explicit Top-k override; Alpha
+  // model does not. Members are edited on their own configuration pages and removed
+  // from the pool's Models tab — the pool's Configuration tab holds only shared
+  // pool settings, so the flag lives on the member, not a shared form.
+  const base = {
+    artifact_id: 'model',
+    runtime_id: 'engine',
+    config: { 'ctx-size': 8192, parallel: 1, 'gpu-layers': 'all' },
+    raw_args: [],
+    catalog: {},
+    profile_snapshot: {
+      artifact_id: 'model',
+      runtime_id: 'engine',
+      config: { 'ctx-size': 8192, parallel: 1, 'gpu-layers': 'all' },
+      raw_args: [],
+      catalog: {},
+    },
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    queue_timeout: 300,
+    allow_eviction: false,
+    gpu: 0,
+    port: null,
+    state: 'STOPPED',
+    enabled: true,
+    revision: 1,
+    lifecycle: { serving: true },
+  };
+  const alpha = { ...base, id: 'pair-a', name: 'Alpha model', alias: 'alpha' };
+  const beta = {
+    ...base,
+    id: 'pair-b',
+    name: 'Beta model',
+    alias: 'beta',
+    config: { ...base.config, 'top-k': 8 },
+    profile_snapshot: {
+      ...base.profile_snapshot,
+      config: { ...base.profile_snapshot!.config, 'top-k': 8 },
+    },
+  };
+  fixture.registry.deployments.push(alpha, beta);
+  fixture.sets.push({
+    id: 'buffered-pair',
+    name: 'Buffered pair',
+    multi_model: true,
+    enabled: true,
+    runtime_id: 'engine',
+    gpu: 0,
+    port: 9120,
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    queue_timeout: 300,
+    allow_eviction: false,
+    state: 'STOPPED',
+    revision: 1,
+    member_ids: ['pair-a', 'pair-b'],
+    members: [alpha, beta],
+    lifecycle: { serving: true },
+  });
+  // The pool's Models tab renders each member as a card with its own
+  // status, properties and Edit / Logs / Remove buttons.
+  await page.goto('/#/deployments/buffered-pair/models');
+  await expect(
+    page.getByRole('heading', { name: 'Alpha model', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Beta model', exact: true }),
+  ).toBeVisible();
+  // Remove Alpha model via the Remove button on its card (scoped to the card
+  // that holds the Alpha heading).
   await page
-    .getByRole('button', { name: 'New deployment', exact: true })
+    .locator('[data-slot="card"]')
+    .filter({
+      has: page.getByRole('heading', { name: 'Alpha model', exact: true }),
+    })
+    .getByRole('button', { name: 'Remove', exact: true })
     .click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Name', { exact: true }).fill('Buffered pair');
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  const second = dialog.locator('[data-model-index="1"]');
-  await second.locator('[data-settings-section="generation"] summary').click();
-  await second.getByRole('button', { name: 'Add generation flags' }).click();
-  const picker = page.getByRole('dialog', { name: 'Add generation flags' });
-  await picker.getByRole('checkbox', { name: 'Top-k', exact: true }).check();
-  await picker.getByRole('button', { name: 'Add (1)', exact: true }).click();
-  await second.getByLabel('Top-k', { exact: true }).fill('');
-  await second.getByLabel('Top-k', { exact: true }).blur();
-  await dialog
-    .locator('[aria-label="Models"]')
-    .getByRole('button')
-    .first()
+  const confirmDialog = page.getByRole('alertdialog');
+  await expect(confirmDialog).toBeVisible();
+  await expect(
+    confirmDialog.getByText('Remove Alpha model from Buffered pair?'),
+  ).toBeVisible();
+  await confirmDialog
+    .getByRole('button', { name: 'Continue', exact: true })
     .click();
-  await dialog
-    .locator('[data-model-index="0"]')
-    .getByRole('button', { name: 'Remove model', exact: true })
-    .click();
-  const remaining = dialog.getByLabel('Top-k', { exact: true });
-  await expect(remaining).toHaveValue('');
-  await remaining.fill('8');
-  await remaining.press('Enter');
-  await expect(dialog).toBeHidden();
-  const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments')!.body,
-  );
-  expect(saved.configuration!.config['top-k']).toBe(8);
+  // Alpha is gone; Beta remains.
+  await expect(
+    page.getByRole('heading', { name: 'Alpha model', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'Beta model', exact: true }),
+  ).toBeVisible();
+  // Beta's own configuration page still renders the saved Top-k override.
+  await page.goto('/#/deployments/pair-b/configuration');
+  await openCard(page, 'generation');
+  await expect(page.getByLabel('Top-k', { exact: true })).toHaveValue('8');
+  // Fixture: the pool now holds exactly one member, with its flag intact, and
+  // the removal bumped the pool revision.
+  const pool = fixture.sets.find((group) => group.id === 'buffered-pair')!;
+  expect(pool.members).toHaveLength(1);
+  expect(pool.members[0].name).toBe('Beta model');
+  expect(pool.members[0].config['top-k']).toBe(8);
+  expect(pool.revision).toBe(2);
 });
 
 test('clearing is an editing buffer; blur validates without substituting zero and Enter commits retyped text', async ({
@@ -160,9 +236,9 @@ test('clearing is an editing buffer; blur validates without substituting zero an
     .toBe(2);
   expect(
     deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.config['top-k'],
+    ).config['top-k'],
   ).toBe(12);
   await expect(
     page.getByRole('button', { name: 'Discard', exact: true }),
@@ -191,7 +267,7 @@ test('automatic thread input stays blank through validation and Discard restores
   await expect(input).toHaveValue('');
   await expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(
-    fixture.writes.filter((w) => w.path.startsWith('/api/deployments?')),
+    fixture.writes.filter((w) => w.path.startsWith('/api/model-setups?')),
   ).toHaveLength(0);
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
   await openCard(page, 'memory');
@@ -232,15 +308,15 @@ test('removing an invalid flag clears its errors and unrelated omitted batch def
   await page
     .getByRole('button', { name: 'Remove Top-k override', exact: true })
     .click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
     )
     .toBe(2);
   const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
-  ).configuration!.config;
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
+  ).config;
   expect(saved).not.toHaveProperty('top-k');
   expect(saved).not.toHaveProperty('batch-size');
   expect(saved['ubatch-size']).toBe(4096);
@@ -276,7 +352,7 @@ test('advanced JSON replaces numeric buffers and a failed Save preserves the cor
   await json.focus();
   await expect(json).toHaveValue('{\n  "top-k": 41,\n  "extension": false\n}');
   fixture.failSave = true;
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect(
     page.getByText('Alias already exists', { exact: false }),
   ).toBeVisible();
@@ -285,7 +361,7 @@ test('advanced JSON replaces numeric buffers and a failed Save preserves the cor
     page.getByRole('button', { name: 'Discard', exact: true }),
   ).toBeEnabled();
   fixture.failSave = false;
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -321,9 +397,9 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
   await expect(
     page.getByRole('button', { name: 'Discard', exact: true }),
   ).toBeEnabled();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   expect(
-    fixture.writes.filter((w) => w.path.startsWith('/api/deployments?')),
+    fixture.writes.filter((w) => w.path.startsWith('/api/model-setups?')),
   ).toHaveLength(0);
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
   await openCard(page, 'generation');
@@ -332,15 +408,21 @@ test('unrelated saves keep omitted flags absent and clearing a saved value stays
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Renamed fixture');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
+  await page
+    .getByRole('button', {
+      name: 'Rename and update API model ID',
+      exact: true,
+    })
+    .click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
     )
     .toBe(2);
   const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
-  ).configuration!.config;
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
+  ).config;
   expect(saved['top-k']).toBe(0);
   expect(saved['top-p']).toBe(0.955);
   expect(saved).not.toHaveProperty('threads');
@@ -364,7 +446,13 @@ test('saved thread counts above host concurrency remain editable and save unchan
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Oversubscribed fixture');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
+  await page
+    .getByRole('button', {
+      name: 'Rename and update API model ID',
+      exact: true,
+    })
+    .click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -372,9 +460,9 @@ test('saved thread counts above host concurrency remain editable and save unchan
     .toBe(2);
   expect(
     deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.config.threads,
+    ).config.threads,
   ).toBe(16);
 });
 
@@ -587,9 +675,9 @@ for (const width of [1440, 576, 320]) {
     await input.fill('');
     await expect(input).toHaveValue('');
     await expect(input).toBeFocused();
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     expect(
-      fixture.writes.filter((w) => w.path.startsWith('/api/deployments?')),
+      fixture.writes.filter((w) => w.path.startsWith('/api/model-setups?')),
     ).toHaveLength(0);
     await input.fill('1.12');
     await page
@@ -624,7 +712,7 @@ for (const width of [1440, 576, 320]) {
           .analyze()
       ).violations,
     ).toEqual([]);
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await expect
       .poll(
         () =>
@@ -632,9 +720,9 @@ for (const width of [1440, 576, 320]) {
       )
       .toBe(2);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.config;
+    ).config;
     expect(saved).toMatchObject({
       'top-p': 0.95,
       'repeat-penalty': 1.13,
@@ -659,10 +747,10 @@ for (const width of [1440, 576, 320]) {
     await openCard(page, 'generation');
     await expect(
       page.getByRole('button', { name: 'Add performance flags', exact: true }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     await expect(
       page.getByRole('button', { name: 'Remove Top-p override', exact: true }),
-    ).toBeDisabled();
-    await expect(page.getByLabel('Top-p', { exact: true })).toBeDisabled();
+    ).toBeEnabled();
+    await expect(page.getByLabel('Top-p', { exact: true })).toBeEnabled();
   });
 }

@@ -16,40 +16,41 @@ import { ConfigurationSearchProvider } from '@/components/configuration-search';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import { Field, JsonEdit, Menu, type Registry } from './ui';
 import { EngineCatalog } from './EngineCatalog';
-import {
-  Duration,
-  Placement,
-  RuntimeControl,
-  RuntimeSettings,
-} from './FormControls';
+import { Duration, Placement, RuntimeControl } from './FormControls';
 import { RuntimeFlagCard } from './RuntimeFlagCard';
 import { DraftResources } from './Resources';
 import { useResourcePreview } from './hooks/use-resource-preview';
 import { Capabilities, OutputLimit } from './Capabilities';
 import { DefaultReasoning, Variants } from './ReasoningVariants';
 import { useConfirmation } from '@/hooks/use-confirmation';
-import { readApi } from './ui';
+import { useSuggestedAlias } from '@/hooks/use-suggested-alias';
+import { fetchSuggestedAlias } from './alias-suggestion';
+import { readApi, api } from './ui';
 import {
   engineRecommendation,
   jsonObject,
   stringArray,
   modelCatalog,
   environment,
-  profileDraft,
   deploymentDraft,
   runtimeDraft,
   runtimeCapabilities,
 } from './contracts';
 import { recordValue } from './decode';
+import { reconcileDeep } from './reconcile';
+import { editable } from './editor-state';
+import { applyLabels, type ApplyMode } from './configuration-apply';
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { artifactLimits } from './artifact-metadata';
 import type {
-  Artifact,
+  Deployment,
+  DeploymentDraft,
   EditorDraft,
   EditorDraftMap,
   EditorState,
   EngineRecommendation,
+  EditableSource,
   JsonValue,
-  ProfileDraft,
   Runtime,
   RuntimeRecommendation,
 } from './types';
@@ -127,7 +128,7 @@ export function ConfigurationFields({
   recommendation,
   modelFields,
   placementFields,
-  formPath = 'configuration.config',
+  formPath = 'config',
   templateOverride,
   runtimeLocked = false,
   observed,
@@ -137,9 +138,9 @@ export function ConfigurationFields({
   availability,
   forecast,
 }: {
-  value: ProfileDraft;
+  value: DeploymentDraft;
   data: Registry;
-  set: (value: ProfileDraft) => void;
+  set: (value: DeploymentDraft) => void;
   onValid: (valid: boolean) => void;
   recommendation?: RuntimeRecommendation;
   modelFields?: ReactNode;
@@ -1034,20 +1035,25 @@ function OverrideBadge({ keys }: { keys: string[] }) {
 
 type EditorProps = {
   initial: EditorState;
-  save: (value: EditorState) => void;
+  save: (value: EditorState, mode?: ApplyMode) => void;
+  applicationStatus?: (dirty: boolean) => ReactNode;
+  applyActions?: boolean;
+  applicationOwnsActions?: boolean;
   data: Registry;
   remove?: () => void;
   busy: boolean;
   memberOnly?: boolean;
   disabled?: boolean;
   embedded?: boolean;
+  /** Show the revision-conflict alert with a Review changes action. */
+  revisionConflict?: boolean;
+  /** Called with the freshly fetched record after the draft is reconciled. */
+  onReconciled?: (fresh: EditableSource) => void;
 };
 type EditorField =
-  | keyof EditorDraftMap['profiles']
-  | keyof EditorDraftMap['deployments']
-  | keyof EditorDraftMap['runtimes'];
+  keyof EditorDraftMap['deployments'] | keyof EditorDraftMap['runtimes'];
 export function Editor(props: EditorProps) {
-  const { initial, data, remove, busy } = props;
+  const { initial, data, remove, busy, onReconciled } = props;
   const kind = initial.kind;
   const owner =
     kind === 'deployments'
@@ -1058,6 +1064,20 @@ export function Editor(props: EditorProps) {
         )
       : undefined;
   const memberOnly = props.memberOnly || Boolean(owner);
+  const applicationMode = useRef<ApplyMode | null>(null);
+  const loaded = owner?.members.some((m) =>
+    ['READY', 'DEGRADED', 'LOADING', 'STARTING', 'QUEUED', 'STOPPING'].includes(
+      m.state,
+    ),
+  );
+  const defaultApplyMode: ApplyMode = loaded
+    ? owner?.inflight
+      ? 'idle'
+      : 'reload'
+    : 'apply';
+  const { confirm: confirmRename, confirmation: renameConfirmation } =
+    useConfirmation();
+  const [namingError, setNamingError] = useState('');
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState('');
   const [wide, setWide] = useState(
@@ -1085,24 +1105,83 @@ export function Editor(props: EditorProps) {
     setValue,
     changed: draftChanged,
     reset,
-  } = useDraftForm<EditorDraft>(initial.value, (value) => {
+  } = useDraftForm<EditorDraft>(initial.value, async (value) => {
     if (Object.values(invalid).some(Boolean) || busy || props.disabled) return;
-    if (kind === 'profiles') props.save({ kind, value: profileDraft(value) });
-    else if (kind === 'deployments')
-      props.save({ kind, value: deploymentDraft(value) });
-    else props.save({ kind, value: runtimeDraft(value) });
+    if (kind === 'deployments') {
+      const draft = deploymentDraft(value);
+      let alias = draft.alias;
+      setNamingError('');
+      if (generatedRename) {
+        try {
+          alias = (await fetchSuggestedAlias(draft.name, draft.id)).alias;
+        } catch (error) {
+          setNamingError(String(error));
+          return;
+        }
+      }
+      const old = deploymentDraft(initial.value).alias;
+      if (
+        draft.id &&
+        alias !== old &&
+        !(await confirmRename(
+          `Clients using ${old} will need to switch to ${alias}.`,
+          'Rename and update API model ID',
+        ))
+      )
+        return;
+      props.save(
+        { kind, value: { ...draft, alias } },
+        applicationMode.current ?? defaultApplyMode,
+      );
+      applicationMode.current = null;
+    } else props.save({ kind, value: runtimeDraft(value) });
   });
+  // The mount-time draft is the reference for "touched vs adopted" fields.
+  // It must not follow the live initial (which becomes the fresh value after a
+  // conflict review), or untouched fields would keep stale server values.
+  const mountRef = useRef<EditorDraft | null>(null);
+  if (mountRef.current === null) mountRef.current = initial.value;
   const [epoch, setEpoch] = useState(0);
+  const reviewRevision = async () => {
+    if (busy || props.disabled) return;
+    const list = (await api(`/api/registry/${kind}`)) as {
+      id?: string;
+      revision?: number;
+    }[];
+    const fresh = list.find(
+      (r) => r.id === (initial.value.id as string | undefined),
+    );
+    if (!fresh) return;
+    const freshValue =
+      kind === 'deployments'
+        ? editable('deployments', fresh as Deployment)
+        : editable('runtimes', fresh as Runtime);
+    setValue(
+      reconcileDeep(mountRef.current!, freshValue, value) as EditorDraft,
+    );
+    onReconciled?.(fresh as EditableSource);
+  };
   const changed = draftChanged || Object.values(invalid).some(Boolean);
   const navigationGuard = useUnsavedChanges(
     !!props.embedded && changed,
     !!props.embedded && busy,
   );
-  const profile = 'artifact_id' in value ? value : undefined;
   const deployment = 'alias' in value ? value : undefined;
+  const originalDeployment =
+    'alias' in initial.value ? initial.value : undefined;
+  const generatedRename = Boolean(
+    deployment &&
+    deployment.identifier_mode !== 'custom' &&
+    (deployment.name !== originalDeployment?.name ||
+      originalDeployment?.identifier_mode === 'custom'),
+  );
+  const aliasSuggestion = useSuggestedAlias(
+    deployment?.name || '',
+    generatedRename,
+    deployment?.id,
+  );
   const runtime = 'engine' in value ? value : undefined;
   const decode = {
-    profiles: profileDraft,
     deployments: deploymentDraft,
     runtimes: runtimeDraft,
   }[kind];
@@ -1116,7 +1195,22 @@ export function Editor(props: EditorProps) {
         .map((d) => ({ ...d, configuration: d.profile_snapshot }))
     : [];
   const preview = useResourcePreview(
-    deployment?.configuration ? [deployment, ...peers] : [],
+    deployment
+      ? [
+          {
+            ...deployment,
+            configuration: {
+              name: deployment.name,
+              artifact_id: deployment.artifact_id,
+              runtime_id: deployment.runtime_id,
+              config: deployment.config,
+              raw_args: deployment.raw_args,
+              catalog: deployment.catalog,
+            },
+          },
+          ...peers,
+        ]
+      : [],
     data.host?.[0]?.ts,
   );
   const set = (key: EditorField, v: unknown) =>
@@ -1164,32 +1258,6 @@ export function Editor(props: EditorProps) {
       />
       {label}
     </label>
-  );
-  const select = (
-    key: EditorField,
-    rows: (Artifact | Runtime)[],
-    label: string,
-  ) => (
-    <Field label={label}>
-      <NativeSelect
-        required
-        value={
-          typeof read(key) === 'string' || typeof read(key) === 'number'
-            ? String(read(key))
-            : ''
-        }
-        onChange={(e) => set(key, e.target.value)}
-      >
-        <NativeSelectOption value="" disabled>
-          Select…
-        </NativeSelectOption>
-        {rows.map((r) => (
-          <NativeSelectOption key={r.id} value={r.id}>
-            {r.name}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
-    </Field>
   );
   const json = (
     key: 'config' | 'raw_args' | 'catalog' | 'env' | 'command_template',
@@ -1260,107 +1328,136 @@ export function Editor(props: EditorProps) {
     >
       <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {input('name', 'Display name')}
-        {deployment && input('alias', 'API model ID')}
+        {deployment && (
+          <Field label="API model ID">
+            {deployment.identifier_mode === 'custom' ? (
+              <Input
+                value={deployment.alias}
+                onChange={(e) => set('alias', e.target.value)}
+              />
+            ) : (
+              <code>
+                {generatedRename ? aliasSuggestion.alias : deployment.alias}
+              </code>
+            )}
+            <p>
+              {deployment.identifier_mode === 'custom'
+                ? 'This ID stays the same when you rename the model.'
+                : 'Generated from the name and updated when you rename it.'}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                set(
+                  'identifier_mode',
+                  deployment.identifier_mode === 'custom'
+                    ? 'generated'
+                    : 'custom',
+                )
+              }
+            >
+              {deployment.identifier_mode === 'custom'
+                ? 'Generate from name'
+                : 'Customize API model ID'}
+            </Button>
+            {generatedRename && (
+              <p>
+                API model ID: {originalDeployment?.alias} →{' '}
+                {aliasSuggestion.alias}
+              </p>
+            )}
+            {aliasSuggestion.error && generatedRename && (
+              <p role="alert">{aliasSuggestion.error}</p>
+            )}
+          </Field>
+        )}
       </FieldGroup>
     </SettingsSection>
   );
   const availability =
-    deployment && kind === 'deployments' ? (
+    deployment && kind === 'deployments' && !memberOnly ? (
       <SettingsSection
         name="lifecycle"
         title="Availability"
         description="Loading and client exposure."
         hidden={availabilityHidden}
-        summary={
-          memberOnly ? (
-            <Badge variant="secondary">Pool policy</Badge>
-          ) : undefined
-        }
       >
-        {memberOnly ? (
-          <>
-            <p className="text-muted-foreground text-sm">{policyLine}</p>
-            <p className="text-muted-foreground text-sm">
-              Loading policy, priority, idle unload, eviction and the endpoint
-              belong to the deployment set, not to this member. Change them once
-              at the top of the pool Configuration.
-            </p>
-          </>
-        ) : (
-          <>
-            <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Mode">
-                <NativeSelect
-                  value={deployment.residency}
-                  onChange={(e) => set('residency', e.target.value)}
-                >
-                  <NativeSelectOption value="on-demand">
-                    On demand
-                  </NativeSelectOption>
-                  <NativeSelectOption value="pinned">Pinned</NativeSelectOption>
-                  <NativeSelectOption value="evictable">
-                    Evictable
-                  </NativeSelectOption>
-                </NativeSelect>
-              </Field>
-              {input('priority', 'Priority', 'number', 0, 100)}
-              {deployment.residency === 'on-demand' && (
-                <Duration
-                  value={deployment.idle_timeout ?? 0}
-                  change={(v) => set('idle_timeout', v)}
-                />
-              )}
-            </FieldGroup>
-            {deployment.residency !== 'pinned' &&
-              check(
-                'allow_eviction',
-                'Can unload to make room for another deployment',
-              )}
-            {check('enabled', 'Enabled for clients')}
-            <CardAdvanced
-              title="Advanced availability"
-              overrides={['queue_timeout', 'port']}
-              defaultOpen={Boolean(
-                q &&
-                ['queue', 'timeout', 'port', 'private'].some((word) =>
-                  q.includes(word),
-                ),
-              )}
-            >
-              {input(
-                'queue_timeout',
-                'Queue timeout (seconds)',
-                'number',
-                1,
-                1800,
-              )}
-              <Field
-                label="Private port"
-                hint="Loopback port for this deployment's endpoint."
+        <>
+          <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Mode">
+              <NativeSelect
+                value={deployment.residency}
+                onChange={(e) => set('residency', e.target.value)}
               >
-                <NumberControl
-                  label="Private port"
-                  required
-                  min={1024}
-                  max={65535}
-                  value={
-                    typeof deployment.port === 'number'
-                      ? deployment.port
-                      : undefined
-                  }
-                  change={(v) => set('port', v ?? 0)}
-                />
-              </Field>
-            </CardAdvanced>
-          </>
-        )}
+                <NativeSelectOption value="on-demand">
+                  On demand
+                </NativeSelectOption>
+                <NativeSelectOption value="pinned">Pinned</NativeSelectOption>
+                <NativeSelectOption value="evictable">
+                  Evictable
+                </NativeSelectOption>
+              </NativeSelect>
+            </Field>
+            {input('priority', 'Priority', 'number', 0, 100)}
+            {deployment.residency === 'on-demand' && (
+              <Duration
+                value={deployment.idle_timeout ?? 0}
+                change={(v) => set('idle_timeout', v)}
+              />
+            )}
+          </FieldGroup>
+          {deployment.residency !== 'pinned' &&
+            check(
+              'allow_eviction',
+              'Can unload to make room for another deployment',
+            )}
+          {check('enabled', 'Enabled for clients')}
+          <CardAdvanced
+            title="Advanced availability"
+            overrides={['queue_timeout', 'port']}
+            defaultOpen={Boolean(
+              q &&
+              ['queue', 'timeout', 'port', 'private'].some((word) =>
+                q.includes(word),
+              ),
+            )}
+          >
+            {input(
+              'queue_timeout',
+              'Queue timeout (seconds)',
+              'number',
+              1,
+              1800,
+            )}
+            <Field
+              label="Private port"
+              hint="Loopback port for this deployment's endpoint."
+            >
+              <NumberControl
+                label="Private port"
+                required
+                min={1024}
+                max={65535}
+                value={
+                  typeof deployment.port === 'number'
+                    ? deployment.port
+                    : undefined
+                }
+                change={(v) => set('port', v ?? 0)}
+              />
+            </Field>
+          </CardAdvanced>
+        </>
       </SettingsSection>
     ) : null;
-  const forecast = deployment?.configuration && (
+  const forecast = deployment && (
     <DraftResources compact preview={preview.data} error={preview.error} />
   );
   return (
     <DraftFormProvider value={form}>
+      {renameConfirmation}
+      {namingError && <p role="alert">{namingError}</p>}
       <form
         ref={formElement}
         className={
@@ -1427,9 +1524,9 @@ export function Editor(props: EditorProps) {
               disabled={busy || props.disabled}
             >
               {identity}
-              {kind === 'deployments' && deployment.configuration && (
+              {deployment && (
                 <ConfigurationFields
-                  value={deployment.configuration}
+                  value={deployment}
                   deploymentId={deployment.id}
                   templateOverride={deployment.template_override}
                   runtimeLocked={Boolean(owner?.engine_pool)}
@@ -1444,7 +1541,7 @@ export function Editor(props: EditorProps) {
                     )?.runtime_observation?.observed_at
                   }
                   data={data}
-                  set={(configuration) => set('configuration', configuration)}
+                  set={(configuration) => setValue(configuration)}
                   onValid={(valid) =>
                     setInvalid((prev) => ({
                       ...prev,
@@ -1459,7 +1556,7 @@ export function Editor(props: EditorProps) {
                     <ChatTemplateSettings
                       label="Chat template"
                       model={data.models.find(
-                        (m) => m.id === deployment.configuration?.artifact_id,
+                        (m) => m.id === deployment.artifact_id,
                       )}
                       override={deployment.template_override || null}
                       onChange={(selection) =>
@@ -1497,32 +1594,6 @@ export function Editor(props: EditorProps) {
         ) : (
           <FieldSet key={epoch} disabled={busy || props.disabled}>
             {identity}
-            {kind === 'profiles' && profile && (
-              <>
-                {select('artifact_id', data.models || [], 'Model')}
-                {select('runtime_id', data.runtimes || [], 'Engine')}
-                <RuntimeSettings
-                  engineSelected={Boolean(profile.runtime_id)}
-                  schema={
-                    data.runtimes?.find((r) => r.id === profile.runtime_id)
-                      ?.capabilities?.schema || {}
-                  }
-                  value={profile.config}
-                  change={(config) => set('config', config)}
-                  host={data.host?.[0]}
-                  formPath="config"
-                />
-                <details>
-                  <summary>Advanced</summary>
-                  {json('config', 'Runtime options (JSON)')}
-                  {json('raw_args', 'Arguments (JSON array)')}
-                  {json('catalog', 'Client capabilities (JSON)')}
-                </details>
-                <p className="muted">
-                  Running deployments keep their saved revision.
-                </p>
-              </>
-            )}
             {kind === 'runtimes' && runtime && (
               <>
                 <FieldGroup className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
@@ -1570,6 +1641,24 @@ export function Editor(props: EditorProps) {
             )}
           </FieldSet>
         )}
+        {props.revisionConflict && (
+          <Alert variant="default" className="mb-5" role="alert">
+            <AlertDescription className="whitespace-pre-line">
+              This configuration changed elsewhere. Your edits have been kept.
+            </AlertDescription>
+            <AlertAction>
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                disabled={busy || props.disabled}
+                onClick={() => void reviewRevision()}
+              >
+                Review changes
+              </Button>
+            </AlertAction>
+          </Alert>
+        )}
         <div className="dialog-actions configuration-save-bar">
           {deployment && (
             <>
@@ -1578,7 +1667,9 @@ export function Editor(props: EditorProps) {
                   ? `${issues} issue${issues === 1 ? '' : 's'} · check highlighted fields`
                   : changed
                     ? 'Unsaved changes'
-                    : 'All changes saved'}
+                    : props.applicationOwnsActions
+                      ? 'Proposed configuration'
+                      : 'All changes saved'}
               </span>
               <Button
                 variant="outline"
@@ -1608,15 +1699,42 @@ export function Editor(props: EditorProps) {
               </DropdownMenuItem>
             </Menu>
           )}
-          <Button
-            variant="default"
-            type="submit"
-            disabled={
-              busy || props.disabled || Object.values(invalid).some(Boolean)
-            }
-          >
-            {busy ? 'Saving…' : kind === 'profiles' ? 'Save revision' : 'Save'}
-          </Button>
+          {props.applicationStatus?.(changed)}
+          {(!props.applicationOwnsActions || changed) &&
+            props.applyActions &&
+            loaded &&
+            Boolean(owner?.inflight) && (
+              <Button
+                type="submit"
+                variant="destructive"
+                disabled={
+                  busy || props.disabled || Object.values(invalid).some(Boolean)
+                }
+                onClick={() => {
+                  applicationMode.current = 'now';
+                }}
+              >
+                Apply and Reload Now
+              </Button>
+            )}
+          {(!props.applicationOwnsActions || changed) && (
+            <Button
+              variant="default"
+              type="submit"
+              onClick={() => {
+                applicationMode.current = defaultApplyMode;
+              }}
+              disabled={
+                busy || props.disabled || Object.values(invalid).some(Boolean)
+              }
+            >
+              {busy
+                ? 'Applying…'
+                : props.applyActions
+                  ? applyLabels[defaultApplyMode]
+                  : 'Save'}
+            </Button>
+          )}
         </div>
       </form>
     </DraftFormProvider>

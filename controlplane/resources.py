@@ -2,6 +2,7 @@
 
 import math
 
+from .schema import profile_view
 from .store import identity
 
 
@@ -238,11 +239,7 @@ def validate_budget(manager, drafts):
     return preview(
         manager,
         [
-            d
-            | {
-                "configuration": d.get("configuration")
-                or manager.store.get("profile", d["profile_id"])
-            }
+            d | {"configuration": d.get("configuration") or profile_view(d)}
             for d in drafts
         ],
     )

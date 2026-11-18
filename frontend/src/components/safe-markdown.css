@@ -1,0 +1,149 @@
+/* Safe Markdown article: untrusted README content, rendered with a fixed,
+   token-driven type scale. No user-controllable styles; only semantic
+   tokens and fixed layout rules. */
+
+.safe-markdown {
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.55;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.safe-markdown > :first-child,
+.safe-markdown > * + :first-child {
+  margin-top: 0;
+}
+
+.safe-markdown h1,
+.safe-markdown h2,
+.safe-markdown h3,
+.safe-markdown h4,
+.safe-markdown h5,
+.safe-markdown h6 {
+  margin: 1.4em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+
+.safe-markdown h1 {
+  font-size: 18px;
+}
+.safe-markdown h2 {
+  font-size: 15px;
+}
+.safe-markdown h3,
+.safe-markdown h4,
+.safe-markdown h5,
+.safe-markdown h6 {
+  font-size: 14px;
+}
+
+.safe-markdown p {
+  margin: 0 0 0.9em;
+}
+
+.safe-markdown a.safe-md-link {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.safe-markdown a.safe-md-link:hover {
+  opacity: 0.85;
+}
+
+.safe-markdown img.safe-md-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.safe-markdown code {
+  font-size: 0.92em;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.12em 0.3em;
+}
+
+.safe-markdown pre {
+  margin: 0 0 0.9em;
+  padding: 0.7em 0.8em;
+  background: var(--background-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.safe-markdown pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: 0.86em;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.safe-markdown blockquote {
+  margin: 0 0 0.9em 0;
+  padding-left: 0.6em;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.safe-markdown blockquote > * {
+  margin-left: 0;
+}
+
+.safe-markdown ul,
+.safe-markdown ol {
+  margin: 0 0 0.9em;
+  padding-left: 1.4em;
+}
+
+.safe-markdown li {
+  margin-bottom: 0.25em;
+}
+
+.safe-markdown table {
+  margin: 0 0 0.9em;
+  border-collapse: collapse;
+  width: auto;
+  max-width: 100%;
+  font-size: 0.9em;
+}
+
+.safe-markdown th,
+.safe-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.35em 0.5em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.safe-markdown th {
+  background: var(--muted);
+  font-weight: 600;
+}
+
+.safe-markdown hr {
+  margin: 1.4em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.safe-markdown dl {
+  margin: 0 0 0.9em;
+}
+
+.safe-markdown dd {
+  margin: 0 0 0.25em 0.7em;
+}
+
+.safe-markdown .safe-md-alt {
+  color: var(--muted-foreground);
+  font-style: italic;
+}

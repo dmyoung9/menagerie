@@ -36,14 +36,27 @@ test('advanced memory controls are quiet by default, explain themselves and pres
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Unchanged defaults');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
+  await page
+    .getByRole('button', {
+      name: 'Rename and update API model ID',
+      exact: true,
+    })
+    .click();
+  await expect
+    .poll(() =>
+      fixture.writes.some((write) =>
+        write.path.startsWith('/api/model-setups?'),
+      ),
+    )
+    .toBe(true);
   const saved = deploymentDraft(
-    fixture.writes.find((write) => write.path.startsWith('/api/deployments?'))!
+    fixture.writes.find((write) => write.path.startsWith('/api/model-setups?'))!
       .body,
   );
-  expect(saved.configuration!.config['fit-target']).toBeUndefined();
-  expect(saved.configuration!.config['split-mode']).toBeUndefined();
-  expect(saved.configuration!.config['gpu-layers']).toBe('all');
+  expect(saved.config['fit-target']).toBeUndefined();
+  expect(saved.config['split-mode']).toBeUndefined();
+  expect(saved.config['gpu-layers']).toBe('all');
 });
 
 test('performance explains engine defaults and its Add action', async ({
@@ -67,20 +80,14 @@ test('performance explains why Add is unavailable without an engine', async ({
   fixture,
 }) => {
   fixture.registry.runtimes = [];
-  await page.goto('/#/deployments');
-  await page
-    .getByRole('button', { name: 'New deployment', exact: true })
-    .click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  const card = dialog.locator('[data-settings-section="memory"]');
+  await page.goto('/#/deployments/idle/configuration');
   await expect(
-    card.getByText(
+    page.getByText(
       'Choose an engine to see supported context and memory options.',
     ),
   ).toBeVisible();
   await expect(
-    card.getByRole('button', { name: 'Add performance flags' }),
+    page.getByRole('button', { name: 'Add performance flags' }),
   ).toHaveCount(0);
 });
 
@@ -88,9 +95,11 @@ test('interrupting requests requires an explicit unload action', async ({
   page,
   fixture,
 }) => {
+  // Unloading is now a pool-level action: force the pool active so its header
+  // exposes the Unload control (member rows only expose Load/Enable).
+  fixture.sets[0].state = 'LOADING';
   await page.goto('/#/deployments');
-  const row = page.getByRole('row').filter({ hasText: 'Example ready' });
-  await row.getByRole('button', { name: 'Unload', exact: true }).click();
+  await page.getByRole('button', { name: 'Unload', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Active requests finish first');
   await dialog
@@ -98,6 +107,6 @@ test('interrupting requests requires an explicit unload action', async ({
     .click();
   await expect(dialog).toBeHidden();
   expect(
-    fixture.writes.find((write) => write.path.endsWith('/ready/stop'))!.body,
+    fixture.writes.find((write) => write.path.endsWith('/pool/stop'))!.body,
   ).toEqual({ cancel_requests: true });
 });

@@ -42,7 +42,8 @@ For 3.0 configuration/capability intelligence, execute every scenario in the
 [release hardware matrix](releases/3.0.0.md#hardware-acceptance-status): upstream
 llama.cpp, a Prism-compatible executable, reasoning, multimodal projector/input,
 native routing/residency/eviction/resource attribution, unknown-feature recovery,
-and existing vLLM supervised behavior. Record GPU and CPU combinations separately.
+and explicit rejection of unsupported non-router workflows. Record GPU and CPU
+combinations separately.
 Keep unexecuted combinations marked unverified; metadata and intercepted-browser
 results must never be promoted to hardware acceptance.
 

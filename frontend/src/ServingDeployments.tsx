@@ -1,5 +1,11 @@
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import {
+  applyConfiguration,
+  applyLabels,
+  type ApplyMode,
+} from './configuration-apply';
+import { PendingChanges } from '@/components/pending-changes';
 import {
   Table,
   TableHeader,
@@ -9,7 +15,7 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { FieldSet, FieldLegend, FieldGroup } from '@/components/ui/field';
+import { FieldSet, FieldGroup } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
   NativeSelect,
@@ -18,15 +24,15 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Card,
+  CardTitle,
   CardHeader,
   CardDescription,
   CardContent,
 } from '@/components/ui/card';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   active,
-  api,
   Dialog,
   Empty,
   Field,
@@ -36,6 +42,7 @@ import {
   mode,
   number,
   state,
+  api,
   Status,
   Tabs,
   Json,
@@ -47,17 +54,12 @@ import { ResourceHistory } from '@/components/resource-history';
 import { EmbeddedEditor } from '@/components/embedded-editor';
 import { RequestHistory } from '@/components/request-history';
 import { DeploymentPerformance } from '@/components/deployment-performance';
-import { go } from './navigation';
-import { ConfigurationFields } from './Editors';
+import { go, repoPath } from './navigation';
 import { DraftFormProvider, useDraftForm } from './use-draft-form';
-import { ChatTemplateSettings } from './ChatTemplateSettings';
-import { defaults, editable } from './editor-state';
+import { editable } from './editor-state';
 import { Duration, Placement } from './FormControls';
 import { NumberControl } from './NumberControl';
-import { DraftResources } from './Resources';
-import { useResourcePreview } from './hooks/use-resource-preview';
 import { useConfirmation } from '@/hooks/use-confirmation';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Select,
   SelectTrigger,
@@ -71,16 +73,271 @@ import { SettingsSection } from '@/components/settings-section';
 import { CardAdvanced } from '@/components/card-advanced';
 import { readApi } from './ui';
 import * as contracts from './contracts';
+import { reconcileDeep, deploymentSetToDraft } from './reconcile';
 import type {
   Deployment,
   DeploymentActions,
-  DeploymentDraft,
   DeploymentSet,
   DeploymentSetDraft,
   HostSnapshot,
   OperationEvent,
+  Runtime,
   ServingDeployment,
 } from './types';
+
+export function PoolSection({
+  d,
+  data,
+  host,
+  actions,
+  changed,
+}: {
+  d: DeploymentSet;
+  data: Registry;
+  host: HostSnapshot;
+  actions: DeploymentActions;
+  changed: (text: string) => void;
+}) {
+  const { confirm, confirmation } = useConfirmation();
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  const members = d.members || [];
+  const runtime = (data.runtimes || []).find((r) => r.id === d.runtime_id);
+  const meta = [
+    `${members.length} model${members.length === 1 ? '' : 's'}`,
+    runtime?.name || d.runtime_id,
+    d.port != null ? `:${d.port}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const stale = telemetryStale(host);
+
+  async function remove(member: Deployment) {
+    if (
+      !(await confirm(
+        `Remove ${member.name} from ${d.name}? Model files and history are kept.`,
+      ))
+    )
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(
+        `/api/deployment-sets/${d.id}/members/${member.id}/remove?expected=${d.revision}`,
+        {},
+      );
+      changed(`${member.name} removed from ${d.name}`);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removePool() {
+    if (
+      !(await confirm(
+        `Delete ${d.name}? ${
+          members.length
+            ? `${members.length} model${members.length === 1 ? '' : 's'} leave the registry. `
+            : ''
+        }Model files and the engine installation are kept.`,
+      ))
+    )
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(
+        `/api/deployment-sets/${d.id}/delete?expected=${d.revision}`,
+        {},
+      );
+      changed(`${d.name} deleted`);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="mb-5 min-w-0 gap-0 p-0">
+      {confirmation}
+      <CardHeader className="flex flex-wrap items-start justify-between gap-3 p-5 pb-3">
+        <div className="min-w-0">
+          <CardTitle className="flex flex-wrap items-center gap-2">
+            <a href={`#/deployments/${d.id}`}>{d.name}</a>
+            <Status value={state(d)} />
+          </CardTitle>
+          <CardDescription>{meta}</CardDescription>
+          {d.changes_pending && <p className="muted">Changes pending</p>}
+        </div>
+        <div className="actions flex flex-wrap items-center gap-2">
+          {d.enabled && !active(d) && (
+            <Button
+              variant="default"
+              type="button"
+              disabled={busy}
+              onClick={() => actions.load('serving-deployments', d)}
+            >
+              Load
+            </Button>
+          )}
+          {active(d) && d.state !== 'STOPPING' && (
+            <Button
+              variant="outline"
+              type="button"
+              disabled={busy}
+              onClick={() => actions.stop('serving-deployments', d)}
+            >
+              Unload
+            </Button>
+          )}
+          <Menu label={'Actions for ' + d.name}>
+            <DropdownMenuItem
+              onClick={() => actions.edit('deployment_sets', d)}
+            >
+              Edit pool
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={busy || active(d)}
+              onClick={() => void removePool()}
+            >
+              Delete pool
+            </DropdownMenuItem>
+          </Menu>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        {error && (
+          <p role="alert" className="error-text px-5 pb-3">
+            {error}
+          </p>
+        )}
+        {members.length ? (
+          <div className="table-wrap">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Model</TableHead>
+                  <TableHead>Availability</TableHead>
+                  <TableHead className="numeric">
+                    VRAM (GiB)
+                    {stale && (
+                      <small
+                        className="muted"
+                        title="Telemetry has not updated"
+                      >
+                        {' '}
+                        · stale
+                      </small>
+                    )}
+                  </TableHead>
+                  <TableHead className="numeric">Active requests</TableHead>
+                  <TableHead>
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {members.map((member) => (
+                  <TableRow key={member.id}>
+                    <TableCell>
+                      <Status value={state(member)} />
+                    </TableCell>
+                    <TableCell>
+                      <a href={`#/deployments/${member.id}`}>{member.name}</a>
+                      <small className="muted">
+                        <code>{member.alias}</code>
+                      </small>
+                      {member.changes_pending && (
+                        <p className="muted">Changes pending</p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {member.member_availability === false
+                        ? 'Unavailable'
+                        : !member.enabled
+                          ? 'Disabled'
+                          : member.runtime_observation?.residency ===
+                                'resident' || member.state === 'READY'
+                            ? 'Loaded'
+                            : ['STARTING', 'LOADING', 'QUEUED'].includes(
+                                  member.state,
+                                )
+                              ? 'Loading'
+                              : member.state === 'STOPPING'
+                                ? 'Unloading'
+                                : 'Not loaded'}
+                    </TableCell>
+                    <TableCell className="numeric">
+                      {gib(host.deployments?.[member.id]?.gpu_mib)}
+                    </TableCell>
+                    <TableCell className="numeric">
+                      {member.inflight || 0}
+                    </TableCell>
+                    <TableCell>
+                      <div className="actions">
+                        {member.member_availability !== false && (
+                          <Button
+                            variant="outline"
+                            type="button"
+                            aria-label={
+                              (member.enabled ? 'Disable ' : 'Enable ') +
+                              member.name
+                            }
+                            disabled={busy || member.changes_pending}
+                            onClick={() =>
+                              actions.enable(member, !member.enabled)
+                            }
+                          >
+                            {member.enabled ? 'Disable' : 'Enable'}
+                          </Button>
+                        )}
+                        <Menu label={'Actions for ' + member.name}>
+                          <DropdownMenuItem
+                            render={
+                              <a
+                                href={`#/deployments/${member.id}/configuration`}
+                              />
+                            }
+                          >
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            render={
+                              <a href={`#/deployments/${member.id}/logs`} />
+                            }
+                          >
+                            Logs
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            aria-label={'Remove ' + member.name + ' from pool'}
+                            disabled={busy || active(member)}
+                            onClick={() => void remove(member)}
+                          >
+                            Remove from pool
+                          </DropdownMenuItem>
+                        </Menu>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : (
+          <div className="px-5 pb-5">
+            <p className="muted">No models in this pool yet.</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function unitVram(
   d: ServingDeployment,
@@ -97,13 +354,24 @@ export function ServingTable({
   host,
   actions,
   compact = false,
+  runtimes = [],
 }: {
   rows: ServingDeployment[];
   host: HostSnapshot;
   actions: DeploymentActions;
   compact?: boolean;
+  runtimes?: Runtime[];
 }) {
   const [expanded, setExpanded] = useState<string[]>([]);
+  function poolSubtitle(d: ServingDeployment) {
+    const modelCount = d.members?.length ?? 0;
+    if (modelCount <= 1) return null;
+    const runtimeName = runtimes.find((r) => r.id === d.runtime_id)?.name;
+    const parts: string[] = [`${modelCount} models`];
+    if (d.runtime_id) parts.push(runtimeName ? runtimeName : d.runtime_id);
+    if (d.port != null) parts.push(`:${d.port}`);
+    return parts.join(' · ');
+  }
   function primary(d: ServingDeployment) {
     const label = !d.enabled ? 'Enable' : active(d) ? 'Unload' : 'Load';
     const onClick = () =>
@@ -205,9 +473,7 @@ export function ServingTable({
                         {d.name}
                       </a>
                       {d.members?.length > 1 && (
-                        <small className="muted">
-                          {d.members.length} models
-                        </small>
+                        <small className="muted">{poolSubtitle(d)}</small>
                       )}
                       {(d.state === 'FAILED' || d.lifecycle?.failure) && (
                         <a
@@ -233,13 +499,21 @@ export function ServingTable({
                     <div className="actions">
                       {primary(d)}
                       <Menu label={'Actions for ' + d.name}>
-                        <DropdownMenuItem
-                          render={
-                            <a href={`#/deployments/${d.id}/configuration`} />
-                          }
-                        >
-                          Edit
-                        </DropdownMenuItem>
+                        {d.multi_model ? (
+                          <DropdownMenuItem
+                            onClick={() => actions.edit('deployment_sets', d)}
+                          >
+                            Edit
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            render={
+                              <a href={`#/deployments/${d.id}/configuration`} />
+                            }
+                          >
+                            Edit
+                          </DropdownMenuItem>
+                        )}
                         {!d.multi_model && (
                           <DropdownMenuItem
                             onClick={() => actions.edit('deployments', d, true)}
@@ -301,20 +575,29 @@ export function ServingTable({
 
 export function DeploymentSetEditor({
   initial,
-  modelId,
   data,
   close,
   saved,
   embedded = false,
 }: {
   initial?: DeploymentSet;
-  modelId?: string;
   data: Registry;
   close: () => void;
   saved: (id: string) => void;
   embedded?: boolean;
 }) {
   const { confirm, confirmation } = useConfirmation();
+  const activity =
+    data.serving?.find((unit) => unit.id === initial?.id) ?? initial;
+  const loaded = activity?.members.some((m) => active(m));
+  const mode: ApplyMode = loaded
+    ? activity?.inflight
+      ? 'idle'
+      : 'reload'
+    : 'apply';
+  const selectedMode = useRef<ApplyMode | null>(null);
+  const [proposed, setProposed] = useState(false);
+  const [applying, setApplying] = useState(false);
   const {
     form,
     value,
@@ -322,9 +605,14 @@ export function DeploymentSetEditor({
     changed: draftChanged,
     reset,
   } = useDraftForm<DeploymentSetDraft>(
-    {
-      name: 'New deployment',
-      engine_pool: false,
+    initial?.proposed_configuration ?? {
+      name: 'New pool',
+      engine_pool: true,
+      // Whole-object pool saves require every shared field, including the
+      // ones that may legitimately be null.
+      runtime_id: null,
+      gpu: null,
+      port: null,
       max_loaded: 4,
       residency: 'on-demand',
       priority: 50,
@@ -337,6 +625,9 @@ export function DeploymentSetEditor({
             id: initial.id,
             name: initial.name,
             engine_pool: initial.engine_pool ?? false,
+            runtime_id: initial.runtime_id ?? null,
+            gpu: initial.gpu ?? null,
+            port: initial.port ?? null,
             max_loaded: initial.max_loaded ?? 4,
             residency: initial.residency || 'on-demand',
             priority: initial.priority ?? 50,
@@ -352,163 +643,81 @@ export function DeploymentSetEditor({
   );
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [separate, setSeparate] = useState(false);
-  const [artifactId, setArtifactId] = useState(
-      modelId || data.models?.[0]?.id || '',
-    ),
-    [invalid, setInvalid] = useState<Record<string, boolean>>({});
-  const [selected, setSelected] = useState(0);
-  const preview = useResourcePreview(value.members, data.host?.[0]?.ts);
-  const [epoch, setEpoch] = useState(0);
-  const changed = draftChanged || Object.values(invalid).some(Boolean);
-  const aliasError = (m: DeploymentDraft) =>
-    value.members.some((other) => other !== m && other.alias === m.alias) ||
-    (data.deployments || []).some(
-      (other) =>
-        other.alias === m.alias &&
-        !value.members.some((member) => member.id === other.id),
-    );
+    [pendingRevision, setPendingRevision] = useState<number | null>(null),
+    [revisionConflict, setRevisionConflict] = useState(false);
+  // Mount-time set draft, the reference for touched-vs-adopted fields. It must
+  // not follow the live initial, or untouched fields would adopt stale server
+  // values during a conflict review.
+  const mountSetRef = useRef<DeploymentSetDraft | null>(null);
+  if (mountSetRef.current === null)
+    mountSetRef.current =
+      initial?.proposed_configuration ?? deploymentSetToDraft(initial);
+  const changed = draftChanged;
   const set = <K extends keyof DeploymentSetDraft>(
     key: K,
     v: DeploymentSetDraft[K],
   ) => setValue((s) => ({ ...s, [key]: v }));
-  const updateMember = (index: number, change: Partial<DeploymentDraft>) =>
-    setValue((v) => ({
-      ...v,
-      members: v.members.map((m, i) => (i === index ? { ...m, ...change } : m)),
-    }));
-  const idleMinutes =
-    value.idle_timeout && value.idle_timeout % 60 === 0
-      ? value.idle_timeout / 60
-      : undefined;
-  const sharedPolicy = [
-    value.residency === 'pinned'
-      ? 'Pinned'
-      : value.residency === 'evictable'
-        ? 'Evictable'
-        : 'On demand',
-    `priority ${value.priority}`,
-    value.residency === 'on-demand'
-      ? value.idle_timeout
-        ? `unload after ${idleMinutes ? `${idleMinutes} min` : `${value.idle_timeout}s`} idle`
-        : 'never unload'
-      : 'always resident',
-    value.allow_eviction ? 'may unload for others' : 'no eviction',
-    `queue ${value.queue_timeout}s`,
-    value.enabled ? 'enabled for clients' : 'disabled for clients',
-  ].join(' · ');
-  async function addModel() {
-    const model = data.models?.find((m) => m.id === artifactId);
-    if (!model) {
-      setError('Choose a model first.');
-      return;
-    }
-    setBusy(true);
-    let recommended: string | null = null;
-    try {
-      recommended =
-        (
-          await readApi(
-            `/api/models/${model.id}/engine-recommendation`,
-            contracts.engineRecommendation,
-          )
-        ).engine || null;
-    } catch {
-      /* Manual selection remains available. */
-    }
-    const compatible = (data.runtimes || []).filter(
-      (r) =>
-        model.format === 'unknown' ||
-        r.capabilities?.formats?.includes(model.format),
-    );
-    const runtime =
-      value.engine_pool && value.members.length
-        ? compatible.find(
-            (r) => r.id === value.members[0].configuration?.runtime_id,
-          )
-        : compatible.find((r) => r.engine === recommended) || compatible[0];
-    if (value.engine_pool && value.members.length && !runtime) {
-      setError('This model is incompatible with the shared pool engine.');
-      setBusy(false);
-      return;
-    }
-    const used = [...(data.deployments || []), ...value.members];
-    const slug = (text: string) =>
-      text
-        .toLowerCase()
-        .replace(/[^a-z0-9_.-]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 100) || 'model';
-    const base = slug(value.name) + '-' + slug(model.name).slice(0, 40);
-    let alias = base,
-      suffix = 2;
-    while (used.some((m) => m.alias === alias)) alias = base + '-' + suffix++;
-    const port = Array.from({ length: 50000 }, (_, i) => 8120 + i).find(
-      (p) => !used.some((m) => m.port === p),
-    );
-    if (port === undefined) {
-      setError('No free private port is available.');
-      setBusy(false);
-      return;
-    }
-    const config: Record<string, import('./types').JsonValue> = {};
-    const member: DeploymentDraft = {
-      ...defaults.deployments,
-      name: model.name,
-      alias,
-      port,
-      gpu: null,
-      configuration: {
-        name: model.name,
-        artifact_id: model.id,
-        runtime_id: runtime?.id || '',
-        config,
-        raw_args: [],
-        catalog: structuredClone(defaults.profiles.catalog),
-      },
-    };
-    set('members', [...value.members, member]);
-    setSelected(value.members.length);
-    setError('');
-    setBusy(false);
-  }
   const submit = async (value: DeploymentSetDraft) => {
-    if (busy || Object.values(invalid).some(Boolean)) return;
+    if (busy || applying) return;
     setBusy(true);
     setError('');
     try {
-      const single =
-        !initial && value.members.length === 1 && !value.engine_pool;
       const path =
-        (single ? '/api/deployments' : '/api/deployment-sets') +
-        (initial ? '?expected=' + initial.revision : '');
-      const shared = {
-        residency: value.residency,
-        priority: value.priority,
-        idle_timeout: value.idle_timeout,
-        allow_eviction: value.allow_eviction,
-        enabled: value.enabled,
-        queue_timeout: value.queue_timeout,
-      };
-      const payload = single
-        ? {
-            ...value.members[0],
-            name: value.name,
-            ...shared,
-          }
-        : value;
-      const result = await readApi(path, contracts.identity, payload);
+        '/api/deployment-sets' +
+        (initial ? '?expected=' + (pendingRevision ?? initial.revision) : '');
+      const result = await readApi(path, contracts.configurationSave, value);
+      if (loaded || result.changes_pending) {
+        setProposed(true);
+        const accepted = await applyConfiguration(
+          result.id,
+          selectedMode.current ?? mode,
+          confirm,
+        );
+        selectedMode.current = null;
+        if (!accepted) return;
+      }
       saved(result.id);
     } catch (e) {
-      setError(message(e));
+      const detail = message(e);
+      if (detail.includes('Revision changed')) {
+        // Concurrent change: surface it for review; do NOT call saved() so the
+        // form is not reset and the user's edits are kept for the re-write.
+        setRevisionConflict(true);
+      } else {
+        setError(detail);
+      }
     } finally {
       setBusy(false);
     }
   };
+  async function reviewRevision() {
+    if (busy || !initial) return;
+    try {
+      const status = (await readApi('/api/status', contracts.status)) as {
+        serving_deployments?: ServingDeployment[];
+      };
+      const freshSet = (status.serving_deployments || []).find(
+        (d): d is DeploymentSet => d.id === initial.id && d.multi_model,
+      );
+      if (!freshSet) return;
+      setValue(
+        reconcileDeep(
+          mountSetRef.current!,
+          deploymentSetToDraft(freshSet),
+          value,
+        ) as DeploymentSetDraft,
+      );
+      setPendingRevision(freshSet.revision);
+      setRevisionConflict(false);
+      setError('');
+    } catch {
+      /* Ignore: the user can review again. */
+    }
+  }
   const Shell = embedded ? EmbeddedEditor : Dialog;
   return (
     <Shell
-      title={initial ? initial.name : 'New deployment'}
+      title={initial ? initial.name : 'New pool'}
       close={close}
       busy={busy}
       wide
@@ -526,18 +735,12 @@ export function DeploymentSetEditor({
       <DraftFormProvider value={form}>
         <form
           className="resource-editor"
-          onInvalidCapture={(e) => {
-            const target = e.target as HTMLElement;
-            const section = target.closest<HTMLElement>('[data-model-index]');
-            if (section) setSelected(Number(section.dataset.modelIndex));
-            target.closest('details')?.setAttribute('open', '');
-          }}
           onSubmit={(e) => {
             e.preventDefault();
             void form.handleSubmit();
           }}
         >
-          <FieldSet key={epoch} disabled={busy}>
+          <FieldSet disabled={busy || applying}>
             <Field label="Name">
               <Input
                 required
@@ -545,171 +748,6 @@ export function DeploymentSetEditor({
                 onChange={(e) => set('name', e.target.value)}
               />
             </Field>
-            <FieldSet className="model-composer">
-              <FieldLegend>Models</FieldLegend>
-              <Field label="Add installed model">
-                <NativeSelect
-                  value={artifactId}
-                  onChange={(e) => setArtifactId(e.target.value)}
-                >
-                  {(data.models || []).map((m) => (
-                    <NativeSelectOption key={m.id} value={m.id}>
-                      {m.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <Button
-                variant="outline"
-                type="button"
-                disabled={!artifactId}
-                onClick={addModel}
-              >
-                Add model
-              </Button>
-              <div className="model-switcher">
-                <ToggleGroup
-                  variant="outline"
-                  aria-label="Models"
-                  value={[String(selected)]}
-                  onValueChange={(next) => {
-                    if (next.length) setSelected(Number(next[0]));
-                  }}
-                >
-                  {value.members.map((m, index: number) => (
-                    <ToggleGroupItem key={m.id || m.port} value={String(index)}>
-                      {m.name || `Model ${index + 1}`}
-                      {invalid[m.id || m.port] || aliasError(m)
-                        ? ' · Check settings'
-                        : ''}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-              {value.members.map((m, index: number) => (
-                <section
-                  hidden={selected !== index}
-                  data-model-index={index}
-                  className="model-edit-section"
-                  key={m.id || m.port}
-                >
-                  <h3>{m.name}</h3>
-                  <p className="text-muted-foreground text-sm">
-                    Shared policy: {sharedPolicy}. Loading policy, priority,
-                    idle unload, eviction and the queue timeout belong to this
-                    deployment set; edit them once in Availability.
-                  </p>
-                  <Field label="Model display name">
-                    <Input
-                      required
-                      value={m.name}
-                      onChange={(e) =>
-                        updateMember(index, { name: e.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label="API model ID">
-                    <Input
-                      required
-                      aria-label="API model ID"
-                      aria-invalid={aliasError(m)}
-                      pattern="[a-zA-Z0-9][a-zA-Z0-9_.\/\-]{0,159}"
-                      value={m.alias}
-                      onChange={(e) =>
-                        updateMember(index, { alias: e.target.value })
-                      }
-                    />
-                    {aliasError(m) && (
-                      <small className="error-text" role="alert">
-                        This API model ID is already in use.
-                      </small>
-                    )}
-                  </Field>
-                  <div className="configuration-grid">
-                    <ConfigurationFields
-                      formPath={`members[${index}].configuration.config`}
-                      value={m.configuration!}
-                      deploymentId={m.id}
-                      templateOverride={m.template_override}
-                      runtimeLocked={Boolean(value.engine_pool)}
-                      observed={
-                        data.deployments?.find((entry) => entry.id === m.id)
-                          ?.runtime_observation?.resolved
-                      }
-                      observedAt={
-                        data.deployments?.find((entry) => entry.id === m.id)
-                          ?.runtime_observation?.observed_at
-                      }
-                      data={data}
-                      set={(configuration) =>
-                        updateMember(index, { configuration })
-                      }
-                      onValid={(valid) =>
-                        setInvalid((v) => ({ ...v, [m.id || m.port]: !valid }))
-                      }
-                      recommendation={
-                        preview.data?.members?.[index]?.recommendation
-                      }
-                      modelFields={
-                        m.configuration && (
-                          <ChatTemplateSettings
-                            label="Chat template"
-                            model={data.models.find(
-                              (x) => x.id === m.configuration?.artifact_id,
-                            )}
-                            override={m.template_override || null}
-                            onChange={(selection) =>
-                              updateMember(index, {
-                                template_override: selection,
-                              })
-                            }
-                          />
-                        )
-                      }
-                      placementFields={
-                        value.engine_pool ? (
-                          <p className="text-muted-foreground text-sm">
-                            Process visibility is shared by all{' '}
-                            {value.members.length} pool members. Edit shared
-                            devices in Availability. Model-server options below
-                            belong to this child preset; native routing and
-                            residency remain pool-controlled.
-                          </p>
-                        ) : (
-                          <Placement
-                            part="gpu"
-                            value={m}
-                            change={(v) => updateMember(index, v)}
-                            host={data.host?.[0]}
-                          />
-                        )
-                      }
-                    />
-                  </div>
-                  <Button
-                    variant="destructive"
-                    type="button"
-                    onClick={async () => {
-                      if (
-                        m.id &&
-                        !(await confirm(
-                          'Remove this model from the deployment? It will be kept as an inactive standalone configuration.',
-                        ))
-                      )
-                        return;
-                      set(
-                        'members',
-                        value.members.filter((_, i) => i !== index),
-                      );
-                      setSelected(Math.max(0, selected - 1));
-                      setInvalid((v) => ({ ...v, [m.id || m.port]: false }));
-                    }}
-                  >
-                    Remove model
-                  </Button>
-                </section>
-              ))}
-            </FieldSet>
             <SettingsSection name="lifecycle" title="Availability">
               {value.engine_pool && (
                 <>
@@ -722,7 +760,7 @@ export function DeploymentSetEditor({
                   </p>
                   <Field label="Shared installed engine">
                     <NativeSelect
-                      value={value.members[0]?.configuration?.runtime_id || ''}
+                      value={value.runtime_id ?? ''}
                       onChange={async (e) => {
                         const runtimeId = e.target.value;
                         if (
@@ -733,16 +771,13 @@ export function DeploymentSetEditor({
                           return;
                         setValue((previous) => ({
                           ...previous,
+                          runtime_id: runtimeId,
                           members: previous.members.map((member) => ({
                             ...member,
-                            configuration: member.configuration
-                              ? {
-                                  ...member.configuration,
-                                  runtime_id: runtimeId,
-                                  config: {},
-                                  raw_args: [],
-                                }
-                              : undefined,
+                            runtime_id: runtimeId,
+                            port: null,
+                            config: {},
+                            raw_args: [],
                           })),
                         }));
                       }}
@@ -750,8 +785,7 @@ export function DeploymentSetEditor({
                       {data.runtimes
                         .filter(
                           (runtime) =>
-                            runtime.id ===
-                              value.members[0]?.configuration?.runtime_id ||
+                            runtime.id === value.runtime_id ||
                             (runtime.execution_kind === 'native' &&
                               runtime.engine === 'llama.cpp' &&
                               runtime.capabilities?.flags?.includes(
@@ -768,43 +802,45 @@ export function DeploymentSetEditor({
                         ))}
                     </NativeSelect>
                   </Field>
-                  {value.members[0] && (
+                  <Field label="Shared device">
                     <Placement
                       part="gpu"
-                      value={value.members[0]}
+                      value={{ gpu: value.gpu ?? null }}
                       host={data.host?.[0]}
                       change={(placement) =>
                         setValue((previous) => ({
                           ...previous,
+                          gpu: placement.gpu ?? null,
                           members: previous.members.map((member) => ({
                             ...member,
-                            gpu: placement.gpu,
+                            gpu: placement.gpu ?? null,
+                            port: null,
                           })),
                         }))
                       }
                     />
-                  )}
+                  </Field>
+                  <Field label="Serving port">
+                    <NumberControl
+                      label="Serving port"
+                      required
+                      min={1024}
+                      max={65535}
+                      value={value.port ?? undefined}
+                      change={(v) => set('port', v ?? null)}
+                    />
+                  </Field>
                 </>
               )}
               <Field
                 label="Lifecycle owner"
-                hint="Runtime pools share one native router and load models independently on request. Pinned and atomic groups use supervised processes. Pools require one compatible native runtime and shared device visibility."
+                hint="Runtime pools share one native router and load models independently on request. Pools require one compatible native runtime and shared device visibility."
               >
-                <NativeSelect
-                  value={value.engine_pool ? 'runtime' : 'supervisor'}
-                  onChange={(e) => {
-                    set('engine_pool', e.target.value === 'runtime');
-                    if (e.target.value === 'runtime')
-                      set('residency', 'on-demand');
-                  }}
-                >
-                  <NativeSelectOption value="supervisor">
-                    Menagerie — coordinated processes
-                  </NativeSelectOption>
-                  <NativeSelectOption value="runtime">
-                    Runtime — native model pool
-                  </NativeSelectOption>
-                </NativeSelect>
+                <p>
+                  {value.engine_pool
+                    ? 'Runtime — native model pool'
+                    : 'Menagerie — coordinated processes'}
+                </p>
               </Field>
               {value.engine_pool && value.allow_eviction && (
                 <Field label="Maximum resident models">
@@ -882,18 +918,6 @@ export function DeploymentSetEditor({
                     change={(v) => set('queue_timeout', v ?? 0)}
                   />
                 </Field>
-                {!value.engine_pool &&
-                  value.members.map((member, index) => (
-                    <FieldSet key={member.id || member.port}>
-                      <FieldLegend>{member.name} endpoint</FieldLegend>
-                      <Placement
-                        part="network"
-                        value={member}
-                        change={(placement) => updateMember(index, placement)}
-                        host={data.host?.[0]}
-                      />
-                    </FieldSet>
-                  ))}
               </CardAdvanced>
               <label className="check">
                 <Switch
@@ -905,9 +929,6 @@ export function DeploymentSetEditor({
               </label>
             </SettingsSection>
           </FieldSet>
-          {value.members.length > 0 && (
-            <DraftResources preview={preview.data} error={preview.error} />
-          )}
           <details className="card-advanced">
             <summary className="card-advanced-summary">
               Raw deployment set
@@ -916,6 +937,24 @@ export function DeploymentSetEditor({
               <Json value={value} />
             </div>
           </details>
+          {revisionConflict && (
+            <Alert variant="default" className="mb-5" role="alert">
+              <AlertDescription className="whitespace-pre-line">
+                This configuration changed elsewhere. Your edits have been kept.
+              </AlertDescription>
+              <AlertAction>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void reviewRevision()}
+                >
+                  Review changes
+                </Button>
+              </AlertAction>
+            </Alert>
+          )}
           <div className="dialog-actions configuration-save-bar">
             <span className="muted" role="status">
               {changed ? 'Unsaved changes' : 'All changes saved'}
@@ -926,68 +965,53 @@ export function DeploymentSetEditor({
               disabled={busy || !changed}
               onClick={() => {
                 reset();
-                setInvalid({});
-                setSelected(0);
-                setEpoch((v) => v + 1);
                 setError('');
               }}
             >
               Discard
             </Button>
-            {initial && value.members.length > 1 && (
-              <Button
-                variant="destructive"
-                type="button"
-                disabled={busy}
-                onClick={() => setSeparate(true)}
-              >
-                Separate models…
-              </Button>
+            {initial && (
+              <PendingChanges
+                deploymentId={initial.id}
+                changed={() => saved(initial.id)}
+                onPendingChange={setProposed}
+                onBusyChange={setApplying}
+                hideApplyActions={changed}
+              />
             )}
-            <Button
-              variant="default"
-              type="submit"
-              disabled={
-                busy ||
-                value.members.length < 1 ||
-                value.members.some(aliasError) ||
-                Object.values(invalid).some(Boolean)
-              }
-            >
-              {busy ? 'Saving…' : 'Save deployment'}
-            </Button>
+            {(!proposed || changed) && (
+              <>
+                {loaded && Boolean(activity?.inflight) && (
+                  <Button
+                    type="submit"
+                    variant="destructive"
+                    disabled={busy}
+                    onClick={() => {
+                      selectedMode.current = 'now';
+                    }}
+                  >
+                    Apply and Reload Now
+                  </Button>
+                )}
+                <Button
+                  variant="default"
+                  type="submit"
+                  disabled={busy}
+                  onClick={() => {
+                    selectedMode.current = mode;
+                  }}
+                >
+                  {busy
+                    ? 'Applying…'
+                    : initial
+                      ? applyLabels[mode]
+                      : 'Save pool'}
+                </Button>
+              </>
+            )}
           </div>
         </form>
       </DraftFormProvider>
-      {separate && (
-        <section className="warning">
-          <p>
-            Make each model a standalone deployment? Current shared policies
-            will be kept.
-          </p>
-          <Button
-            variant="destructive"
-            type="button"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await api(
-                  `/api/deployment-sets/${initial!.id}/dissolve?expected=${initial!.revision}`,
-                  {},
-                );
-                saved('');
-              } catch (e) {
-                setError(message(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            Separate models
-          </Button>
-        </section>
-      )}
     </Shell>
   );
 }
@@ -1021,6 +1045,24 @@ export function MultiDeploymentDetail({
     ),
     [logs, setLogs] = useState(''),
     [error, setError] = useState('');
+  const { confirm, confirmation } = useConfirmation();
+  async function removeMember(member: Deployment) {
+    if (
+      !(await confirm(
+        `Remove ${member.name} from ${d.name}? Model files and history are kept.`,
+      ))
+    )
+      return;
+    try {
+      await api(
+        `/api/deployment-sets/${d.id}/members/${member.id}/remove?expected=${d.revision}`,
+        {},
+      );
+      saved();
+    } catch (e) {
+      setError(message(e));
+    }
+  }
   useEffect(() => {
     if (tab !== 'Logs') return;
     let alive = true;
@@ -1048,6 +1090,7 @@ export function MultiDeploymentDetail({
   }, [logMember, tab, logRun, requestedMember]);
   return (
     <>
+      {confirmation}
       <a className="back-link" href="#/deployments">
         <ArrowLeft size={16} />
         Deployments
@@ -1085,6 +1128,11 @@ export function MultiDeploymentDetail({
           </AlertDescription>
         </Alert>
       )}
+      {error && (
+        <Alert variant="destructive" role="alert" className="mb-5">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       <Tabs
         items={['Models', 'Configuration', 'Activity', 'Requests', 'Logs']}
         value={tab}
@@ -1092,18 +1140,14 @@ export function MultiDeploymentDetail({
       />
       {(tab === 'Configuration' || tab === 'Policy') && (
         <>
-          {active(d) ? (
-            <p>Unload this deployment before changing its configuration.</p>
-          ) : (
-            <DeploymentSetEditor
-              key={`${d.id}-${d.revision}`}
-              initial={d}
-              data={data}
-              close={() => {}}
-              saved={saved}
-              embedded
-            />
-          )}
+          <DeploymentSetEditor
+            key={`${d.id}-${d.revision}`}
+            initial={d}
+            data={data}
+            close={() => {}}
+            saved={saved}
+            embedded
+          />
         </>
       )}
       {tab === 'Requests' && (
@@ -1143,41 +1187,90 @@ export function MultiDeploymentDetail({
             </Card>
           </div>
           <div className="model-grid">
-            {d.members.map((m) => (
-              <Card className="mb-5 min-w-0 gap-0 p-0 library-card" key={m.id}>
-                <CardContent className="p-0">
-                  <Status value={state(m)} />
-                  <h2>{m.name}</h2>
-                  <dl className="properties">
-                    <dt>API model</dt>
-                    <dd>
-                      <code>{m.alias}</code>
-                    </dd>
-                    <dt>Context / request</dt>
-                    <dd>
-                      {number(
-                        m.profile_snapshot?.catalog?.model?.limit?.context,
-                        0,
-                      )}
-                    </dd>
-                    <dt>VRAM (GiB)</dt>
-                    <dd>{gib(host.deployments?.[m.id]?.gpu_mib)}</dd>
-                  </dl>
-                  <div className="card-actions">
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={() => {
-                        setLogMember(m.id);
-                        go(`deployments/${d.id}/logs`);
-                      }}
-                    >
-                      Logs
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+            {d.members.map((m) => {
+              const artifact =
+                data.models?.find(
+                  (a) => a.id === m.profile_snapshot?.artifact_id,
+                ) || undefined;
+              return (
+                <Card
+                  className="mb-5 min-w-0 gap-0 p-0 library-card"
+                  key={m.id}
+                >
+                  <CardContent className="p-0">
+                    <Status value={state(m)} />
+                    <h2>{m.name}</h2>
+                    <dl className="properties">
+                      <dt>API model</dt>
+                      <dd>
+                        <code>{m.alias}</code>
+                      </dd>
+                      {artifact?.repo ? (
+                        <>
+                          <dt>Model</dt>
+                          <dd className="copy-value">
+                            <code>{artifact.repo || artifact.name}</code>
+                            <button
+                              type="button"
+                              className="view-model"
+                              onClick={() =>
+                                go(
+                                  repoPath(artifact.repo || '', {
+                                    revision:
+                                      artifact.source_revision || undefined,
+                                    returnTo:
+                                      window.location.hash.slice(2) ||
+                                      'deployments',
+                                  }),
+                                )
+                              }
+                            >
+                              View model
+                            </button>
+                          </dd>
+                        </>
+                      ) : null}
+                      <dt>Context / request</dt>
+                      <dd>
+                        {number(
+                          m.profile_snapshot?.catalog?.model?.limit?.context,
+                          0,
+                        )}
+                      </dd>
+                      <dt>VRAM (GiB)</dt>
+                      <dd>{gib(host.deployments?.[m.id]?.gpu_mib)}</dd>
+                    </dl>
+                    <div className="card-actions">
+                      <Button
+                        variant="outline"
+                        type="button"
+                        onClick={() => go(`deployments/${m.id}/configuration`)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        type="button"
+                        onClick={() => {
+                          setLogMember(m.id);
+                          go(`deployments/${d.id}/logs`);
+                        }}
+                      >
+                        Logs
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        type="button"
+                        disabled={active(m)}
+                        onClick={() => void removeMember(m)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </>
       )}
@@ -1256,11 +1349,6 @@ export function MultiDeploymentDetail({
                 ))}
               </NativeSelect>
             </Field>
-            {error && (
-              <p role="alert" className="error-text">
-                {error}
-              </p>
-            )}
             <pre tabIndex={0}>{logs || 'Loading logs…'}</pre>
           </CardContent>
         </Card>

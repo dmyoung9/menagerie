@@ -106,6 +106,8 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("model") not in models:
                 return self.send({"error": "unknown model"}, 404)
             loaded.add(body["model"])
+        if self.path == "/models/load":
+            return self.send({"success": True})
         if not body.get("stream"):
             return self.send(
                 {

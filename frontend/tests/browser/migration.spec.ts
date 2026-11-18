@@ -35,6 +35,11 @@ test('observed resources, SSE events, polling and exact preset stay integrated',
     id: 'polled',
     name: 'Polled deployment',
   });
+  // The member table re-serves a new member only after a refetch, and the SPA
+  // caches the registry slice — reload before expecting it to render.
+  fixture.sets[0].member_ids.push('polled');
+  await page.reload();
+  await page.goto('/#/deployments');
   await expect(
     page.getByRole('link', { name: 'Polled deployment' }).first(),
   ).toBeVisible({ timeout: 8000 });
@@ -111,18 +116,28 @@ test('unsaved editor dismissal is accessible and busy submissions cannot be dism
   page,
   fixture,
 }) => {
+  const opener = page
+    .locator('.page-head')
+    .getByRole('button', { name: 'New deployment', exact: true });
   await page.goto('/#/deployments');
-  const opener = page.getByRole('button', {
-    name: 'New deployment',
-    exact: true,
-  });
+
+  // No changes yet: Escape closes the wizard and returns focus to the trigger.
   await opener.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toBeHidden();
   await expect(opener).toBeFocused();
+
+  // Editing makes dismissal ask to discard, and the guard is visible to beforeunload.
   await opener.click();
   const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog.getByLabel('Name', { exact: true }).fill('Unsaved deployment');
+  // Joins the starter pool; the pool owns the runtime/device/port, so there are
+  // no inline pool fields to fill in the wizard.
+  await dialog
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Example pool' });
   expect(
     await page.evaluate(() => {
       const event = new Event('beforeunload', { cancelable: true });
@@ -139,16 +154,18 @@ test('unsaved editor dismissal is accessible and busy submissions cannot be dism
   await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue(
     'Unsaved deployment',
   );
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  await expect(
-    dialog.getByRole('heading', { name: 'Resource preview', exact: true }),
-  ).toBeVisible();
+
+  // A submission in flight locks the close button; the write still lands.
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   fixture.holdSave = true;
   await dialog
-    .getByRole('button', { name: 'Save deployment', exact: true })
+    .getByRole('button', {
+      name: 'Make available without loading',
+      exact: true,
+    })
     .click();
   await expect
-    .poll(() => fixture.writes.some((w) => w.path === '/api/deployments'))
+    .poll(() => fixture.writes.some((w) => w.path === '/api/model-setups'))
     .toBe(true);
   await page.keyboard.press('Escape');
   await expect(dialog).toBeVisible();
@@ -156,9 +173,10 @@ test('unsaved editor dismissal is accessible and busy submissions cannot be dism
     dialog.getByRole('button', { name: 'Close dialog' }),
   ).toBeDisabled();
   fixture.releaseSave();
-  await expect(dialog).toBeHidden();
   await expect(
-    page.getByText('Deployment saved', { exact: true }),
+    dialog.getByText('Unsaved deployment is available', {
+      exact: true,
+    }),
   ).toBeVisible();
 });
 
@@ -166,73 +184,147 @@ test('multi-model controls preserve payloads, failed input, invalid JSON and sli
   page,
   fixture,
 }) => {
+  // Seed the pool the pair will share. The wizard joins it rather than
+  // creating one inline; the pool owns the runtime, device and port.
+  fixture.sets.push({
+    id: 'buffered-pair',
+    revision: 1,
+    name: 'Buffered pair',
+    engine_pool: true,
+    runtime_id: 'engine',
+    gpu: 0,
+    port: 9120,
+    max_loaded: 4,
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    allow_eviction: false,
+    queue_timeout: 300,
+    enabled: true,
+    state: 'STOPPED',
+    multi_model: true,
+    member_ids: [],
+    members: [],
+    lifecycle: { serving: false },
+  });
+
+  // First run: join the pool with the first member (context 32K, tools on).
   await page.goto('/#/deployments');
   await page
+    .locator('.page-head')
     .getByRole('button', { name: 'New deployment', exact: true })
     .click();
   const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+
   await dialog.getByLabel('Name', { exact: true }).fill('Pair');
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  const context = dialog.getByLabel('ctx-size', { exact: true });
-  await context.fill('16384');
-  await dialog.getByRole('button', { name: '32K', exact: true }).click();
-  await expect(context).toHaveValue('32768');
+  // Context capacity: Custom → 32K preset (32768 tokens).
   await dialog
-    .locator('[data-settings-section="model"] summary')
-    .filter({ visible: true })
-    .click();
+    .getByLabel('Context capacity', { exact: true })
+    .selectOption('custom');
+  await dialog.getByRole('button', { name: '32K', exact: true }).click();
+  // Capabilities: Tools (carried in the member catalog).
   await dialog.getByRole('button', { name: 'Tools', exact: true }).click();
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  const secondMember = dialog.locator('[data-model-index="1"]');
-  await expect(secondMember).toBeVisible();
-  await secondMember
-    .getByLabel('Model display name', { exact: true })
-    .fill('Second member');
+  await expect(
+    dialog.getByRole('button', { name: 'Tools', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+
+  // "Continue" is disabled until the member is attached to a pool.
+  await expect(
+    dialog.getByRole('button', { name: 'Continue', exact: true }),
+  ).toBeDisabled();
+  await dialog
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Buffered pair' });
+  await expect(
+    dialog.getByRole('button', { name: 'Continue', exact: true }),
+  ).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+
+  // Failed input: alias collision keeps the form intact.
   fixture.failSave = true;
   await dialog
-    .getByRole('button', { name: 'Save deployment', exact: true })
+    .getByRole('button', {
+      name: 'Make available without loading',
+      exact: true,
+    })
     .click();
-  await expect(dialog.getByRole('alert')).toContainText('Alias already exists');
+  await expect(dialog.getByText('Alias already exists')).toBeVisible();
   await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue('Pair');
-  await dialog
-    .locator('[data-slot="toggle-group"][aria-label="Models"]')
-    .getByRole('button')
-    .first()
-    .click();
-  await expect(context.filter({ visible: true })).toHaveValue('32768');
-  await dialog
-    .locator('[data-settings-section="diagnostics"] summary')
-    .filter({ visible: true })
-    .click();
-  const json = dialog
-    .getByLabel('Runtime options (JSON)', { exact: true })
-    .filter({ visible: true });
-  await json.fill('{invalid');
-  await expect(
-    dialog.getByRole('button', { name: 'Save deployment', exact: true }),
-  ).toBeDisabled();
-  await json.fill('{"ctx-size":32768,"parallel":1,"gpu-layers":"all"}');
   fixture.failSave = false;
+
+  // Invalid JSON in the advanced options blocks "Continue"; valid JSON unblocks it.
+  await dialog.getByRole('button', { name: 'Back', exact: true }).click();
+  await dialog.getByText('Advanced', { exact: true }).click();
   await dialog
-    .getByRole('button', { name: 'Save deployment', exact: true })
+    .getByText('Additional engine arguments', { exact: true })
     .click();
-  await expect(dialog).toBeHidden();
-  const saved = contracts.deploymentSetDraft(
-    fixture.writes.filter((w) => w.path === '/api/deployment-sets').at(-1)!
-      .body,
-  );
-  expect(saved.members).toHaveLength(2);
-  expect(saved.members[0].configuration?.config['ctx-size']).toBe(32768);
-  expect(
-    saved.members[0].configuration?.catalog.model?.capabilities?.tools,
-  ).toBe(true);
-  expect(saved.members[1].name).toBe('Second member');
-  expect(
-    new Set(saved.members.map((m: { alias: string }) => m.alias)).size,
-  ).toBe(2);
-  expect(new Set(saved.members.map((m: { port: number }) => m.port)).size).toBe(
-    2,
-  );
+  await dialog.getByLabel('Additional engine arguments').fill('{invalid');
+  await expect(
+    dialog.getByRole('button', { name: 'Continue', exact: true }),
+  ).toBeDisabled();
+  await dialog.getByLabel('Additional engine arguments').fill('[]');
+  await expect(
+    dialog.getByRole('button', { name: 'Continue', exact: true }),
+  ).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  await dialog
+    .getByRole('button', {
+      name: 'Make available without loading',
+      exact: true,
+    })
+    .click();
+  await expect(
+    dialog.getByText('Pair is available', { exact: true }),
+  ).toBeVisible();
+  await expect(fixture.sets).toHaveLength(2);
+  let pool = fixture.sets.find((s) => s.id === 'buffered-pair')!;
+
+  // Exit to the deployments list, then join the pool as the second member.
+  await dialog
+    .getByRole('button', { name: 'Open deployment', exact: true })
+    .click();
+  await navigate(page, 'Deployments');
+  await page
+    .locator('.page-head')
+    .getByRole('button', { name: 'New deployment', exact: true })
+    .click();
+  const wizard = page.getByRole('dialog');
+  await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
+  await wizard.getByLabel('Name', { exact: true }).fill('Second member');
+  await expect(
+    wizard.locator(`option[value="pool:${pool.id}"]`),
+  ).toBeAttached();
+  await wizard
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Buffered pair' });
+  await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
+  await wizard
+    .getByRole('button', {
+      name: 'Make available without loading',
+      exact: true,
+    })
+    .click();
+  await expect(
+    wizard.getByText('Second member is available', { exact: true }),
+  ).toBeVisible();
+
+  // The join handler rebuilds fixture.sets (a fresh map), so the pool reference
+  // captured before the join is stale — resolve it fresh before asserting.
+  pool = fixture.sets.find((s) => s.id === 'buffered-pair')!;
+
+  // The pool holds two pooled members: member 0 carries the reviewed context and
+  // tools; every pooled member shares one engine/device and carries no port.
+  await expect(pool.members).toHaveLength(2);
+  expect(pool.id).toBe('buffered-pair');
+  const [first, second] = pool.members;
+  expect(first.unit_id).toBe(pool.id);
+  expect(second.unit_id).toBe(pool.id);
+  expect(first.config['ctx-size']).toBe(32768);
+  expect(first.catalog.model?.capabilities?.tools).toBe(true);
+  expect(second.name).toBe('Second member');
+  expect(new Set(pool.members.map((m) => m.alias)).size).toBe(2);
+  expect(pool.members.every((m) => m.port === null)).toBe(true);
 });
 
 test('launch warnings remain advisory and submit the plan token; local files use the original endpoint', async ({
@@ -240,7 +332,9 @@ test('launch warnings remain advisory and submit the plan token; local files use
   fixture,
 }) => {
   await page.goto('/#/deployments/idle');
-  await page.getByRole('button', { name: 'Load now', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Review and load', exact: true })
+    .click();
   const dialog = page.getByRole('dialog');
   await expect(
     dialog.getByRole('button', { name: 'Load', exact: true }),
@@ -248,7 +342,9 @@ test('launch warnings remain advisory and submit the plan token; local files use
   await expect(dialog.getByRole('checkbox')).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Load', exact: true }).click();
   await expect(dialog).toBeHidden();
-  expect(fixture.writes.find((w) => w.path.endsWith('/start'))!.body).toEqual({
+  expect(
+    fixture.writes.find((w) => w.path.endsWith('/load-model'))!.body,
+  ).toEqual({
     plan_token: 'review-token',
   });
   await navigate(page, 'Models');
@@ -334,7 +430,9 @@ for (const width of [1440, 390])
       filename: 'model-7B-Q4_K_M.gguf',
     });
     await expect(
-      page.getByText('Download queued', { exact: true }),
+      page
+        .locator('.operation-notifications')
+        .getByText(/Download fixture\/model/),
     ).toBeVisible();
   });
 
@@ -362,23 +460,26 @@ test('engine-reset confirmation is cancellable and recovery retains its existing
   page,
   fixture,
 }) => {
+  // The engine is a shared pool setting: it lives on the pool's Configuration
+  // page, where it is editable (members render it as locked pool policy).
   fixture.registry.runtimes.push({
     ...fixture.registry.runtimes[0],
     id: 'engine-two',
     name: 'Second engine',
+    // The pool's engine picker lists native llama.cpp runtimes that advertise
+    // the models-preset flag; mark the second engine as such so it is offered.
+    capabilities: {
+      ...fixture.registry.runtimes[0].capabilities,
+      flags: ['models-preset'],
+    },
   });
-  await page.goto('/#/deployments/idle/configuration');
-  const editor = page.locator('main');
-  const dialog = page.getByRole('dialog');
-  const engine = editor.getByLabel('Engine', { exact: true });
-  await engine.selectOption('engine-two');
+  await page.goto('/#/deployments/pool/configuration');
+  const engine = page.getByLabel('Shared installed engine', { exact: true });
   const confirm = page.getByRole('alertdialog');
-  await expect(confirm).toContainText('Engine-specific settings');
+  await engine.selectOption('engine-two');
+  await expect(confirm).toContainText('Engine-specific options');
   await page.keyboard.press('Escape');
   await expect(confirm).toBeHidden();
-  await expect(
-    editor.getByRole('button', { name: 'Save', exact: true }),
-  ).toBeVisible();
   await expect(engine).toHaveValue('engine');
   await engine.selectOption('engine-two');
   await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -386,23 +487,37 @@ test('engine-reset confirmation is cancellable and recovery retains its existing
   await engine.selectOption('engine-two');
   await confirm.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(engine).toHaveValue('engine-two');
-  await editor.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect
-    .poll(
-      () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
-    )
-    .toBe(2);
+  await page
+    .getByRole('button', { name: 'Apply and Reload', exact: true })
+    .click();
+  await expect(
+    fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1'),
+  ).toBeDefined();
   expect(
-    contracts.deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+    contracts.deploymentSetDraft(
+      fixture.writes.find((w) => w.path === '/api/deployment-sets?expected=1')!
         .body,
-    ).configuration?.runtime_id,
+    ).runtime_id,
   ).toBe('engine-two');
-  await navigate(page, 'Settings');
+  await expect(confirm).toContainText('Cached context will be lost');
+  await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
+  // Cancelling reload preserves the draft; leaving still uses the route guard.
+  await page
+    .getByRole('navigation', { name: 'Main navigation' })
+    .getByRole('link', { name: 'Settings', exact: true })
+    .click();
+  await page
+    .getByRole('alertdialog')
+    .getByRole('button', { name: 'Continue', exact: true })
+    .click();
+  await expect(
+    page.getByRole('heading', { name: 'Settings', exact: true }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Recovery', exact: true }).click();
   await page
     .getByRole('button', { name: 'Create backup', exact: true })
     .click();
+  const dialog = page.getByRole('dialog');
   await dialog
     .getByRole('button', { name: 'Create backup', exact: true })
     .click();
@@ -421,7 +536,6 @@ test('empty installation and connection errors remain actionable', async ({
   fixture.registry = {
     models: [],
     runtimes: [],
-    profiles: [],
     deployments: [],
     jobs: [],
   };
@@ -446,30 +560,32 @@ test('empty installation and connection errors remain actionable', async ({
   ).toBeVisible();
 });
 
-test('Base UI Select, Switch, outside dismissal and discard actions preserve policy values', async ({
+test('wizard select and switch drafts are discarded without writes; outside dismissal closes dialogs', async ({
   page,
   fixture,
 }) => {
+  // Outside-click dismissal of an unrelated dialog.
   await page.goto('/#/overview');
   await page.getByRole('button', { name: 'Connect client' }).click();
   await page.mouse.click(1, 1);
   await expect(page.getByRole('dialog')).toBeHidden();
+
   await navigate(page, 'Deployments');
   await page
+    .locator('.page-head')
     .getByRole('button', { name: 'New deployment', exact: true })
     .click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: 'Add model', exact: true }).click();
-  const mode = dialog.getByRole('combobox', { name: 'Mode', exact: true });
-  await mode.click();
-  await page.getByRole('option', { name: 'Pinned', exact: true }).click();
-  await expect(mode).toContainText('Pinned');
-  const enabled = dialog.getByRole('switch', {
-    name: 'Enabled for clients',
-    exact: true,
-  });
-  await enabled.uncheck();
-  await expect(enabled).not.toBeChecked();
+  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  // Wizard select: choose a pool through the value, not a DOM option click.
+  const poolSelect = dialog.getByLabel('Pool', { exact: true });
+  await poolSelect.selectOption({ label: 'Join pool: Example pool' });
+  await expect(poolSelect).toContainText('Join pool: Example pool');
+  // Base UI toggle (ToggleGroupItem, aria-pressed) marks the wizard dirty.
+  await dialog.getByRole('button', { name: 'Tools', exact: true }).click();
+  await expect(
+    dialog.getByRole('button', { name: 'Tools', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
   await dialog.getByRole('button', { name: 'Close dialog' }).click();
   await expect(page.getByRole('alertdialog')).toBeVisible();
   await page
@@ -520,12 +636,16 @@ for (const width of [1440, 390])
     }
     await navigate(page, 'Deployments');
     await page
+      .locator('.page-head')
       .getByRole('button', { name: 'New deployment', exact: true })
       .click();
     const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+    await dialog.getByLabel('Name', { exact: true }).fill('Surface');
     await dialog
-      .getByRole('button', { name: 'Add model', exact: true })
-      .click();
+      .getByLabel('Pool', { exact: true })
+      .selectOption({ label: 'Join pool: Example pool' });
+    await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
     await expect(
       dialog.getByRole('heading', { name: 'Resource preview', exact: true }),
     ).toBeVisible();
@@ -533,7 +653,7 @@ for (const width of [1440, 390])
       await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth),
     ).toBe(true);
     const save = dialog.getByRole('button', {
-      name: 'Save deployment',
+      name: 'Make available without loading',
       exact: true,
     });
     await expect(save).toBeEnabled();

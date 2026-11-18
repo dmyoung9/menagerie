@@ -82,7 +82,13 @@ for (const width of [1440, 576, 320]) {
     await page
       .getByLabel('Display name', { exact: true })
       .fill('Capability review');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
+    await page
+      .getByRole('button', {
+        name: 'Rename and update API model ID',
+        exact: true,
+      })
+      .click();
     await expect
       .poll(
         () =>
@@ -90,9 +96,9 @@ for (const width of [1440, 576, 320]) {
       )
       .toBe(2);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.catalog;
+    ).catalog;
     expect(saved.reasoning).toEqual(original);
     expect(saved.model?.capabilities?.reasoning).toEqual({ supported: false });
     await page.reload();
@@ -120,9 +126,7 @@ test('variants can be edited, enabled and selected as default while Reasoning st
   page,
   fixture,
 }) => {
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = {
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
     model: { capabilities: { reasoning: false } },
     reasoning: {
       presets: [
@@ -157,15 +161,15 @@ test('variants can be edited, enabled and selected as default while Reasoning st
   await page
     .getByLabel('Default reasoning level', { exact: true })
     .selectOption('ultra');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
     )
     .toBe(2);
   const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
-  ).configuration!.catalog;
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
+  ).catalog;
   expect(saved.model?.capabilities?.reasoning).toBe(false);
   expect(saved.reasoning?.default_mode).toBe('ultra');
   expect(saved.reasoning?.presets?.find((p) => p.id === 'ultra')).toMatchObject(

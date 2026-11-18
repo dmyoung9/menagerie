@@ -88,16 +88,19 @@ for (const width of [1440, 576, 320]) {
     const config = page.locator('form.configuration-editor');
     await openAdvanced(page);
     await openIdentity(page);
-    await openCard(page, 'lifecycle');
     await openCard(page, 'model');
     await openCard(page, 'generation');
     await openCard(page, 'diagnostics');
+    // Members inherit the pool's availability, which the pool owns; the member
+    // editor no longer shows an Availability card.
+    await expect(
+      config.getByRole('heading', { name: 'Availability', exact: true }),
+    ).toHaveCount(0);
     for (const title of [
       'Identity',
       'Model & runtime',
       'Resources & context',
       'Generation',
-      'Availability',
     ]) {
       await expect(
         config.getByRole('heading', { name: title, exact: true }),
@@ -151,7 +154,12 @@ for (const width of [1440, 576, 320]) {
     await expect(
       mtp.getByLabel('Multimodal projector path', { exact: true }),
     ).toHaveCount(0);
-    await expect(multimodal.getByRole('button')).toHaveCount(0);
+    await expect(
+      multimodal.getByRole('button', {
+        name: 'Choose another file',
+        exact: true,
+      }),
+    ).toBeVisible();
     await multimodal
       .getByRole('combobox', { name: 'Projector', exact: true })
       .selectOption('/models/example-mmproj.gguf');
@@ -330,19 +338,22 @@ for (const width of [1440, 576, 320]) {
       .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
       .analyze();
     expect(axe.violations).toEqual([]);
-    await config.getByRole('button', { name: 'Save', exact: true }).click();
+    await config
+      .getByRole('button', { name: /^Apply(?: and Reload)?$/ })
+      .click();
     await expect
       .poll(
         () =>
-          fixture.writes.filter((w) => w.path === '/api/deployments?expected=1')
-            .length,
+          fixture.writes.filter(
+            (w) => w.path === '/api/model-setups?expected=1',
+          ).length,
       )
       .toBe(1);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
     );
-    expect(saved.configuration!.config).toMatchObject({
+    expect(saved.config).toMatchObject({
       'top-p': 0.9,
       'top-k': 40,
       'min-p': 0.05,
@@ -355,7 +366,7 @@ for (const width of [1440, 576, 320]) {
       extension: 'preserved',
       mmproj: '/models/example-mmproj.gguf',
     });
-    expect(saved.configuration!.catalog.model?.capabilities).toMatchObject({
+    expect(saved.catalog.model?.capabilities).toMatchObject({
       input: ['image'],
       output: ['image'],
       reasoning: { supported: true },
@@ -399,20 +410,20 @@ test('discard resets typed controls, invalid raw edits and the navigation guard'
     .getByLabel('Runtime options (JSON)', { exact: true })
     .fill('{broken');
   await expect(
-    page.getByRole('button', { name: 'Save', exact: true }),
+    page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }),
   ).toBeDisabled();
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
   await expect(page.getByLabel('Display name', { exact: true })).toHaveValue(
     'Example idle',
   );
   await expect(
-    page.getByRole('button', { name: 'Save', exact: true }),
+    page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }),
   ).toBeEnabled();
   await page.getByRole('button', { name: 'Activity', exact: true }).click();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
 });
 
-test('resource tooltips use allocation names and loaded configuration remains read-only', async ({
+test('resource tooltips use allocation names and loaded configuration offers reload', async ({
   page,
 }) => {
   await page.goto('/#/deployments/idle/configuration');
@@ -427,10 +438,10 @@ test('resource tooltips use allocation names and loaded configuration remains re
   await expect(tooltip).toContainText('GiB');
   await expect(tooltip).not.toContainText(/\bs\d+\b/);
   await page.goto('/#/deployments/ready/configuration');
-  await expect(page.getByLabel('Display name', { exact: true })).toBeDisabled();
+  await expect(page.getByLabel('Display name', { exact: true })).toBeEnabled();
   await expect(
-    page.getByRole('button', { name: 'Save', exact: true }),
-  ).toBeDisabled();
+    page.getByRole('button', { name: 'Apply and Reload', exact: true }),
+  ).toBeEnabled();
 });
 
 test('deployment rows separate request counts, move failure links and remove duplicate actions', async ({
@@ -440,35 +451,41 @@ test('deployment rows separate request counts, move failure links and remove dup
   const idle = fixture.registry.deployments.find((d) => d.id === 'idle')!;
   idle.state = 'FAILED';
   idle.inflight = 2;
-  idle.historical_requests = 17;
   await page.goto('/#/deployments');
-  const row = page.getByRole('row').filter({
-    has: page.getByRole('link', { name: 'Example idle', exact: true }),
-  });
-  await expect(page.getByRole('columnheader').first()).toHaveText('Status');
+  // The row table is now the per-pool member table: Status, Model, Availability,
+  // VRAM (GiB), Active requests, (sr-only) Actions.
+  await expect(
+    page.getByRole('columnheader', { name: 'Status', exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole('columnheader', { name: 'Active requests', exact: true }),
   ).toBeVisible();
-  await expect(
-    row.getByRole('cell').nth(1).getByRole('link', { name: 'View logs' }),
-  ).toHaveAttribute('href', '#/deployments/idle/logs');
+  const row = page.getByRole('row').filter({
+    has: page.getByRole('link', { name: 'Example idle', exact: true }),
+  });
   await expect(row.getByRole('cell').nth(4)).toHaveText('2');
-  await expect(row.getByRole('cell').nth(5)).toHaveText('17');
+  // The failure log link now lives inside the member's Actions menu.
   await row.getByRole('button', { name: 'Actions for Example idle' }).click();
   const menu = page.getByRole('menu');
-  await expect(menu.getByRole('menuitem')).toHaveText([
-    'Edit',
-    'Duplicate',
-    'Logs',
-    'Disable',
-  ]);
   await expect(
-    menu.getByRole('menuitem', { name: 'Edit', exact: true }),
-  ).toHaveAttribute('href', '#/deployments/idle/configuration');
-  await page.keyboard.press('Escape');
-  await expect(
-    page.getByRole('button', { name: 'Disabled (1)', exact: true }),
+    menu.locator('a[href="#/deployments/idle/configuration"]'),
   ).toBeVisible();
-  await row.getByRole('cell').nth(2).click();
+  await expect(menu.locator('a[href="#/deployments/idle/logs"]')).toBeVisible();
+  await expect(
+    menu.getByRole('menuitem', {
+      name: 'Remove Example idle from pool',
+      exact: true,
+    }),
+  ).toBeVisible();
+  // Members can't be duplicated; that action was removed from the row.
+  await expect(
+    menu.getByRole('menuitem', { name: 'Duplicate', exact: true }),
+  ).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  // Pool-level enabled state drives the tabs, not member state.
+  await expect(
+    page.getByRole('button', { name: 'Disabled (0)', exact: true }),
+  ).toBeVisible();
+  await row.getByRole('link', { name: 'Example idle', exact: true }).click();
   await expect(page).toHaveURL(/\/deployments\/idle$/);
 });

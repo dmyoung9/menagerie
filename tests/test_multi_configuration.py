@@ -3,9 +3,11 @@
 from copy import deepcopy
 
 import httpx
+import pytest
 from test_controlplane import baseline, port, seed
 
 from controlplane.api import create_app
+from controlplane.schema import profile_view
 
 
 async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
@@ -28,7 +30,11 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
             "engine": "llama.cpp",
             "execution_kind": "native",
             "executable": "/unused",
-            "capabilities": {"formats": ["gguf"], "flags": ["ctx-size"]},
+            "capabilities": {
+                "formats": ["gguf"],
+                "flags": ["ctx-size"],
+                "mechanisms": {"router": True},
+            },
         },
     )
 
@@ -37,18 +43,18 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
             "name": alias,
             "alias": alias,
             "port": port,
-            "configuration": {
-                "name": alias,
-                "artifact_id": "weights",
-                "runtime_id": "engine",
-                "config": {"ctx-size": 8192},
-            },
+            "artifact_id": "weights",
+            "runtime_id": "engine",
+            "config": {"ctx-size": 8192},
+            "raw_args": [],
+            "catalog": {},
         }
 
     def draft(unit):
         return {
             "id": unit["id"],
             "name": unit["name"],
+            "port": unit["port"],
             "members": [
                 member(m["alias"], m["port"]) | {"id": m["id"]} for m in unit["members"]
             ],
@@ -68,7 +74,20 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
                 return await client.post(
                     "/api/deployment-sets"
                     + (f"?expected={expected}" if expected is not None else ""),
-                    json=body,
+                    json={
+                        "engine_pool": True,
+                        "runtime_id": "engine",
+                        "port": port(),
+                        "residency": "on-demand",
+                        "gpu": None,
+                        "max_loaded": 4,
+                        "priority": 50,
+                        "idle_timeout": 300,
+                        "allow_eviction": False,
+                        "queue_timeout": 300,
+                        "enabled": True,
+                    }
+                    | body,
                     headers=headers,
                 )
 
@@ -96,7 +115,16 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
             assert b.status_code == 200, b.text
             b = await unit(b.json()["id"])
             assert set(a["member_ids"]).isdisjoint(b["member_ids"])
-            assert len({m["profile_id"] for u in (a, b) for m in u["members"]}) == 4
+            # Each member is its own deployment owning an independent
+            # configuration snapshot; sharing the installed artifact is the
+            # point, not a shared profile.
+            member_ids = {m["id"] for u in (a, b) for m in u["members"]}
+            assert len(member_ids) == 4
+            assert all(
+                profile_view(m) == m["profile_snapshot"]
+                for u in (a, b)
+                for m in u["members"]
+            )
             assert all(
                 m["profile_snapshot"]["artifact_id"] == "weights"
                 for u in (a, b)
@@ -105,7 +133,7 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
 
             changed = draft(a)
             changed["members"][0]["name"] = "Gemma renamed"
-            changed["members"][0]["configuration"]["config"]["ctx-size"] = 32768
+            changed["members"][0]["config"]["ctx-size"] = 32768
             changed.update(idle_timeout=900)
             response = await save(changed, a["revision"])
             assert response.status_code == 200, response.text
@@ -114,16 +142,16 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
             assert all(m["idle_timeout"] == 900 for m in a["members"])
             assert await unit(b["id"]) == b
             catalog = (await client.get("/v1/models")).json()["data"]
+            # generated-mode rename: the member's API identifier follows the
+            # display name, so "Gemma renamed" now advertises as "gemma-renamed".
             assert (
-                next(m for m in catalog if m["id"] == "a-gemma")["menagerie"][
+                next(m for m in catalog if m["id"] == "gemma-renamed")["menagerie"][
                     "catalog"
                 ]["model"]["name"]
                 == "Gemma renamed"
             )
 
-            before = {
-                k: store.list(k) for k in ("profile", "deployment", "deployment_set")
-            }
+            before = {k: store.list(k) for k in ("deployment", "deployment_set")}
             invalid = deepcopy(changed)
             invalid["members"].append(
                 member("b-gemma", 8124)
@@ -140,7 +168,9 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
                 store.get("deployment", a["member_ids"][0]) | {"state": "READY"},
                 historical=False,
             )
-            assert (await save(changed, a["revision"])).status_code == 409
+            assert (
+                await save(changed | {"members": changed["members"][:1]}, a["revision"])
+            ).status_code == 409
             store.put(
                 "deployment",
                 store.get("deployment", a["member_ids"][0]) | {"state": "STOPPED"},
@@ -148,9 +178,10 @@ async def test_multi_configuration_reuse_edit_rollback_and_membership(tmp_path):
             )
             changed["members"] = changed["members"][:1] + [member("a-new", 8124)]
             assert (await save(changed, a["revision"])).status_code == 200
-            detached = store.get("deployment", a["member_ids"][1])
-            assert detached["enabled"] is False
-            assert detached["state"] == "STOPPED"
+            # Members are never orphaned into standalone deployments: removing
+            # one from the pool drops its deployment record.
+            with pytest.raises(KeyError):
+                store.get("deployment", a["member_ids"][1])
             assert store.list("job") == []
     finally:
         await app.state.manager.close()
@@ -177,11 +208,11 @@ async def test_reused_weights_have_independent_serving_lifecycles(tmp_path):
                         "name": f"{name}-{i}",
                         "alias": f"{name}-{i}",
                         "port": port(),
-                        "configuration": {
-                            "name": "Gemma",
-                            "artifact_id": "weights",
-                            "runtime_id": "runtime",
-                        },
+                        "artifact_id": "weights",
+                        "runtime_id": "runtime",
+                        "config": {},
+                        "raw_args": [],
+                        "catalog": {},
                     }
                     for i in range(2)
                 ]
@@ -189,7 +220,17 @@ async def test_reused_weights_have_independent_serving_lifecycles(tmp_path):
                     "/api/deployment-sets",
                     json={
                         "name": name,
+                        "engine_pool": True,
+                        "runtime_id": "runtime",
+                        "port": port(),
                         "residency": "on-demand",
+                        "gpu": None,
+                        "max_loaded": 4,
+                        "priority": 50,
+                        "idle_timeout": 300,
+                        "allow_eviction": False,
+                        "queue_timeout": 300,
+                        "enabled": True,
                         "members": members,
                     },
                     headers=headers,

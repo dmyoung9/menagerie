@@ -128,6 +128,9 @@ code.path,
 .connection i.online {
   background: var(--sidebar-primary);
 }
+.connection i.caution {
+  background: var(--chart-2);
+}
 .page-head {
   display: flex;
   justify-content: space-between;
@@ -328,6 +331,20 @@ meter::-moz-meter-bar {
 .copy-value code {
   overflow-wrap: anywhere;
 }
+.view-model {
+  margin-left: auto;
+  color: var(--primary);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.view-model:hover {
+  text-decoration: underline;
+}
 .update-notice {
   display: flex;
   gap: 12px;
@@ -374,10 +391,17 @@ meter::-moz-meter-bar {
 .operation > [data-slot='button'] {
   margin-left: auto;
 }
-.operation-indicator {
+.operation-notifications {
   position: fixed;
   bottom: 20px;
   right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  z-index: 50;
+}
+.operation-indicator {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -386,8 +410,10 @@ meter::-moz-meter-bar {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   font-size: 12px;
+  color: inherit;
+  text-decoration: none;
   box-shadow: 0 8px 24px #0004;
-  max-width: calc(100vw - 32px);
+  max-width: 100%;
 }
 .dialog-actions {
   display: flex;
@@ -778,15 +804,34 @@ meter::-moz-meter-bar {
 .configuration-card-wide {
   grid-column: 1 / -1;
 }
-@media (min-width: 1200px) {
-  .configuration-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+/* Editor sections stack in one column. The card's overflow is "clip" so it
+ * keeps the rounded-corner clipping without becoming a scroll container that
+ * would trap the section's sticky header. Because the sections never overlap,
+ * pinning each section header to the top means only the current section's
+ * header is ever visible at the top. */
+.configuration-editor [data-slot='card'] {
+  overflow: clip;
 }
-@media (max-width: 1199px) {
-  .configuration-editor.resource-editor {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.configuration-editor
+  [data-settings-section]
+  > [data-slot='card']
+  > details.settings-disclosure
+  > summary.settings-disclosure-summary,
+.configuration-editor
+  [data-settings-section]
+  > [data-slot='card']
+  > [data-slot='card-header'] {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  scroll-margin-top: 8px;
+  scroll-margin-bottom: 12px;
+}
+/* Keep focused controls and anchors clear of the sticky header. */
+#main,
+.editor-page .dialog-body {
+  scroll-padding-top: 64px;
+  scroll-padding-bottom: 16px;
 }
 .settings-disclosure > summary {
   display: flex;
@@ -1034,7 +1079,7 @@ meter::-moz-meter-bar {
     gap: 12px;
     flex-wrap: wrap;
   }
-  .operation-indicator {
+  .operation-notifications {
     right: 16px;
     bottom: 14px;
   }

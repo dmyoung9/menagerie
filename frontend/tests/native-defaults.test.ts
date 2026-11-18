@@ -4,12 +4,9 @@ import { defaults } from '../src/editor-state.ts';
 import { deploymentDraft, deploymentSetDraft } from '../src/contracts.ts';
 
 test('new deployments omit tuning and GPU selection; pool configuration survives decoding', () => {
-  assert.deepEqual(defaults.profiles.config, {});
+  assert.deepEqual(defaults.deployments.config, {});
   assert.equal(defaults.deployments.gpu, null);
-  const member = deploymentDraft({
-    ...defaults.deployments,
-    configuration: defaults.profiles,
-  });
+  const member = deploymentDraft(defaults.deployments);
   assert.equal(member.gpu, null);
   const pool = deploymentSetDraft({
     name: 'Pool',
@@ -25,5 +22,5 @@ test('new deployments omit tuning and GPU selection; pool configuration survives
   });
   assert.equal(pool.engine_pool, true);
   assert.equal(pool.max_loaded, 2);
-  assert.deepEqual(pool.members[0].configuration!.config, {});
+  assert.deepEqual(pool.members[0].config, {});
 });

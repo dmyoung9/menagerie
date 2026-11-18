@@ -35,20 +35,20 @@ class Store:
                     "SELECT 1 FROM sqlite_master WHERE name='schema_version'"
                 ).fetchone()
                 if (
-                    table
-                    and existing.execute(
+                    not table
+                    or existing.execute(
                         "SELECT max(version) FROM schema_version"
                     ).fetchone()[0]
-                    != 3
+                    != 4
                 ):
                     raise ValueError(
-                        "Menagerie 3 requires fresh state. Back up the 2.x state for rollback and choose an empty state directory; automatic migration is not supported."
+                        "This pool-only build requires fresh state (registry layout 4). Preserve the old state and application together for rollback and choose an empty state directory; migration is not supported."
                     )
         with self.connect() as c:
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
             CREATE TABLE IF NOT EXISTS schema_version(version INTEGER PRIMARY KEY);
-            INSERT OR IGNORE INTO schema_version VALUES(3);
+            INSERT OR IGNORE INTO schema_version VALUES(4);
             CREATE TABLE IF NOT EXISTS objects(
               kind TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
               data TEXT NOT NULL, PRIMARY KEY(kind,id));
@@ -161,6 +161,13 @@ class Store:
                 (kind, ident, data["revision"], time.time(), encode(data)),
             )
         return data
+
+    def delete(self, kind, ident, c=None):
+        if c is None:
+            with self.connect() as c:
+                return self.delete(kind, ident, c)
+        cur = c.execute("DELETE FROM objects WHERE kind=? AND id=?", (kind, ident))
+        return cur.rowcount
 
     def event(self, kind, data, deployment=None, c=None):
         if c is None:

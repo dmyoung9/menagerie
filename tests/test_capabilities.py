@@ -10,6 +10,7 @@ from controlplane.api import create_app
 from controlplane.capabilities import inspect
 from controlplane.catalog import apply_reasoning, normalize
 from controlplane.jobs import Jobs
+from controlplane.schema import PROFILE_FIELDS
 
 
 def profile():
@@ -235,7 +236,12 @@ async def test_gateway_and_catalog_use_deployment_presets(tmp_path, monkeypatch)
             "id": "d",
             "name": "Reasoner",
             "alias": "reasoner",
-            "profile_snapshot": p,
+            "artifact_id": p["artifact_id"],
+            "runtime_id": p["runtime_id"],
+            "config": p["config"],
+            "raw_args": p["raw_args"],
+            "catalog": p["catalog"],
+            "profile_snapshot": {k: p[k] for k in PROFILE_FIELDS},
             "state": "READY",
             "enabled": True,
             "residency": "pinned",

@@ -12,7 +12,7 @@ import pytest
 from huggingface_hub.hf_api import ModelInfo
 
 from controlplane.api import create_app
-from controlplane.schema import Artifact, Deployment, DeploymentSet, Profile, Runtime
+from controlplane.schema import Artifact, Deployment, DeploymentSet, Runtime
 
 
 async def test_frontend_decodes_actual_api_responses(tmp_path, monkeypatch):
@@ -47,26 +47,27 @@ async def test_frontend_decodes_actual_api_responses(tmp_path, monkeypatch):
             executable="/unused/runtime",
         ).model_dump(),
     )
-    profile = store.put(
-        "profile",
-        Profile(
-            id="profile",
-            name="Profile",
-            artifact_id=artifact["id"],
-            runtime_id=runtime["id"],
-            catalog={"vendor": {"retain": True}},
-        ).model_dump(),
-    )
     member = store.put(
         "deployment",
         Deployment(
             id="member",
             name="Member",
-            profile_id=profile["id"],
+            artifact_id=artifact["id"],
+            runtime_id=runtime["id"],
+            catalog={"vendor": {"retain": True}},
             alias="member",
             port=8120,
         ).model_dump(exclude_none=True)
-        | {"state": "STOPPED", "profile_snapshot": profile},
+        | {
+            "state": "STOPPED",
+            "profile_snapshot": {
+                "artifact_id": artifact["id"],
+                "runtime_id": runtime["id"],
+                "config": {},
+                "raw_args": [],
+                "catalog": {"vendor": {"retain": True}},
+            },
+        },
     )
     store.put(
         "deployment", member | {"id": "standalone", "alias": "standalone", "port": 8121}
@@ -151,7 +152,7 @@ async def test_frontend_decodes_actual_api_responses(tmp_path, monkeypatch):
         status = await get("/api/status")
         payload = {"status": status}
         payload["catalog"] = await get("/api/catalog/hf?q=qwen")
-        for kind in ("models", "runtimes", "profiles", "deployments", "jobs"):
+        for kind in ("models", "runtimes", "deployments", "jobs"):
             payload[kind] = await get(f"/api/registry/{kind}")
         payload["serving"] = await get("/api/serving-deployments")
         store.put(
@@ -163,19 +164,20 @@ async def test_frontend_decodes_actual_api_responses(tmp_path, monkeypatch):
         for kind in ("sessions", "requests", "activations", "resources"):
             payload[kind] = await get(f"/api/history/{kind}")
         payload["events"] = await get("/api/events")
-        payload["revisions"] = await get("/api/profiles/profile/revisions")
         preview = await client.post(
             "/api/resources/preview",
             json={
                 "members": [
                     {
-                        "configuration": Profile(
-                            **{
-                                key: value
-                                for key, value in profile.items()
-                                if key != "revision"
-                            }
-                        ).model_dump()
+                        "name": member["name"],
+                        "configuration": {
+                            "name": member["name"],
+                            "artifact_id": member["artifact_id"],
+                            "runtime_id": member["runtime_id"],
+                            "config": member["config"],
+                            "raw_args": member["raw_args"],
+                            "catalog": member["catalog"],
+                        },
                     }
                 ]
             },

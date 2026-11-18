@@ -19,10 +19,16 @@ test('configuration is inline, guards navigation and saves with the expected rev
   await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(name).toHaveValue('Changed name');
   await expect(page).toHaveURL(/\/configuration$/);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
+  await page
+    .getByRole('button', {
+      name: 'Rename and update API model ID',
+      exact: true,
+    })
+    .click();
   await expect
     .poll(() =>
-      fixture.writes.some((w) => w.path === '/api/deployments?expected=1'),
+      fixture.writes.some((w) => w.path === '/api/model-setups?expected=1'),
     )
     .toBe(true);
   await expect(

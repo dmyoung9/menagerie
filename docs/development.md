@@ -21,8 +21,9 @@ a supplier is a declaration, not a new engine literal or adapter branch.
 mechanisms. `runtime_pool.py` renders explicit native model presets and validates
 pool policy. Capabilities are tied to executable hashes, not repository names.
 Native pools use one process owner, pool-local routing/residency, and aggregate
-process telemetry. Supervised groups retain atomic residency. Version 3 opens only
-schema-3 registries; a 2.x state directory must be preserved for rollback, not migrated.
+process telemetry. This pool-only build opens only layout-4 registries. Older
+state must be preserved together with its application for rollback; choose a
+fresh state directory instead of migrating it.
 
 The hardened user service only grants writes inside its state directory. Keep
 registry migrations independent of writable system temporary directories: stream
@@ -53,16 +54,57 @@ components, styling, contracts, or accessibility behavior.
 owns membership and shared policy. Installed model artifacts are reusable; runtime
 instances have a single lifecycle owner.
 
-- `GET /api/serving-deployments` provides the unified serving view.
+- `GET /api/serving-deployments` provides the unified serving view, including
+  `changes_pending` on a pool and each member that has a retained proposal.
 - `POST /api/deployment-sets` saves shared policy and inline `members`, with
   `name`, `alias`, `port`, and `configuration`. Existing members include their
-  instance `id`; new members omit it. `?expected=REV` guards updates.
+  instance `id`; new members omit it. `?expected=REV` guards updates. A pool save
+  replaces the whole shared configuration: send every shared field, and use an
+  explicit `null` (for example `gpu`) to clear an optional setting. An omitted
+  field is rejected rather than treated as unchanged.
 - `/api/serving-deployments/{id}/validate`, `/start`, `/stop`, and `/enabled`
   operate on complete serving units. User starts require the reviewed `plan_token`.
-- `/api/deployment-sets/{id}/dissolve?expected=REV` separates unloaded members.
+- Membership changes require the pool unloaded; removal deletes the member record,
+  retaining its installed weights. Only native router pools may be created.
 
-Member lifecycle actions expand to complete membership. Policy/enablement changes
-on owned members are rejected; settings edits require the whole unit unloaded.
+### Desired changes and queued application
+
+- `GET /api/deployments/alias/suggest?name=` returns the deterministic
+  `{alias, base, mode: "generated"}` slug preview against current deployment
+  aliases, including pending aliases. `exclude=ID` excludes the edited model.
+- `GET /api/deployments/{ident}/pending` reports desired-vs-applied status for
+  a unit (and its pool): `op`, `desired_rev`, `applied_rev`, `pending`,
+  `scope_fingerprint`, `affected_ids`, `affected`. Model setup stages separate
+  desired rows while the live registry continues routing the applied configuration.
+- `POST /api/model-setups?expected=REV` creates or updates a model setup. New
+  members explicitly target an unloaded pool. Active configuration edits stage
+  snapshots without mutating live routing or process ownership. Shared pool edits
+  use `/api/deployment-sets` and the same reviewed application lifecycle.
+- `POST /api/deployments/{ident}/review-apply` validates the desired overlay and
+  binds consent to configuration, dependencies, affected scope and unload consequences.
+- `POST /api/deployments/{ident}/request-apply` queues a reviewed apply,
+  taking the `token`, `scope_fingerprint`, and mode (`apply`, `reload`, `idle`,
+  or `now`) captured during review. `now` also requires `confirm_interrupt: true`. It
+  revalidates scope and the launch plan immediately before applying, so stale
+  consent is never used, and returns the queued `op` plus a `job_id` for
+  progress polling.
+- `POST /api/deployments/{ident}/cancel` cancels a queued apply before it
+  begins; the saved change remains pending for a fresh review.
+- `POST /api/deployments/{ident}/discard` deletes the proposed configuration and
+  its operation, preserving the authoritative live configuration.
+- `GET /api/deployments/{ident}/action-scope` returns
+  `{is_whole_unit, multi_model, member_level, scope_label}` so a pool-level
+  action is never labeled as a per-model action.
+- `GET /api/deployments/{ident}/eligibility` returns the hard errors that
+  block pool membership; nothing is auto-changed to fit.
+- `GET /api/deployments/{ident}/eviction-candidates` lists idle,
+  policy-eligible unload candidates for this unit; candidates are always
+  consent-gated and never include the unit being loaded.
+
+Member stop actions expand to complete membership. Native-pool members can change
+client availability independently without stopping the process. Loaded shared-policy
+edits require reviewed pool reload. `/api/deployments/{ident}/load-model` requires a
+reviewed launch token and observes selected native-pool residency before completion.
 Review tokens include membership and policy revisions. Preserve atomic rollback,
 independent aliases/ports for reused weights, and inactive history restoration.
 See `tests/test_deployment_sets.py` and `tests/test_multi_configuration.py` for

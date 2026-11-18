@@ -51,9 +51,17 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
   page,
   fixture,
 }) => {
-  const snapshot = fixture.registry.deployments[1].profile_snapshot;
-  if (!snapshot) throw new Error('Expected fixture profile snapshot');
-  snapshot.catalog = contracts.modelCatalog({
+  // `idle` is a starter-pool member; pooled members lock their engine args and
+  // carry no port. Detach it so this standalone Configuration page stays
+  // editable, and give it the endpoint port a standalone deployment requires
+  // (the "Private port" field is required and empty otherwise).
+  fixture.sets[0].member_ids = fixture.sets[0].member_ids.filter(
+    (id) => id !== 'idle',
+  );
+  const target = fixture.registry.deployments[1];
+  if (!target) throw new Error('Expected fixture deployment');
+  target.port = 8121;
+  target.catalog = contracts.modelCatalog({
     vendor: { retain: true },
     model: { compatibility: { reasoningField: 'reasoning_content' } },
   });
@@ -67,24 +75,26 @@ test('valid JSON with an invalid argument shape blocks saving; extensions surviv
   await args.fill('{"not":"an array"}');
   await expect(args).toHaveAttribute('aria-invalid', 'true');
   await expect(
-    dialog.getByRole('button', { name: 'Save', exact: true }),
+    dialog.getByRole('button', { name: 'Apply', exact: true }),
   ).toBeDisabled();
   expect(
-    fixture.writes.filter((write) => write.path.startsWith('/api/deployments')),
+    fixture.writes.filter((write) =>
+      write.path.startsWith('/api/model-setups'),
+    ),
   ).toEqual([]);
   await args.fill('["--fixture-control"]');
-  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
     )
     .toBe(2);
   const write = fixture.writes.find((entry) =>
-    entry.path.startsWith('/api/deployments'),
+    entry.path.startsWith('/api/model-setups'),
   );
   const saved = contracts.deploymentDraft(write?.body);
-  expect(saved.configuration?.raw_args).toEqual(['--fixture-control']);
-  const catalog = recordValue(saved.configuration?.catalog);
+  expect(saved.raw_args).toEqual(['--fixture-control']);
+  const catalog = recordValue(saved.catalog);
   expect(catalog.vendor).toEqual({ retain: true });
   expect(recordValue(catalog.model).compatibility).toEqual({
     reasoningField: 'reasoning_content',

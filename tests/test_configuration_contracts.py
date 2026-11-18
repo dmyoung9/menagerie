@@ -7,21 +7,23 @@ from pydantic import ValidationError
 
 from controlplane import adapters
 from controlplane.catalog import normalize
-from controlplane.schema import Capability, Profile
+from controlplane.schema import Capability, Deployment
 
 
 @pytest.mark.parametrize(
     "config",
     [{}, {"ctx-size": 0, "parallel": -1}, {"temp": 0, "vendor-option": "custom"}],
 )
-def test_profile_round_trip_preserves_omission_and_engine_extensions(config):
-    profile = Profile(
+def test_deployment_round_trip_preserves_omission_and_engine_extensions(config):
+    deployment = Deployment(
         name="Synthetic model",
         artifact_id="artifact",
         runtime_id="engine",
         config=config,
+        alias="synthetic",
+        port=8120,
     )
-    assert Profile.model_validate_json(profile.model_dump_json()).config == config
+    assert Deployment.model_validate_json(deployment.model_dump_json()).config == config
 
 
 def test_schema_annotations_do_not_mutate_fields_or_seed_defaults():

@@ -1,0 +1,662 @@
+"""Model-first user outcomes, isolated from processes and inference.
+
+Members join a runtime pool only when the caller targets it: an inline
+``pool`` specification creates the pool atomically with the first member, and
+``pool_id`` adds a member to an existing pool. Nothing is auto-assigned.
+"""
+
+import asyncio
+import time
+
+import httpx
+import pytest
+from test_controlplane import baseline, port, seed
+
+from controlplane import apply_ops, model_setup, queued_apply
+from controlplane.api import create_app
+from controlplane.manager import Conflict
+from controlplane.schema import Deployment, DeploymentSet
+
+
+async def test_process_pool_addition_review_apply_and_selected_load(tmp_path):
+    app = create_app(tmp_path / "state")
+    manager, store = app.state.manager, app.state.store
+    await seed(store, tmp_path)
+    manager.host = baseline()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        client.headers["X-Menagerie-Token"] = (await client.get("/api/status")).json()[
+            "csrf_token"
+        ]
+
+        pool_port = port()
+
+        def setup_draft(name):
+            return draft(name, port(), runtime_id="runtime") | {
+                "queue_timeout": 10,
+            }
+
+        try:
+            # The wizard creates the pool atomically with the first member.
+            first = await save(
+                client,
+                setup_draft("Alpha")
+                | {
+                    "pool": pool_spec(
+                        "Alpha pool", pool_port, "runtime", queue_timeout=10
+                    )
+                },
+            )
+            key = manager.unit(first["id"])["id"]
+            assert manager.unit(key)["engine_pool"]
+            assert manager.unit(key)["port"] == pool_port
+            plan = manager.plan([first["id"]])
+            assert plan["errors"] == []
+            await manager.load_model(first["id"], plan["plan_token"])
+            owner = store.get("deployment", first["id"])
+            # A second member targets the same pool by id, not by coincidence.
+            await manager.stop(key)
+            second = await save(client, setup_draft("Beta") | {"pool_id": key})
+            plan = manager.plan([first["id"]])
+            await manager.load_model(first["id"], plan["plan_token"])
+            second = await save(
+                client,
+                setup_draft("Beta")
+                | {
+                    "id": second["id"],
+                    "catalog": {"model": {"limit": {"output": 512}}},
+                },
+                store.get("deployment", second["id"])["revision"],
+            )
+            assert second["changes_pending"]
+            assert store.get("deployment", first["id"])["pid"] != owner["pid"]
+            review = await client.post(
+                f"/api/deployments/{second['id']}/review-apply", json={}
+            )
+            assert review.status_code == 200, review.text
+            plan = review.json()
+            assert plan["errors"] == []
+            apply_ops.save_op(
+                store,
+                queued_apply.request_apply(
+                    apply_ops.find_op(store, key),
+                    time.time(),
+                    plan["plan_token"],
+                    plan["scope_fingerprint"],
+                ),
+            )
+            await manager.apply_desired(key, lambda _: None)
+            assert model_setup.desired(store, key) is None
+            assert set(manager.unit(key)["member_ids"]) == {first["id"], second["id"]}
+            plan = manager.plan([second["id"]])
+            result = await manager.load_model(second["id"], plan["plan_token"])
+            assert result["residency"] == "resident"
+            assert {
+                r["id"] for r in (await client.get("/v1/models")).json()["data"]
+            } == {"alpha", "beta"}
+            assert store.list("request") == []
+            for row in (first, second):
+                live = store.get("deployment", row["id"])
+                await save(
+                    client,
+                    setup_draft(row["name"])
+                    | {"id": row["id"], "port": live["port"], "enabled": False},
+                    live["revision"],
+                )
+            plan = model_setup.plan(manager, key)
+            assert plan["errors"] == []
+            apply_ops.save_op(
+                store,
+                queued_apply.request_apply(
+                    apply_ops.find_op(store, key),
+                    time.time(),
+                    plan["plan_token"],
+                    plan["scope_fingerprint"],
+                ),
+            )
+            await manager.apply_desired(key, lambda _: None)
+            assert all(
+                m["state"] == "STOPPED" and not m["enabled"]
+                for m in manager.unit(key)["members"]
+            )
+            assert (await client.get("/v1/models")).json()["data"] == []
+            assert apply_ops.find_op(store, key).state == "applied"
+        finally:
+            await manager.close()
+
+
+@pytest.fixture
+async def setup(tmp_path):
+    app = create_app(tmp_path)
+    store = app.state.store
+    store.put(
+        "artifact",
+        {
+            "id": "weights",
+            "name": "Weights",
+            "format": "gguf",
+            "local_path": "/unused.gguf",
+        },
+    )
+    store.put(
+        "runtime",
+        {
+            "id": "engine",
+            "name": "Engine",
+            "engine": "llama.cpp",
+            "execution_kind": "native",
+            "executable": "/unused",
+            "capabilities": {
+                "formats": ["gguf"],
+                "flags": ["ctx-size"],
+                "mechanisms": {"router": True},
+            },
+        },
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        client.headers["X-Menagerie-Token"] = (await client.get("/api/status")).json()[
+            "csrf_token"
+        ]
+        yield app.state.manager, store, client
+    await app.state.manager.client.aclose()
+
+
+def pool_spec(name, pool_port, runtime_id="engine", **policy):
+    """An inline runtime-pool specification accepted by /api/model-setups.
+
+    The client supplies the pool identity and the shared engine/device/serving
+    settings; the backend fills the remaining policy defaults.
+    """
+    return {
+        "name": name,
+        "engine_pool": True,
+        "runtime_id": runtime_id,
+        "gpu": None,
+        "port": pool_port,
+        "residency": "on-demand",
+        "enabled": True,
+        "max_loaded": 4,
+        "priority": 50,
+        "idle_timeout": 300,
+        "allow_eviction": True,
+        "queue_timeout": 300,
+        **policy,
+    }
+
+
+def draft(name, port_value, artifact_id="weights", runtime_id="engine"):
+    return {
+        "name": name,
+        "alias": name.lower(),
+        "port": port_value,
+        "artifact_id": artifact_id,
+        "runtime_id": runtime_id,
+        "config": {},
+        "raw_args": [],
+        "catalog": {},
+        "allow_eviction": True,
+    }
+
+
+async def save(client, data, revision=None):
+    response = await client.post(
+        "/api/model-setups" + (f"?expected={revision}" if revision is not None else ""),
+        json=data,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def test_busy_addition_to_live_pool_preserves_live_members(setup):
+    manager, store, client = setup
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
+    pool = manager.unit(first["id"])
+    assert pool["engine_pool"]
+    second = await save(client, draft("Beta", port()) | {"pool_id": pool["id"]})
+    assert manager.unit(second["id"])["id"] == pool["id"]
+    for ident in (first["id"], second["id"]):
+        store.put("deployment", store.get("deployment", ident) | {"state": "READY"})
+    before = manager.unit(first["id"])
+    response = await client.post(
+        "/api/model-setups", json=draft("Gamma", port()) | {"pool_id": pool["id"]}
+    )
+    assert response.status_code == 409
+    assert manager.unit(first["id"]) == before
+    assert len(store.list("deployment")) == 2
+    assert store.list("desired") == []
+    assert store.list("job") == []
+
+
+async def test_active_rename_keeps_live_alias_and_discard_preserves_runtime(setup):
+    manager, store, client = setup
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
+    live = store.put("deployment", first | {"state": "READY"})
+    changed = await save(
+        client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"]
+    )
+    assert changed["alias"] == "renamed" and changed["active_alias"] == "alpha"
+    assert store.get("deployment", first["id"])["alias"] == "alpha"
+    response = await client.post(f"/api/deployments/{first['id']}/discard", json={})
+    assert response.status_code == 200, response.text
+    assert store.get("deployment", first["id"])["state"] == "READY"
+    assert store.get("deployment", first["id"])["alias"] == "alpha"
+
+
+async def test_members_join_a_pool_only_when_explicitly_targeted(setup):
+    manager, store, client = setup
+    # No targeting: rejected outright, nothing is created.
+    pools_before = {s["id"] for s in store.list("deployment_set")}
+    members_before = {d["name"] for d in store.list("deployment")}
+    response = await client.post("/api/model-setups", json=draft("Standalone", port()))
+    assert response.status_code == 409
+    assert "pool" in response.text
+    assert {s["id"] for s in store.list("deployment_set")} == pools_before
+    assert {d["name"] for d in store.list("deployment")} == members_before
+    # Explicit on-demand targeting: pooled.
+    pooled = await save(
+        client, draft("Pooled", port()) | {"pool": pool_spec("P", port())}
+    )
+    assert manager.unit(pooled["id"])["engine_pool"]
+    # A pinned member cannot join an on-demand pool: the pool is never
+    # created (atomic rollback) and the change is a hard conflict.
+    pools_before = {s["id"] for s in store.list("deployment_set")}
+    members_before = {d["name"] for d in store.list("deployment")}
+    response = await client.post(
+        "/api/model-setups",
+        json=draft("Pinned", port())
+        | {"residency": "pinned", "pool": pool_spec("P2", port())},
+    )
+    assert response.status_code == 409
+    assert "pool" in response.text
+    assert {s["id"] for s in store.list("deployment_set")} == pools_before
+    assert {d["name"] for d in store.list("deployment")} == members_before
+
+
+async def test_cancel_during_drain_never_stops_live_model(setup, monkeypatch):
+    manager, store, client = setup
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
+    live = store.put("deployment", first | {"state": "READY"})
+    await save(client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"])
+    key = manager.unit(first["id"])["id"]
+    monkeypatch.setattr(
+        manager, "plan", lambda ids: {"errors": [], "stops": [], "plan_token": "base"}
+    )
+    plan = model_setup.plan(manager, key)
+    op = apply_ops.find_op(store, key)
+    apply_ops.save_op(
+        store,
+        queued_apply.request_apply(
+            op, time.time(), plan["plan_token"], plan["scope_fingerprint"]
+        ),
+    )
+    manager.inflight[first["id"]] = 1
+    waiting = asyncio.Event()
+    task = asyncio.create_task(manager.apply_desired(key, lambda _: waiting.set()))
+    await asyncio.wait_for(waiting.wait(), 2)
+    assert key in manager.apply_holds
+    response = await client.post(f"/api/deployments/{first['id']}/cancel", json={})
+    assert response.status_code == 200
+    with pytest.raises(Conflict, match="cancelled"):
+        await task
+    assert key not in manager.apply_holds
+    assert store.get("deployment", first["id"])["state"] == "READY"
+    assert model_setup.desired(store, key)
+
+
+@pytest.mark.parametrize("change", ["consent", "timeout", "launch", "became_busy"])
+async def test_failed_application_preserves_desired_configuration(
+    setup, monkeypatch, change
+):
+    manager, store, client = setup
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
+    live = store.put("deployment", first | {"state": "READY"})
+    await save(client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"])
+    key = manager.unit(first["id"])["id"]
+    monkeypatch.setattr(
+        manager, "plan", lambda ids: {"errors": [], "stops": [], "plan_token": "base"}
+    )
+    plan = model_setup.plan(manager, key)
+    op = queued_apply.request_apply(
+        apply_ops.find_op(store, key),
+        time.time(),
+        plan["plan_token"],
+        plan["scope_fingerprint"],
+    )
+    if change == "timeout":
+        op = op._with(drain_deadline=time.time() - 1)
+    apply_ops.save_op(store, op)
+    if change == "became_busy":
+        manager.inflight[first["id"]] = 1
+    if change == "consent":
+        live = store.get("deployment", first["id"])
+        store.put("deployment", live | {"priority": 12})
+    stopped = []
+
+    async def stop(ident, reason, force=False):
+        stopped.append(ident)
+        for member in manager.unit(ident)["members"]:
+            store.put("deployment", member | {"state": "STOPPED"})
+
+    async def fail(*args, **kwargs):
+        raise Conflict("Synthetic launch failure")
+
+    monkeypatch.setattr(manager, "_stop_unit_locked", stop)
+    monkeypatch.setattr(manager, "_activate_locked", fail)
+    with pytest.raises(Conflict):
+        await manager.apply_desired(
+            key, lambda _: None, mode="reload" if change == "became_busy" else "idle"
+        )
+    assert model_setup.desired(store, key)
+    assert store.get("deployment", first["id"])["alias"] == "alpha"
+    assert key not in manager.apply_holds
+    if change != "launch":
+        assert stopped == []
+    assert apply_ops.find_op(store, key).state in {"failed", "expired"}
+
+
+async def test_load_waits_for_selected_member_residency_without_inference(
+    setup, monkeypatch
+):
+    manager, store, client = setup
+    # A pool member is what issues the router /models/load request; the
+    # standalone path would never reach it.
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
+
+    async def activate(*args, **kwargs):
+        assert kwargs["token"] == "reviewed"
+        store.put(
+            "deployment", store.get("deployment", first["id"]) | {"state": "READY"}
+        )
+
+    monkeypatch.setattr(manager, "activate", activate)
+    observed = []
+
+    async def ready(member):
+        observed.append(member["id"])
+        store.put(
+            "runtime_observation",
+            {
+                "id": member["id"],
+                "session_id": member.get("session_id"),
+                "facts": {
+                    "residency": "resident" if len(observed) == 2 else "unloaded"
+                },
+            },
+        )
+        return True
+
+    monkeypatch.setattr(manager, "ready", ready)
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    await manager.client.aclose()
+    manager.client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    result = await manager.load_model(first["id"], "reviewed")
+    assert result["residency"] == "resident" and len(observed) == 2
+    assert [r.url.path for r in requests] == ["/models/load"]
+    assert manager.inflight[first["id"]] == 0
+
+
+async def test_reviewed_apply_updates_routing_and_clears_pending_only_after_readiness(
+    setup, monkeypatch
+):
+    manager, store, client = setup
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Alpha pool", port())}
+    )
+    live = store.put("deployment", first | {"state": "READY"})
+    await save(client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"])
+    key = manager.unit(first["id"])["id"]
+    assert [r["id"] for r in (await client.get("/v1/models")).json()["data"]] == [
+        "alpha"
+    ]
+    monkeypatch.setattr(
+        manager, "plan", lambda ids: {"errors": [], "stops": [], "plan_token": "base"}
+    )
+    plan = model_setup.plan(manager, key)
+    op = queued_apply.request_apply(
+        apply_ops.find_op(store, key),
+        time.time(),
+        plan["plan_token"],
+        plan["scope_fingerprint"],
+    )
+    apply_ops.save_op(store, op)
+
+    async def stop(ident, reason, force=False):
+        for member in manager.unit(ident)["members"]:
+            store.put("deployment", member | {"state": "STOPPED"})
+
+    async def activate(ids, **kwargs):
+        assert model_setup.desired(store, key)
+        assert apply_ops.find_op(store, key).state == "applying"
+        for ident in ids:
+            store.put("deployment", store.get("deployment", ident) | {"state": "READY"})
+
+    monkeypatch.setattr(manager, "_stop_unit_locked", stop)
+    monkeypatch.setattr(manager, "_activate_locked", activate)
+    await manager.apply_desired(key, lambda _: None)
+    assert model_setup.desired(store, key) is None
+    assert apply_ops.find_op(store, key).state == "applied"
+    assert not store.list("apply_recovery")
+    assert [r["id"] for r in (await client.get("/v1/models")).json()["data"]] == [
+        "renamed"
+    ]
+
+
+async def test_member_disable_keeps_neighbor_available_and_runtime_running(setup):
+    manager, store, client = setup
+    pool_port = port()
+    first = await save(
+        client,
+        draft("Alpha", port()) | {"pool": pool_spec("Pair", pool_port)},
+    )
+    second = await save(
+        client, draft("Beta", port()) | {"pool_id": manager.unit(first["id"])["id"]}
+    )
+    for row in (first, second):
+        store.put("deployment", row | {"state": "READY"})
+    response = await client.post(
+        f"/api/deployments/{first['id']}/enabled", json={"enabled": False}
+    )
+    assert response.status_code == 200
+    assert all(m["state"] == "READY" for m in manager.unit(first["id"])["members"])
+    assert [r["id"] for r in (await client.get("/v1/models")).json()["data"]] == [
+        "beta"
+    ]
+
+
+async def test_shared_engine_edit_and_explicit_template_clear(setup):
+    manager, store, client = setup
+    store.put("template", {"id": "custom", "kind": "custom", "artifact_id": "weights"})
+    first = await save(
+        client,
+        draft("Alpha", port())
+        | {
+            "pool": pool_spec("Pool", port()),
+            "template_override": {"source": "custom", "asset_id": "custom"},
+        },
+    )
+    cleared = await save(
+        client,
+        draft("Alpha", port())
+        | {
+            "id": first["id"],
+            "template_override": None,
+        },
+        first["revision"],
+    )
+    assert cleared.get("template_override") is None
+    cleared = store.put("deployment", cleared | {"enabled": False})
+    pool = manager.unit(first["id"])
+    store.put("runtime", store.get("runtime", "engine") | {"id": "replacement"})
+    response = await client.post(
+        "/api/deployment-sets",
+        params={"expected": pool["revision"]},
+        json={
+            **{k: v for k, v in pool.items() if k in DeploymentSet.model_fields},
+            "runtime_id": "replacement",
+            "gpu": 1,
+            "member_ids": [],
+            "members": [
+                {k: v for k, v in cleared.items() if k in Deployment.model_fields}
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    member = store.get("deployment", first["id"])
+    assert member["profile_snapshot"]["runtime_id"] == "replacement"
+    assert member["gpu"] == 1 and member["port"] is None
+    assert not member["enabled"]
+    store.put("deployment", member | {"state": "READY"})
+    pool = manager.unit(first["id"])
+    response = await client.post(
+        "/api/deployment-sets",
+        params={"expected": pool["revision"]},
+        json={
+            **{k: v for k, v in pool.items() if k in DeploymentSet.model_fields},
+            "gpu": None,
+            "member_ids": [],
+            "members": [
+                {k: v for k, v in member.items() if k in Deployment.model_fields}
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["changes_pending"]
+    assert manager.unit(first["id"])["gpu"] == 1
+    proposal = model_setup.desired(store, pool["id"])
+    assert all(row["data"]["gpu"] is None for row in proposal["rows"])
+    public_pool = next(
+        row
+        for row in (await client.get("/api/serving-deployments")).json()
+        if row["id"] == pool["id"]
+    )
+    assert public_pool["gpu"] == 1
+    assert public_pool["proposed_configuration"]["gpu"] is None
+    assert public_pool["changes_pending"]
+    assert all(member["changes_pending"] for member in public_pool["members"])
+    store.put("deployment", store.get("deployment", first["id"]) | {"state": "STOPPED"})
+    response = await client.post(
+        "/api/deployment-sets",
+        params={"expected": pool["revision"]},
+        json=public_pool["proposed_configuration"] | {"member_ids": [], "gpu": 2},
+    )
+    assert response.status_code == 200, response.text
+    assert manager.unit(first["id"])["gpu"] == 1
+    assert (
+        next(
+            row["data"]
+            for row in model_setup.desired(store, pool["id"])["rows"]
+            if row["kind"] == "deployment_set"
+        )["gpu"]
+        == 2
+    )
+
+
+async def test_empty_pool_protects_runtime_dependency(setup):
+    _, _, client = setup
+    response = await client.post(
+        "/api/deployment-sets", json=pool_spec("Empty", port())
+    )
+    assert response.status_code == 200, response.text
+    response = await client.post("/api/registry/runtimes/engine/delete", json={})
+    assert response.status_code == 409
+
+
+async def test_retired_workflows_cannot_create_or_launch_configuration(setup):
+    _, store, client = setup
+    response = await client.post("/api/deployment-sets", json={"name": "Supervised"})
+    assert response.status_code == 400
+    assert store.list("deployment_set") == []
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Pool", port())}
+    )
+    response = await client.post(
+        f"/api/deployments/{first['id']}/save-desired", json={}
+    )
+    assert response.status_code == 404
+    response = await client.post(
+        f"/api/deployments/{first['id']}/request-apply",
+        json={"token": "unused", "scope_fingerprint": "unused", "mode": "apply"},
+    )
+    assert response.status_code == 409
+    assert store.list("job") == []
+
+
+@pytest.mark.parametrize("mode", ["apply", "reload", "idle", "now"])
+async def test_apply_modes_respect_activity_and_restart_scope(setup, monkeypatch, mode):
+    manager, store, client = setup
+    first = await save(
+        client, draft("Alpha", port()) | {"pool": pool_spec("Pool", port())}
+    )
+    live = store.put("deployment", first | {"state": "READY"})
+    await save(client, draft("Renamed", port()) | {"id": first["id"]}, live["revision"])
+    key = manager.unit(first["id"])["id"]
+    monkeypatch.setattr(manager, "plan", lambda ids: {"errors": [], "stops": []})
+    if mode == "apply":
+        store.put(
+            "deployment", store.get("deployment", first["id"]) | {"state": "STOPPED"}
+        )
+    else:
+        manager.inflight[first["id"]] = 1
+    plan = model_setup.plan(manager, key)
+    payload = {
+        "token": plan["plan_token"],
+        "scope_fingerprint": plan["scope_fingerprint"],
+        "mode": mode,
+    }
+    if mode == "now":
+        response = await client.post(
+            f"/api/deployments/{key}/request-apply", json=payload
+        )
+        assert response.status_code == 409
+        payload["confirm_interrupt"] = True
+    stopped, started = [], []
+
+    async def stop(ident, reason, force=False):
+        stopped.append(force)
+        for member in manager.unit(ident)["members"]:
+            store.put("deployment", member | {"state": "STOPPED"})
+
+    async def activate(ids, **kwargs):
+        started.extend(ids)
+        for ident in ids:
+            store.put("deployment", store.get("deployment", ident) | {"state": "READY"})
+
+    monkeypatch.setattr(manager, "_stop_unit_locked", stop)
+    monkeypatch.setattr(manager, "_activate_locked", activate)
+    response = await client.post(f"/api/deployments/{key}/request-apply", json=payload)
+    if mode == "reload":
+        assert response.status_code == 409
+        assert stopped == started == []
+        return
+    assert response.status_code == 200, response.text
+    if mode == "idle":
+        for _ in range(100):
+            if key in manager.apply_holds:
+                break
+            await asyncio.sleep(0.01)
+        assert key in manager.apply_holds and not stopped
+        manager.inflight[first["id"]] = 0
+        manager.request_changed.set()
+    await asyncio.wait_for(asyncio.gather(*manager.tasks), 3)
+    assert store.get("deployment", first["id"])["alias"] == "renamed"
+    assert stopped == [mode == "now"]
+    assert bool(started) == (mode != "apply")
+    assert model_setup.desired(store, key) is None

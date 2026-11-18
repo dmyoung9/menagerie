@@ -9,9 +9,7 @@ for (const enabled of [true, false]) {
     page,
     fixture,
   }) => {
-    fixture.registry.deployments.find(
-      (d) => d.id === 'idle',
-    )!.profile_snapshot!.catalog = {
+    fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
       reasoning: {
         default_mode: 'default',
         presets: [
@@ -48,7 +46,7 @@ for (const enabled of [true, false]) {
     await drawer
       .getByRole('button', { name: 'Apply changes', exact: true })
       .click();
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await expect
       .poll(
         () =>
@@ -56,9 +54,9 @@ for (const enabled of [true, false]) {
       )
       .toBe(2);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.catalog;
+    ).catalog;
     expect(saved.reasoning?.default_mode).toBe('default');
     expect(
       saved.reasoning?.presets?.find((p) => p.id === 'default'),
@@ -77,9 +75,7 @@ test('selecting legacy blank Instant as default persists its configured thinking
   page,
   fixture,
 }) => {
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = {
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
     model: { capabilities: { reasoning: false } },
     reasoning: { presets: [{ id: 'instant', enabled: false, body: {} }] },
   };
@@ -104,15 +100,15 @@ test('selecting legacy blank Instant as default persists its configured thinking
   await page
     .getByLabel('Default reasoning level', { exact: true })
     .selectOption('instant');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
     )
     .toBe(2);
   const saved = deploymentDraft(
-    fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!.body,
-  ).configuration!.catalog;
+    fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!.body,
+  ).catalog;
   expect(
     saved.reasoning?.presets?.find((mode) => mode.id === 'instant'),
   ).toMatchObject({
@@ -132,7 +128,7 @@ for (const width of [1440, 320]) {
       'Research variant with a deliberately long name and no per-row configuration label';
     fixture.registry.deployments.find(
       (deployment) => deployment.id === 'idle',
-    )!.profile_snapshot!.catalog = {
+    )!.catalog = {
       model: { capabilities: { reasoning: true } },
       reasoning: {
         presets: [
@@ -231,14 +227,104 @@ test('new deployment members get common defaults and a nested Drawer without sub
   page,
   fixture,
 }) => {
+  // Seed a single-member pool so the New deployment wizard can join it.
+  const member = (id: string) => ({
+    id,
+    name: `Example ${id}`,
+    alias: id,
+    artifact_id: 'model',
+    runtime_id: 'engine',
+    config: {},
+    raw_args: [],
+    catalog: {},
+    enabled: true,
+    state: 'STOPPED',
+    revision: 1,
+    port: null,
+    gpu: null,
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    queue_timeout: 300,
+    allow_eviction: false,
+    lifecycle: { serving: false },
+    profile_snapshot: {
+      artifact_id: 'model',
+      runtime_id: 'engine',
+      config: {},
+      raw_args: [],
+      catalog: {},
+    },
+  });
+  const first = member('seed-a');
+  fixture.registry.deployments.push(first);
+  fixture.sets.push({
+    id: 'shared',
+    name: 'Shared pool',
+    engine_pool: true,
+    runtime_id: 'engine',
+    gpu: null,
+    port: 8200,
+    max_loaded: 4,
+    residency: 'on-demand',
+    priority: 50,
+    idle_timeout: 300,
+    allow_eviction: false,
+    queue_timeout: 300,
+    enabled: true,
+    state: 'STOPPED',
+    revision: 1,
+    multi_model: true,
+    member_ids: ['seed-a'],
+    members: [first],
+    lifecycle: { serving: false },
+  });
+  // The New deployment wizard joins an existing pool and creates the member.
+  // There is no longer a local, non-submitted composer in the pool editor.
   await page.goto('/#/deployments');
   await page
+    .locator('.page-head')
     .getByRole('button', { name: 'New deployment', exact: true })
     .click();
-  await page
-    .getByRole('dialog')
-    .getByRole('button', { name: 'Add model', exact: true })
+  const wizard = page.getByRole('dialog');
+  await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
+  await wizard
+    .getByLabel('Pool', { exact: true })
+    .selectOption({ label: 'Join pool: Shared pool' });
+  await wizard.getByLabel('Name', { exact: true }).fill('New variant member');
+  await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
+  await wizard
+    .getByRole('button', {
+      name: 'Make available without loading',
+      exact: true,
+    })
     .click();
+  await expect(
+    wizard.getByText('New variant member is available', { exact: true }),
+  ).toBeVisible();
+  // The wizard submitted the member; it joined the shared pool with common
+  // defaults (no member-specific tuning).
+  const added = fixture.registry.deployments.find(
+    (d) => d.name === 'New variant member',
+  )!;
+  expect(
+    fixture.sets.find((group) => group.id === 'shared')!.member_ids,
+  ).toContain(added.id);
+  expect(added.port).toBeNull();
+  // Close the wizard. Any form interaction marks the dialog "dirty", so
+  // Escape opens a "Discard unsavd changes?" guard instead of closing.
+  // Dismissing it unmounts the wizard, removing the beforeunload handler
+  // that would otherwise block page navigation.
+  await page.keyboard.press('Escape');
+  const discard = page
+    .getByRole('alertdialog')
+    .getByRole('button', { name: 'Discard changes', exact: true });
+  if ((await discard.count()) > 0) {
+    await discard.click();
+  }
+  await expect(wizard).toBeHidden();
+  await page.goto('/#/deployments/' + added.id + '/configuration');
+
   await openCard(page, 'model');
   await openCard(page, 'variants');
   await expect(
@@ -265,6 +351,14 @@ test('new deployment members get common defaults and a nested Drawer without sub
       }),
     ).not.toBeChecked();
   }
+  // The variant drawer is an editing buffer, not a submission. Snapshot the
+  // member-write count before opening it so the Low round-trip and the final
+  // Cancel are both verified to add no writes.
+  const memberWrite = (w: { path: string }) =>
+    w.path === '/api/model-setups' ||
+    w.path === '/api/deployment-sets' ||
+    w.path === '/api/deployments';
+  const writesBeforeDrawer = fixture.writes.filter(memberWrite).length;
   await section.getByRole('button', { name: 'Low', exact: true }).click();
   const drawer = page.getByRole('dialog', { name: 'Edit Low', exact: true });
   await drawer.getByLabel('Effort value', { exact: true }).fill('minimal');
@@ -275,20 +369,14 @@ test('new deployment members get common defaults and a nested Drawer without sub
     'minimal',
   );
   await drawer.getByRole('button', { name: 'Cancel', exact: true }).click();
-  expect(
-    fixture.writes.filter(
-      (w) => w.path === '/api/deployments' || w.path === '/api/deployment-sets',
-    ),
-  ).toEqual([]);
+  expect(fixture.writes.filter(memberWrite).length).toBe(writesBeforeDrawer);
 });
 
 test('guided destination changes and JSON preserve additional template controls', async ({
   page,
   fixture,
 }) => {
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = {
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
     model: { capabilities: { reasoning: true } },
     reasoning: {
       presets: [
@@ -329,7 +417,7 @@ test('guided destination changes and JSON preserve additional template controls'
     ),
   );
   await drawer.getByRole('button', { name: 'Apply changes' }).click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -337,9 +425,9 @@ test('guided destination changes and JSON preserve additional template controls'
     .toBe(2);
   expect(
     deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.catalog.reasoning!.presets![0].body,
+    ).catalog.reasoning!.presets![0].body,
   ).toEqual({
     reasoning_budget: 8192,
     chat_template_kwargs: { style: 'research', reasoning_effort: 'max' },
@@ -352,9 +440,7 @@ for (const width of [1440, 576, 320]) {
     fixture,
   }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 });
-    fixture.registry.deployments.find(
-      (d) => d.id === 'idle',
-    )!.profile_snapshot!.catalog = {
+    fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
       model: { capabilities: { reasoning: true } },
       reasoning: { presets: defaultReasoningOptions() },
     };
@@ -528,7 +614,7 @@ for (const width of [1440, 576, 320]) {
     await page
       .getByLabel('Default reasoning level', { exact: true })
       .selectOption('research');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
     await expect
       .poll(
         () =>
@@ -536,9 +622,9 @@ for (const width of [1440, 576, 320]) {
       )
       .toBe(2);
     const saved = deploymentDraft(
-      fixture.writes.find((w) => w.path === '/api/deployments?expected=1')!
+      fixture.writes.find((w) => w.path === '/api/model-setups?expected=1')!
         .body,
-    ).configuration!.catalog;
+    ).catalog;
     expect(saved.reasoning?.default_mode).toBe('research');
     expect(
       saved.reasoning?.presets?.find((mode) => mode.id === 'xhigh')?.body,
@@ -631,9 +717,8 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
       ],
     },
   };
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = structuredClone(catalog);
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog =
+    structuredClone(catalog);
   await page.goto('/#/deployments/idle/configuration');
   await openCard(page, 'variants');
   const section = page.getByRole('region', { name: 'Variants', exact: true });
@@ -654,7 +739,13 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
   await page
     .getByLabel('Display name', { exact: true })
     .fill('Preserved variants');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
+  await page
+    .getByRole('button', {
+      name: 'Rename and update API model ID',
+      exact: true,
+    })
+    .click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -663,9 +754,9 @@ test('existing mappings, order, IDs and disabled default survive unrelated saves
   expect(
     deploymentDraft(
       fixture.writes.find(
-        (write) => write.path === '/api/deployments?expected=1',
+        (write) => write.path === '/api/model-setups?expected=1',
       )!.body,
-    ).configuration!.catalog.reasoning,
+    ).catalog.reasoning,
   ).toEqual(catalog.reasoning);
   await openCard(page, 'variants');
   await section
@@ -691,9 +782,7 @@ test('invalid JSON stays local, cancellation guards drafts, and prompt-only vari
   page,
   fixture,
 }) => {
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = {
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
     model: {
       capabilities: { reasoning: true },
       variants: [{ id: 'research', body: { temperature: 1 } }],
@@ -787,9 +876,7 @@ test('overflow menus support keyboard reordering and preserve disabled variants'
   page,
   fixture,
 }) => {
-  fixture.registry.deployments.find(
-    (d) => d.id === 'idle',
-  )!.profile_snapshot!.catalog = {
+  fixture.registry.deployments.find((d) => d.id === 'idle')!.catalog = {
     model: { capabilities: { reasoning: true } },
     reasoning: { presets: defaultReasoningOptions() },
   };

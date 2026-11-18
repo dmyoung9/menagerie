@@ -58,18 +58,6 @@ async def seed(store, tmp_path):
     weights.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 0))
     store.put("artifact", adapters.inspect_artifact(weights) | {"id": "weights"})
     for ident in ("a", "b"):
-        profile = store.put(
-            "profile",
-            {
-                "id": ident,
-                "name": ident,
-                "artifact_id": "weights",
-                "runtime_id": "runtime",
-                "config": {},
-                "raw_args": [],
-                "catalog": {},
-            },
-        )
         store.put(
             "deployment",
             {
@@ -77,8 +65,18 @@ async def seed(store, tmp_path):
                 "name": ident,
                 "alias": ident,
                 "port": port(),
-                "profile_id": ident,
-                "profile_snapshot": profile,
+                "artifact_id": "weights",
+                "runtime_id": "runtime",
+                "config": {},
+                "raw_args": [],
+                "catalog": {},
+                "profile_snapshot": {
+                    "artifact_id": "weights",
+                    "runtime_id": "runtime",
+                    "config": {},
+                    "raw_args": [],
+                    "catalog": {},
+                },
                 "state": "STOPPED",
                 "residency": "pinned",
                 "priority": 50,
@@ -88,7 +86,10 @@ async def seed(store, tmp_path):
                 "allow_uncertain": True,
                 "allow_eviction": False,
                 "idle_timeout": 300,
-                "queue_timeout": 5,
+                # Activation budget: stop-then-start can take a few seconds on
+                # a busy machine (wait_for_requests + ~2s health check). A 5s
+                # budget flakes under parallel load; 15s gives headroom.
+                "queue_timeout": 15,
                 "reservation_active": 0,
             },
         )
@@ -112,12 +113,132 @@ def baseline():
 
 
 def test_revision_and_backup(store):
-    p = store.put("profile", {"id": "p", "config": {"ctx": 10}})
-    store.put("profile", p | {"config": {"ctx": 20}}, expected=1)
+    p = store.put("artifact", {"id": "p", "config": {"ctx": 10}})
+    store.put("artifact", p | {"config": {"ctx": 20}}, expected=1)
     with pytest.raises(ValueError, match="Revision changed"):
-        store.put("profile", p, expected=1)
-    assert store.history("profile", "p")[-1]["config"]["ctx"] == 10
+        store.put("artifact", p, expected=1)
+    assert store.history("artifact", "p")[-1]["config"]["ctx"] == 10
     assert store.backup().exists()
+
+
+async def test_fresh_registry_stop_sources_snapshot_from_folded_fields(tmp_path):
+    """A zero-profile registry creates deployments whose frozen snapshot is
+    sourced from the deployment's own five fields; the stop transition preserves
+    that snapshot rather than reaching for a (nonexistent) profile row."""
+    app = create_app(tmp_path)
+    store, m = app.state.store, app.state.manager
+    assert store.list("profile") == []
+    # A fake runtime + artifact let us exercise the real lifecycle without
+    # loading a real model.
+    script = tmp_path / "runtime"
+    source = Path(__file__).with_name("fake_runtime.py").read_text().split("\n", 1)[1]
+    script.write_text(f"#!{sys.executable}\n" + source)
+    script.chmod(0o700)
+    runtime = {
+        "id": "runtime",
+        "name": "fixture",
+        "engine": "llama.cpp",
+        "execution_kind": "native",
+        "executable": str(script),
+        "env": {},
+        "trust": True,
+    }
+    runtime["capabilities"] = await adapters.probe(runtime)
+    store.put("runtime", runtime)
+    weights = tmp_path / "weights.gguf"
+    weights.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 0))
+    store.put("artifact", adapters.inspect_artifact(weights) | {"id": "weights"})
+    m.host = baseline()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        headers = {
+            "X-Menagerie-Token": (await client.get("/api/status")).json()["csrf_token"]
+        }
+        # Models live in a runtime pool; create the pool that owns the shared
+        # runtime installation and serving port.
+        pool = await client.post(
+            "/api/deployment-sets",
+            json={
+                "name": "Folded pool",
+                "engine_pool": True,
+                "runtime_id": "runtime",
+                "port": port(),
+                "residency": "on-demand",
+                "enabled": True,
+                "gpu": None,
+                "max_loaded": 4,
+                "priority": 50,
+                "idle_timeout": 300,
+                "allow_eviction": False,
+                "queue_timeout": 300,
+                "member_ids": [],
+            },
+            headers=headers,
+        )
+        assert pool.status_code == 200, pool.text
+        response = await client.post(
+            "/api/model-setups",
+            json={
+                "name": "Folded",
+                "artifact_id": "weights",
+                "runtime_id": "runtime",
+                "config": {"gpu-layers": 1},
+                "raw_args": [],
+                "catalog": {
+                    "catalog_id": "folded",
+                    "model": {
+                        "capabilities": {
+                            "tools": False,
+                            "input": ["text"],
+                            "output": ["text"],
+                        },
+                        "limit": {"output": 1024},
+                    },
+                },
+                "alias": "folded",
+                "port": port(),
+                "residency": "on-demand",
+                "pool_id": pool.json()["id"],
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        d = store.get("deployment", response.json()["id"])
+        # The five folded fields are stored directly on the deployment row.
+        assert d["artifact_id"] == "weights"
+        assert d["runtime_id"] == "runtime"
+        assert d["config"] == {"gpu-layers": 1}
+        assert d["raw_args"] == []
+        assert "profile_id" not in d
+        snap = d["profile_snapshot"]
+        assert set(snap) == {
+            "artifact_id",
+            "runtime_id",
+            "config",
+            "raw_args",
+            "catalog",
+        }
+        assert snap["artifact_id"] == d["artifact_id"]
+        assert snap["runtime_id"] == d["runtime_id"]
+        assert snap["config"] == d["config"]
+        assert snap["raw_args"] == d["raw_args"]
+        assert snap["catalog"] == d["catalog"]
+        # Exercise the full lifecycle: load then unload; the frozen snapshot
+        # survives the stop transition still sourced from the folded fields.
+        await m.activate([d["id"]], True)
+        assert store.get("deployment", d["id"])["state"] == "READY"
+        await m.stop(d["id"])
+        d = store.get("deployment", d["id"])
+        assert d["state"] == "STOPPED"
+        assert d["profile_snapshot"] == {
+            "artifact_id": d["artifact_id"],
+            "runtime_id": d["runtime_id"],
+            "config": d["config"],
+            "raw_args": d["raw_args"],
+            "catalog": d["catalog"],
+        }
+    await m.close()
 
 
 async def test_two_processes_independent_stop_and_failure_rollback(store, tmp_path):
@@ -379,19 +500,12 @@ async def test_ui_revision_guard_and_model_catalog_contract(tmp_path):
         ).json()
         config = json.loads(Path(exported["path"]).read_text())
         assert config["providers"]["menagerie"]["models"]["a"]["modelID"] == "a"
+        # The profile entity was collapsed into the deployment; the old
+        # endpoints must 404 rather than accept or validate a body.
         bad = await client.post(
-            "/api/profiles?expected=0",
-            json={
-                "id": "a",
-                "name": "a",
-                "artifact_id": "weights",
-                "runtime_id": "runtime",
-                "config": {},
-                "raw_args": [],
-                "catalog": {},
-            },
+            "/api/profiles", json={"name": "a", "artifact_id": "weights"}
         )
-        assert bad.status_code == 400
+        assert bad.status_code == 404
     await m.close()
 
 
@@ -615,4 +729,6 @@ async def test_lifecycle_separates_deployed_serving_and_running(tmp_path):
         )
         assert (
             await client.post("/api/deployments/a/enabled", json={"enabled": False})
-        ).status_code == 409
+        ).status_code == 200
+        assert store.get("deployment", "a")["state"] == "READY"
+        assert not store.get("deployment", "a")["enabled"]

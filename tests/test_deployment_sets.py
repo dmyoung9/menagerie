@@ -8,6 +8,7 @@ from test_controlplane import baseline, port, seed
 from controlplane import deployment_sets
 from controlplane.api import create_app
 from controlplane.manager import Conflict, Manager
+from controlplane.schema import Deployment
 
 
 def link(store, ids=("a", "b"), **policy):
@@ -43,9 +44,6 @@ async def setup(tmp_path):
 
 def third(store):
     d = store.get("deployment", "a")
-    p = store.put(
-        "profile", d["profile_snapshot"] | {"id": "c", "name": "c", "catalog": {}}
-    )
     store.put(
         "deployment",
         d
@@ -54,8 +52,12 @@ def third(store):
             "name": "Large",
             "alias": "c",
             "port": port(),
-            "profile_id": p["id"],
-            "profile_snapshot": p,
+            "artifact_id": d["artifact_id"],
+            "runtime_id": d["runtime_id"],
+            "config": d["config"],
+            "raw_args": d["raw_args"],
+            "catalog": {},
+            "profile_snapshot": d["profile_snapshot"] | {"catalog": {}},
             "residency": "on-demand",
             "allow_eviction": True,
         },
@@ -233,7 +235,7 @@ async def test_plan_expands_full_unit_and_pinned_units_are_not_automatic_victims
         await m.close()
 
 
-async def test_new_deployment_owns_shared_policy_and_ignores_unused_group_records(
+async def test_retired_supervised_group_endpoints_do_not_modify_records(
     tmp_path,
 ):
     app, store, m = await setup(tmp_path)
@@ -263,29 +265,9 @@ async def test_new_deployment_owns_shared_policy_and_ignores_unused_group_record
             response = await client.post(
                 "/api/deployment-sets", json=body, headers=headers
             )
-            assert response.status_code == 200, response.text
-            created = response.json()
-            units = (await client.get("/api/serving-deployments")).json()
-            assert len(units) == 1 and len(units[0]["members"]) == 2
-            for d in store.list("deployment"):
-                assert d["alias"] == original[d["id"]]["alias"]
-                assert d["profile_snapshot"] == original[d["id"]]["profile_snapshot"]
-                assert d["residency"] == "on-demand"
-            overlap = await client.post(
-                "/api/deployment-sets", json=body, headers=headers
-            )
-            assert overlap.status_code == 409
-            split_enable = await client.post(
-                "/api/deployments/a/enabled", json={"enabled": False}, headers=headers
-            )
-            assert split_enable.status_code == 409
-            enable = await client.post(
-                f"/api/serving-deployments/{created['id']}/enabled",
-                json={"enabled": False},
-                headers=headers,
-            )
-            assert enable.status_code == 200
-            assert not any(d["enabled"] for d in store.list("deployment"))
+            assert response.status_code == 400, response.text
+            assert {d["id"]: d for d in store.list("deployment")} == original
+            assert store.list("deployment_set") == []
             for path in (
                 "/api/groups",
                 "/api/groups/old-group/validate",
@@ -410,9 +392,12 @@ async def test_auto_device_stops_count_residents_and_priority_gates_eviction(tmp
         await m.close()
 
 
-async def test_live_membership_changes_are_rejected_and_separation_preserves_members(
+async def test_live_membership_changes_are_rejected_and_members_can_be_separated(
     tmp_path,
 ):
+    """Live membership edits are refused; when idle, a member may be
+    removed or the whole pool deleted, keeping model files and pool revisions
+    intact."""
     app, store, m = await setup(tmp_path)
     try:
         await m.activate(["a"], True)
@@ -424,7 +409,21 @@ async def test_live_membership_changes_are_rejected_and_separation_preserves_mem
                     "csrf_token"
                 ]
             }
-            body = {"name": "Pair", "member_ids": ["a", "b"], "residency": "on-demand"}
+            body = {
+                "name": "Pair",
+                "member_ids": ["a", "b"],
+                "residency": "on-demand",
+                "engine_pool": True,
+                "runtime_id": "runtime",
+                "port": port(),
+                "gpu": 0,
+                "max_loaded": 4,
+                "priority": 50,
+                "idle_timeout": 300,
+                "allow_eviction": False,
+                "queue_timeout": 300,
+                "enabled": True,
+            }
             response = await client.post(
                 "/api/deployment-sets", json=body, headers=headers
             )
@@ -437,22 +436,47 @@ async def test_live_membership_changes_are_rejected_and_separation_preserves_mem
             )
             unit = response.json()
             assert response.status_code == 200, response.text
+            # A policy edit is permitted while the pool is idle; the shared
+            # idle_timeout propagates to both members.
             changed = await client.post(
                 f"/api/deployment-sets?expected={unit['revision']}",
                 json=body | {"id": unit["id"], "idle_timeout": 900},
                 headers=headers,
             )
             assert changed.status_code == 200, changed.text
-            assert "source_group_id" not in store.get("deployment_set", unit["id"])
-            separated = await client.post(
-                f"/api/deployment-sets/{unit['id']}/dissolve?expected={changed.json()['revision']}",
+            assert store.get("deployment_set", unit["id"])["idle_timeout"] == 900
+            assert all(d["idle_timeout"] == 900 for d in store.list("deployment"))
+            # Remove a single member: its deployment record is dropped but the
+            # pool (and its remaining members) survives, and the model files
+            # are never dropped.
+            removed = await client.post(
+                (
+                    f"/api/deployment-sets/{unit['id']}/members/a/remove"
+                    f"?expected={changed.json()['revision']}"
+                ),
                 json={},
                 headers=headers,
             )
-            assert separated.status_code == 200
-            assert len(deployment_sets.units(store)) == 2
-            assert all(d["idle_timeout"] == 900 for d in store.list("deployment"))
-            assert {d["alias"] for d in store.list("deployment")} == {"a", "b"}
+            assert removed.status_code == 200, removed.text
+            pool = store.get("deployment_set", unit["id"])
+            assert pool["member_ids"] == ["b"]
+            assert pool["idle_timeout"] == 900
+            assert "a" not in {d["id"] for d in store.list("deployment")}
+            assert store.get("deployment", "b")["idle_timeout"] == 900
+            # Delete the whole pool: the last member goes with it, the set is
+            # gone, and model files + the runtime installation remain.
+            deleted = await client.post(
+                (
+                    f"/api/deployment-sets/{unit['id']}/delete?expected="
+                    f"{removed.json()['revision']}"
+                ),
+                json={},
+                headers=headers,
+            )
+            assert deleted.status_code == 200, deleted.text
+            assert store.list("deployment_set") == []
+            assert store.list("deployment") == []
+            assert "weights" in {d["id"] for d in store.list("artifact")}
     finally:
         await m.close()
 
@@ -522,6 +546,9 @@ async def test_public_api_launch_and_member_stop_control_the_complete_deployment
             assert restored.status_code == 200, restored.text
             assert len(restored.json()["member_ids"]) == 2
             restored_unit = m.unit(restored.json()["id"])
+            assert restored_unit["engine_pool"]
+            assert restored_unit["runtime_id"] == "runtime"
+            assert all(d["port"] is None for d in restored_unit["members"])
             assert not restored_unit["enabled"]
             assert all(d["state"] == "STOPPED" for d in restored_unit["members"])
     finally:
@@ -601,5 +628,115 @@ async def test_switch_timeout_does_not_interrupt_busy_predecessor(tmp_path):
         assert all(store.get("deployment", i)["state"] == "STOPPED" for i in ("a", "b"))
         assert m.waiting == 0
         m.release(c)
+    finally:
+        await m.close()
+
+
+def pool_body(**overrides):
+    """A complete pool body; every shared field must be present."""
+    return {
+        "name": "Pair",
+        "engine_pool": True,
+        "runtime_id": "runtime",
+        "gpu": None,
+        "port": port(),
+        "max_loaded": 4,
+        "residency": "on-demand",
+        "priority": 50,
+        "idle_timeout": 300,
+        "allow_eviction": False,
+        "enabled": True,
+        "queue_timeout": 300,
+    } | overrides
+
+
+async def test_pool_save_rejects_partial_bodies_and_clears_only_explicit_nulls(
+    tmp_path,
+):
+    app, store, m = await setup(tmp_path)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            headers = {
+                "X-Menagerie-Token": (await client.get("/api/status")).json()[
+                    "csrf_token"
+                ]
+            }
+            body = pool_body()
+            partial = {k: v for k, v in body.items() if k != "gpu"}
+            response = await client.post(
+                "/api/deployment-sets", json=partial, headers=headers
+            )
+            assert response.status_code == 400, response.text
+            assert "complete pool configuration" in response.text
+            assert "gpu" in response.text
+            assert store.list("deployment_set") == []
+
+            response = await client.post(
+                "/api/deployment-sets", json=body | {"gpu": 0}, headers=headers
+            )
+            assert response.status_code == 200, response.text
+            saved = response.json()
+            assert saved["gpu"] == 0
+
+            response = await client.post(
+                f"/api/deployment-sets?expected={saved['revision']}",
+                json=body | {"id": saved["id"], "gpu": None},
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["gpu"] is None
+            assert store.get("deployment_set", saved["id"])["gpu"] is None
+    finally:
+        await m.close()
+
+
+async def test_pool_member_save_applies_explicit_nested_nulls(tmp_path):
+    app, store, m = await setup(tmp_path)
+    store.put("template", {"id": "custom", "kind": "custom", "artifact_id": "weights"})
+    draft = {
+        k: v
+        for k, v in store.get("deployment", "a").items()
+        if k in Deployment.model_fields and k != "id"
+    } | {"name": "Pooled", "alias": "pooled", "port": port()}
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            headers = {
+                "X-Menagerie-Token": (await client.get("/api/status")).json()[
+                    "csrf_token"
+                ]
+            }
+            body = pool_body(
+                name="Solo",
+                members=[
+                    draft
+                    | {"template_override": {"source": "custom", "asset_id": "custom"}}
+                ],
+            )
+            response = await client.post(
+                "/api/deployment-sets", json=body, headers=headers
+            )
+            assert response.status_code == 200, response.text
+            unit = response.json()
+            member_id = unit["member_ids"][0]
+            assert store.get("deployment", member_id)["template_override"] == {
+                "source": "custom",
+                "asset_id": "custom",
+            }
+
+            response = await client.post(
+                f"/api/deployment-sets?expected={unit['revision']}",
+                json=body
+                | {
+                    "id": unit["id"],
+                    "members": [draft | {"id": member_id, "template_override": None}],
+                },
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            assert store.get("deployment", member_id)["template_override"] is None
     finally:
         await m.close()

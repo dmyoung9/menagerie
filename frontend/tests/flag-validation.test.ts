@@ -11,15 +11,27 @@ import {
   flagInputs,
   reconcileInputs,
 } from '../src/draft-form.ts';
-import type { DeploymentSetDraft, ProfileDraft } from '../src/types/index.ts';
+import type {
+  DeploymentDraft,
+  DeploymentSetDraft,
+} from '../src/types/index.ts';
 
-const profile = (config: ProfileDraft['config']): ProfileDraft => ({
+const profile = (config: DeploymentDraft['config']): DeploymentDraft => ({
   name: 'Fixture',
   artifact_id: 'weights',
   runtime_id: 'engine',
   config,
   raw_args: [],
   catalog: {},
+  alias: 'fixture',
+  port: 8120,
+  residency: 'on-demand',
+  priority: 50,
+  idle_timeout: 300,
+  allow_eviction: false,
+  enabled: true,
+  gpu: null,
+  queue_timeout: 300,
 });
 
 test('stable optional schema never seeds defaults or strips extensions', () => {
@@ -137,26 +149,19 @@ test('member removal keeps pending text with its original model', () => {
     enabled: true,
     queue_timeout: 300,
     members: [8120, 8121].map((port) => ({
+      ...profile({ 'top-k': 0 }),
       name: String(port),
       alias: String(port),
       port,
-      gpu: 0,
-      residency: 'on-demand',
-      priority: 50,
-      idle_timeout: 300,
-      allow_eviction: false,
-      enabled: true,
-      queue_timeout: 300,
-      configuration: profile({ 'top-k': 0 }),
     })),
   };
   const inputs = flagInputs(draft);
-  inputs[inputKey('members[0].configuration.config', 'top-k')] = '99';
-  inputs[inputKey('members[1].configuration.config', 'top-k')] = '';
+  inputs[inputKey('members[0].config', 'top-k')] = '99';
+  inputs[inputKey('members[1].config', 'top-k')] = '';
   const next = { ...draft, members: draft.members.slice(1) };
   assert.equal(
     reconcileInputs(draft, next, inputs)[
-      inputKey('members[0].configuration.config', 'top-k')
+      inputKey('members[0].config', 'top-k')
     ],
     '',
   );

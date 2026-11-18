@@ -185,26 +185,28 @@ export type Runtime = {
   managed?: { recipe_id?: string; backend?: string; source?: string };
   capabilities?: RuntimeCapabilities;
 };
-export type Profile = {
-  id: string;
+export type ProfileSnapshot = {
+  artifact_id: string;
+  runtime_id: string;
+  config: Record<string, JsonValue>;
+  raw_args: string[];
+  catalog: ModelCatalog;
+};
+export type ResourceConfiguration = ProfileSnapshot & {
+  name?: string;
+};
+export type DeploymentDraft = {
+  identifier_mode?: 'generated' | 'custom';
+  runtime_assignment?: 'automatic' | 'dedicated';
+  id?: string;
   name: string;
   artifact_id: string;
   runtime_id: string;
   config: Record<string, JsonValue>;
   raw_args: string[];
   catalog: ModelCatalog;
-  revision: number;
-};
-export type ProfileDraft = Omit<Profile, 'id' | 'revision'> & {
-  id?: string;
-};
-export type DeploymentDraft = {
-  id?: string;
-  name: string;
-  profile_id?: string;
-  configuration?: ProfileDraft;
   alias: string;
-  port: number;
+  port?: number | null;
   residency: string;
   priority: number;
   idle_timeout: number;
@@ -218,6 +220,9 @@ export type DeploymentSetDraft = {
   id?: string;
   name: string;
   engine_pool?: boolean;
+  runtime_id?: string | null;
+  gpu?: number | null;
+  port?: number | null;
   max_loaded?: number;
   residency: string;
   priority: number;
@@ -235,6 +240,12 @@ export type DeploymentLifecycle = {
   last_stop_reason?: string | null;
 };
 export type Deployment = {
+  unit_name?: string;
+  member_availability?: boolean;
+  changes_pending?: boolean;
+  runtime_assignment?: 'automatic' | 'dedicated';
+  identifier_mode?: 'generated' | 'custom';
+  active_alias?: string;
   draining?: boolean;
   id: string;
   name: string;
@@ -247,10 +258,14 @@ export type Deployment = {
     source: string;
     observed_at?: number;
   } | null;
-  profile_id?: string | null;
-  profile_snapshot?: Profile;
+  artifact_id: string;
+  runtime_id: string;
+  config: Record<string, JsonValue>;
+  raw_args: string[];
+  catalog: ModelCatalog;
+  profile_snapshot?: ProfileSnapshot;
   alias: string;
-  port?: number;
+  port?: number | null;
   residency?: string;
   priority?: number;
   idle_timeout?: number;
@@ -275,14 +290,23 @@ export type StandaloneServingDeployment = Deployment & {
 export type DeploymentSet = Omit<
   Deployment,
   | 'alias'
-  | 'profile_id'
   | 'profile_snapshot'
   | 'port'
   | 'gpu'
   | 'template_override'
+  | 'artifact_id'
+  | 'runtime_id'
+  | 'config'
+  | 'raw_args'
+  | 'catalog'
 > & {
   multi_model: true;
+  proposed_configuration?: DeploymentSetDraft;
   alias?: never;
+  runtime_id?: string | null;
+  port?: number | null;
+  gpu?: number | null;
+  failure_reason?: string | null;
   members: Deployment[];
   member_ids: string[];
 };
@@ -292,7 +316,6 @@ export type LaunchKind = 'deployments' | 'serving-deployments';
 export type Registry = {
   models: Artifact[];
   runtimes: Runtime[];
-  profiles: Profile[];
   deployments: Deployment[];
   deployment_sets?: DeploymentSet[];
   jobs: Job[];
@@ -504,7 +527,7 @@ export type ResourcePreview = {
 export type ResourcePreviewDraft = {
   name?: string;
   gpu?: number | null;
-  configuration?: ProfileDraft;
+  configuration?: ResourceConfiguration;
 };
 export type ResourceDraft = Required<ResourcePreviewDraft>;
 export type ResourcePreviewRequest = { members: ResourceDraft[] };
@@ -524,14 +547,12 @@ export type RuntimeDraft = {
   formats?: string[];
 };
 export type EditorDraftMap = {
-  profiles: ProfileDraft;
   deployments: DeploymentDraft;
   runtimes: RuntimeDraft;
 };
 export type EditorKind = keyof EditorDraftMap;
 export type EditorDraft = EditorDraftMap[EditorKind];
 export type EditableSourceMap = {
-  profiles: Profile;
   deployments: Deployment;
   runtimes: Runtime;
   deployment_sets: DeploymentSet;
@@ -564,8 +585,8 @@ export type LaunchModal = {
   row: LaunchTarget;
 };
 export type ModalState =
-  | { type: 'wizard'; modelId?: string }
-  | { type: 'new-deployment' }
+  | { type: 'wizard'; modelId?: string; poolId?: string }
+  | { type: 'pool-wizard' }
   | {
       type: 'deployment-set';
       row?: DeploymentSet;
@@ -579,12 +600,6 @@ export type ModalState =
   | EditModal
   | DeleteModal
   | { type: 'inspect'; title: string; value: unknown }
-  | {
-      type: 'revisions';
-      title: string;
-      row: Profile;
-      value?: ProfileRevision[];
-    }
   | { type: 'model'; title: string; value: Artifact }
   | { type: 'local-model'; path: string }
   | { type: 'policy' }
@@ -614,6 +629,51 @@ export type CatalogFiles = {
   };
 };
 export type CatalogRevision = { name: string; kind: string };
+
+export type AcquisitionStatus =
+  'not_downloaded' | 'downloading' | 'downloaded' | 'failed' | 'missing';
+
+export type ManifestFile = {
+  name: string;
+  size: number | null;
+  sha256?: string | null;
+  status: AcquisitionStatus;
+  local_path?: string | null;
+  error?: string | null;
+};
+
+export type ManifestGroupKind =
+  'gguf_split' | 'safetensors' | 'companion' | 'standalone';
+
+export type ManifestGroup = {
+  id: string;
+  name: string;
+  kind: ManifestGroupKind;
+  required: string[];
+  complete: boolean;
+  local_status: Record<string, AcquisitionStatus>;
+  downloaded_count: number;
+  failed_count: number;
+  downloading_count: number;
+};
+
+export type RepositoryManifest = {
+  repo: string;
+  revision: string;
+  files: ManifestFile[];
+  groups: ManifestGroup[];
+  selected?: string[];
+  required_files?: string[];
+  pending?: string[];
+  retry_targets?: string[];
+};
+
+export type RepositoryReadme = {
+  repo: string;
+  revision: string;
+  content: string;
+};
+
 export type DeploymentActions = {
   enable: (row: LaunchTarget, enabled: boolean) => void;
   stop: (kind: LaunchKind, row: LaunchTarget) => void;
@@ -645,7 +705,7 @@ export type HistorySession = {
   id: string;
   started_at: number;
   deployment_snapshot: Deployment & {
-    profile_snapshot: Profile;
+    profile_snapshot: ProfileSnapshot;
   };
   peak_gpu_mib?: number;
   peak_ram_mib?: number;
@@ -686,4 +746,3 @@ export type HistoryActivation = {
   started_at: number;
   deployment_name?: string;
 };
-export type ProfileRevision = Profile & { revision: number };

@@ -218,14 +218,24 @@ def check(installer, worker, baseline=None):
                     "trust": True,
                 },
             )
-            profile = request(
-                "/api/profiles",
+            # Models live in a runtime pool: the pool owns the runtime
+            # installation, device and serving port; the member targets it.
+            pool = request(
+                "/api/deployment-sets",
                 {
-                    "name": "Synthetic fixture",
-                    "artifact_id": artifact["id"],
+                    "name": "Synthetic fixture pool",
+                    "engine_pool": True,
                     "runtime_id": runtime["id"],
-                    "config": {"gpu-layers": 0},
-                    "raw_args": ["--spawn-child"],
+                    "gpu": None,
+                    "port": free_port(),
+                    "max_loaded": 4,
+                    "residency": "on-demand",
+                    "priority": 50,
+                    "idle_timeout": 300,
+                    "allow_eviction": False,
+                    "queue_timeout": 300,
+                    "enabled": True,
+                    "member_ids": [],
                 },
             )
             deployment = request(
@@ -233,9 +243,10 @@ def check(installer, worker, baseline=None):
                 {
                     "name": "Synthetic fixture",
                     "alias": "fixture",
-                    "profile_id": profile["id"],
-                    "port": free_port(),
-                    "residency": "on-demand",
+                    "artifact_id": artifact["id"],
+                    "runtime_id": runtime["id"],
+                    "config": {"gpu-layers": 0},
+                    "pool_id": pool["id"],
                 },
             )
             ident = deployment["id"]
@@ -267,7 +278,6 @@ def check(installer, worker, baseline=None):
             else:
                 raise AssertionError("Fake runtime readiness timed out")
             parent = row["pid"]
-            child = int(model.with_suffix(".child.pid").read_text())
             reply = request(
                 "/v1/chat/completions",
                 {
@@ -310,10 +320,10 @@ def check(installer, worker, baseline=None):
                 raise AssertionError(
                     "Disconnected fake stream retained an in-flight request"
                 )
-            # Authenticated, loopback shutdown runs Manager.close and kills descendants.
+            # Authenticated, loopback shutdown runs Manager.close; an engine
+            # pool is a single router process with no spawned children.
             execute(launch("stop"))
             wait_dead(parent)
-            wait_dead(child)
             assert model.exists()
             before = hashlib.sha256(model.read_bytes()).hexdigest()
             execute(launch())
@@ -353,7 +363,7 @@ def check(installer, worker, baseline=None):
                 app, state, root, env, lambda: install(installer), execute
             )
             print(
-                "PASS: native installer, isolated launch/duplicate/conflict, bundled dashboard, fake inference/streaming, process tree shutdown, restart/upgrade/uninstall/reinstall preservation"
+                "PASS: native installer, isolated launch/duplicate/conflict, bundled dashboard, fake inference/streaming, single-process shutdown, restart/upgrade/uninstall/reinstall preservation"
             )
         finally:
             if installed and (app / "Menagerie.exe").exists():

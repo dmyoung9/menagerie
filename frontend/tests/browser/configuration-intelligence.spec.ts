@@ -8,7 +8,7 @@ test('curated sections preserve omission and separate explicit automatic context
   const deployment = fixture.registry.deployments.find(
     (entry) => entry.id === 'idle',
   )!;
-  deployment.profile_snapshot!.config = {};
+  deployment.config = {};
   fixture.registry.runtimes[0].capabilities!.schema!['ctx-size'].min = 0;
   fixture.registry.runtimes[0].capabilities!.schema!['ctx-size'].presentation =
     {
@@ -20,15 +20,16 @@ test('curated sections preserve omission and separate explicit automatic context
       provenance: 'adapter',
     };
   await page.goto('/#/deployments/idle/configuration');
-  for (const title of [
-    'Model & runtime',
-    'Resources & context',
-    'Generation',
-    'Availability',
-  ])
+  for (const title of ['Model & runtime', 'Resources & context', 'Generation'])
     await expect(
       page.getByRole('heading', { name: title, exact: true }),
     ).toBeVisible();
+  // The member's availability is the shared pool policy, owned by the pool's
+  // Configuration page; the member editor no longer renders an Availability
+  // card.
+  await expect(
+    page.getByRole('heading', { name: 'Availability', exact: true }),
+  ).toHaveCount(0);
   const source = page.getByLabel('ctx-size', { exact: true });
   await expect(source).toHaveValue('');
   await expect(
@@ -38,7 +39,7 @@ test('curated sections preserve omission and separate explicit automatic context
     .getByRole('button', { name: 'Automatic (0)', exact: true })
     .click();
   await expect(source).toHaveValue('0');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () =>
@@ -48,10 +49,10 @@ test('curated sections preserve omission and separate explicit automatic context
     .toBe(2);
   const saved = deploymentDraft(
     fixture.writes.find(
-      (entry) => entry.path === '/api/deployments?expected=1',
+      (entry) => entry.path === '/api/model-setups?expected=1',
     )!.body,
   );
-  expect(saved.configuration!.config).toEqual({ 'ctx-size': 0 });
+  expect(saved.config).toEqual({ 'ctx-size': 0 });
 });
 
 test('capability warnings retain manual controls and recommendations need explicit application', async ({
@@ -61,7 +62,7 @@ test('capability warnings retain manual controls and recommendations need explic
   const deployment = fixture.registry.deployments.find(
     (entry) => entry.id === 'idle',
   )!;
-  deployment.profile_snapshot!.config = {};
+  deployment.config = {};
   fixture.registry.runtimes[0].capabilities!.schema!.temp = {
     type: 'number',
     min: 0,
@@ -129,7 +130,7 @@ test('capability warnings retain manual controls and recommendations need explic
   await expect(page.getByLabel('Temperature', { exact: true })).toHaveValue(
     '0.6',
   );
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () =>
@@ -147,6 +148,14 @@ test('retired Advanced route redirects to cards with raw arguments and identity'
   page,
   fixture,
 }) => {
+  // Detach `idle` from the starter pool so its standalone Configuration page
+  // exposes editable engine args. A standalone deployment needs its own endpoint
+  // port (the "Private port" field is required), so give it one.
+  fixture.sets[0].member_ids = fixture.sets[0].member_ids.filter(
+    (id) => id !== 'idle',
+  );
+  const target = fixture.registry.deployments.find((d) => d.id === 'idle');
+  if (target) target.port = 8121;
   await page.goto('/#/deployments/idle/advanced');
   await expect(page).toHaveURL(/\/configuration$/);
   await expect(
@@ -162,7 +171,7 @@ test('retired Advanced route redirects to cards with raw arguments and identity'
   await page
     .getByLabel('Engine arguments', { exact: true })
     .fill('["--vendor-option", "synthetic"]');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () =>
@@ -210,7 +219,7 @@ test('filter reveals advanced matches without clearing edits; unsupported overri
     page.getByRole('heading', { name: 'Unsupported saved overrides' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Reset retired-option' }).click();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect
     .poll(
       () => fixture.registry.deployments.find((d) => d.id === 'idle')?.revision,
@@ -235,7 +244,7 @@ test('invalid identity inside a collapsed card opens and receives focus on submi
   await name.fill('');
   await page.locator('[data-settings-section="identity"] summary').click();
   await expect(name).toBeHidden();
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /^Apply(?: and Reload)?$/ }).click();
   await expect(name).toBeVisible();
   await expect(name).toBeFocused();
   await expect(
@@ -266,7 +275,7 @@ for (const { width, components } of [1440, 576, 320].flatMap((width) =>
     });
     await page.goto('/#/deployments/idle/configuration');
     const cards = page.locator('.configuration-grid > [data-settings-section]');
-    await expect(cards).toHaveCount(7);
+    await expect(cards).toHaveCount(6);
     expect(
       await cards.evaluateAll((elements) =>
         elements.map((element) =>
@@ -279,7 +288,6 @@ for (const { width, components } of [1440, 576, 320].flatMap((width) =>
       'memory',
       'generation',
       'variants',
-      'lifecycle',
       'diagnostics',
     ]);
     const grid = page.locator('.configuration-grid');
@@ -306,13 +314,10 @@ for (const { width, components } of [1440, 576, 320].flatMap((width) =>
     const memoryBox = (await grid
       .locator('[data-settings-section="memory"]')
       .boundingBox())!;
-    if (width >= 1200) {
-      expect(memoryBox.x).toBeGreaterThan(modelBox.x);
-      expect(memoryBox.y).toBeCloseTo(modelBox.y, 0);
-    } else {
-      expect(memoryBox.x).toBeCloseTo(modelBox.x, 0);
-      expect(memoryBox.y).toBeGreaterThan(modelBox.y + modelBox.height);
-    }
+    // Sections stack in one column at every width: the memory card sits
+    // directly below the model card, never beside it.
+    expect(memoryBox.x).toBeCloseTo(modelBox.x, 0);
+    expect(memoryBox.y).toBeGreaterThan(modelBox.y + modelBox.height);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,

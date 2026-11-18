@@ -66,14 +66,13 @@ import type {
   Job,
   MetricSample,
   OperationEvent,
-  Profile,
   Runtime,
   TemplateAssetPublic,
   TemplateSelection,
   TemplateSource,
 } from './types';
 
-import { go } from './navigation';
+import { go, repoPath } from './navigation';
 import { readApi } from './ui';
 import * as contracts from './contracts';
 function InspectModel({ id }: { id: string }) {
@@ -107,7 +106,6 @@ function InspectModel({ id }: { id: string }) {
 }
 type Actions = DeploymentActions & {
   inspect: (title: string, value: unknown) => void;
-  revisions: (row: Profile) => void;
 };
 export function ActivityFeed({
   events,
@@ -246,6 +244,8 @@ export function DeploymentDetail({
   saved: () => void;
 }) {
   const profile = d.profile_snapshot;
+  const modelArtifact =
+    data.models?.find((m) => m.id === profile?.artifact_id) || undefined;
   const [logs, setLogs] = useState(''),
     [error, setError] = useState('');
   const logRun = new URLSearchParams(window.location.hash.split('?')[1]).get(
@@ -288,37 +288,51 @@ export function DeploymentDetail({
           <Status value={state(d)} />
         </div>
         <div className="actions">
-          {d.enabled && !active(d) && (
+          {d.enabled &&
+            !d.changes_pending &&
+            d.member_availability !== false &&
+            (!active(d) || Boolean(d.unit_id && d.unit_id !== d.id)) && (
+              <Button
+                variant="default"
+                type="button"
+                onClick={() => actions.load('deployments', d)}
+              >
+                Review and load
+              </Button>
+            )}
+          {(!d.unit_id || d.unit_id === d.id) &&
+            ['READY', 'DEGRADED', 'LOADING', 'STARTING', 'QUEUED'].includes(
+              d.state,
+            ) && (
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => actions.stop('deployments', d)}
+              >
+                Unload
+              </Button>
+            )}
+          {!d.changes_pending && d.member_availability !== false && (
             <Button
-              variant="default"
+              variant={d.enabled ? 'outline' : 'default'}
               type="button"
-              onClick={() => actions.load('deployments', d)}
+              onClick={() => actions.enable(d, !d.enabled)}
             >
-              Load now
-            </Button>
-          )}
-          {['READY', 'DEGRADED', 'LOADING', 'STARTING', 'QUEUED'].includes(
-            d.state,
-          ) && (
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() => actions.stop('deployments', d)}
-            >
-              Unload
-            </Button>
-          )}
-          {!d.enabled && (
-            <Button
-              variant="default"
-              type="button"
-              onClick={() => actions.enable(d, true)}
-            >
-              Enable for clients
+              {d.enabled ? 'Disable for clients' : 'Enable for clients'}
             </Button>
           )}
         </div>
       </div>
+      {d.unit_id && d.unit_id !== d.id && (
+        <p>
+          Member of{' '}
+          <a href={`#/deployments/${d.unit_id}`}>
+            {data.serving?.find((s) => s.id === d.unit_id)?.name || 'its pool'}
+          </a>
+          , which owns the shared engine, device and serving port. It affects
+          every model in the pool.
+        </p>
+      )}
       {d.lifecycle?.failure && (
         <Alert variant="destructive" className="mb-5" role="alert">
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3 whitespace-pre-line">
@@ -383,6 +397,31 @@ export function DeploymentDetail({
                   <dd>{visible(d) ? 'Available' : 'Not listed'}</dd>
                   <dt>Mode</dt>
                   <dd>{mode(d)}</dd>
+                  {modelArtifact?.repo ? (
+                    <>
+                      <dt>Model</dt>
+                      <dd className="copy-value">
+                        <code>{modelArtifact.repo || modelArtifact.name}</code>
+                        <button
+                          type="button"
+                          className="view-model"
+                          onClick={() =>
+                            go(
+                              repoPath(modelArtifact.repo || '', {
+                                revision:
+                                  modelArtifact.source_revision || undefined,
+                                returnTo:
+                                  window.location.hash.slice(2) ||
+                                  'deployments',
+                              }),
+                            )
+                          }
+                        >
+                          View model
+                        </button>
+                      </dd>
+                    </>
+                  ) : null}
                   {d.residency === 'on-demand' && (
                     <>
                       <dt>Unload after idle</dt>
@@ -718,6 +757,22 @@ export function ModelLibrary({
                 >
                   Details
                 </Button>
+                {m.repo ? (
+                  <Button
+                    variant="ghost"
+                    type="button"
+                    onClick={() =>
+                      go(
+                        repoPath(m.repo || m.name, {
+                          revision: m.source_revision || undefined,
+                          returnTo: 'models/installed',
+                        }),
+                      )
+                    }
+                  >
+                    Browse repository files
+                  </Button>
+                ) : null}
               </div>
             </ModelCard>
           );

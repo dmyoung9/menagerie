@@ -1,7 +1,9 @@
-"""Serving deployments with one or more individually supervised model members.
+"""Serving deployments, grouped into pools.
 
-A standalone model is a one-member unit. An owning set supplies shared residency
-policy for multiple members without changing their aliases or profile snapshots.
+A pool owns its shared residency policy and its runtime settings (one runtime
+installation, one device, one serving port) for zero or more individually
+supervised model members. A standalone model is a one-member unit outside
+any pool. An owning set never changes its members' aliases or profile snapshots.
 """
 
 from . import lifecycle, runtime_protocol
@@ -50,7 +52,10 @@ def expand(store, ids):
 
 
 def state(unit):
-    states = [d["state"] for d in unit["members"]]
+    members = unit.get("members") or []
+    if not members:
+        return "STOPPED"
+    states = [d["state"] for d in members]
     if all(s == "READY" for s in states):
         return "READY"
     if "STOPPING" in states:

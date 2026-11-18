@@ -6,12 +6,14 @@ import type {
   EditableSourceMap,
 } from './types';
 import { recordValue } from './decode.ts';
-import { profileDraft, deploymentDraft, runtimeDraft } from './contracts.ts';
+import { deploymentDraft, runtimeDraft } from './contracts.ts';
 import { defaultReasoningOptions } from './capabilityOptions.ts';
 
 export const defaults: EditorDraftMap = {
-  profiles: {
-    name: 'New profile',
+  deployments: {
+    identifier_mode: 'generated',
+    runtime_assignment: 'dedicated',
+    name: 'New deployment',
     artifact_id: '',
     runtime_id: '',
     config: {},
@@ -20,10 +22,6 @@ export const defaults: EditorDraftMap = {
       model: { capabilities: { reasoning: false } },
       reasoning: { presets: defaultReasoningOptions() },
     },
-  },
-  deployments: {
-    name: 'New deployment',
-    profile_id: '',
     alias: 'local-model',
     port: 8120,
     residency: 'on-demand',
@@ -46,15 +44,6 @@ export const defaults: EditorDraftMap = {
 };
 
 const allowed: Record<string, string[]> = {
-  profiles: [
-    'id',
-    'name',
-    'artifact_id',
-    'runtime_id',
-    'config',
-    'raw_args',
-    'catalog',
-  ],
   deployments: [
     'id',
     ...Object.keys(defaults.deployments),
@@ -93,30 +82,8 @@ export function editable(
     delete input.id;
     input.name += ' (copy)';
   }
-  if (kind === 'profiles') {
-    const value = profileDraft(input);
-    if (clone)
-      value.catalog.catalog_id =
-        (value.catalog.catalog_id || 'model') +
-        '-copy-' +
-        Date.now().toString(36);
-    return value;
-  }
   if (kind === 'runtimes') return runtimeDraft(input);
   const value = deploymentDraft(input);
-  if (source?.profile_snapshot) {
-    const snapshot = recordValue(source.profile_snapshot);
-    const configuration = profileDraft(
-      Object.fromEntries(
-        allowed.profiles
-          .filter((key) => snapshot[key] !== undefined)
-          .map((key) => [key, snapshot[key]]),
-      ),
-    );
-    delete configuration.id;
-    value.configuration = configuration;
-    delete value.profile_id;
-  }
   if (clone) value.alias += '-copy';
   return value;
 }

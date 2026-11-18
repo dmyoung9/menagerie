@@ -263,24 +263,20 @@ export const runtimeDraft = d.object<T.RuntimeDraft>({
   fork_url: maybeString,
   formats: opt(stringArray),
 });
-export const profileDraft = d.object<T.ProfileDraft>({
-  id: opt(d.string),
-  name: d.string,
+export const profileSnapshot = d.object<T.ProfileSnapshot>({
   artifact_id: d.string,
   runtime_id: d.string,
   config: jsonObject,
   raw_args: stringArray,
   catalog: modelCatalog,
 });
-export const profile = d.object<T.Profile>({
-  id: d.string,
-  name: d.string,
+export const resourceConfiguration = d.object<T.ResourceConfiguration>({
+  name: opt(d.string),
   artifact_id: d.string,
   runtime_id: d.string,
   config: jsonObject,
   raw_args: stringArray,
   catalog: modelCatalog,
-  revision: d.number,
 });
 const lifecycle = d.object<T.DeploymentLifecycle>({
   deployed: opt(d.boolean),
@@ -296,10 +292,20 @@ export const deployment: d.Decoder<T.Deployment> = (value, path) =>
     max_loaded: opt(d.number),
     id: d.string,
     name: d.string,
-    profile_id: maybeString,
-    profile_snapshot: opt(profile),
+    artifact_id: d.string,
+    runtime_id: d.string,
+    config: jsonObject,
+    raw_args: stringArray,
+    catalog: modelCatalog,
+    profile_snapshot: opt(profileSnapshot),
     alias: d.string,
-    port: opt(d.number),
+    unit_name: opt(d.string),
+    member_availability: opt(d.boolean),
+    changes_pending: opt(d.boolean),
+    runtime_assignment: opt(d.oneOf('automatic', 'dedicated')),
+    identifier_mode: opt(d.oneOf('generated', 'custom')),
+    active_alias: opt(d.string),
+    port: opt(d.nullable(d.number)),
     residency: opt(d.string),
     priority: opt(d.number),
     idle_timeout: opt(d.number),
@@ -342,24 +348,22 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
       members,
       member_ids,
     };
-  // A group has no member-specific alias, private port, or profile snapshot.
-  for (const key of [
-    'alias',
-    'port',
-    'gpu',
-    'profile_id',
-    'profile_snapshot',
-    'configuration',
-  ]) {
+  // A group has no member-specific alias or profile snapshot; it does own
+  // the pool runtime, device and serving port.
+  for (const key of ['alias', 'profile_snapshot']) {
     if (input[key] !== undefined)
       d.fail(`${path}.${key}`, 'no member-specific field on a serving group');
   }
   const common = d.object({
     draining: opt(d.boolean),
+    proposed_configuration: opt(deploymentSetDraft),
     id: d.string,
     name: d.string,
     enabled: d.boolean,
     engine_pool: opt(d.boolean),
+    runtime_id: opt(d.nullable(d.string)),
+    gpu: opt(d.nullable(d.number)),
+    port: opt(d.nullable(d.number)),
     max_loaded: opt(d.number),
     state: d.string,
     residency: opt(d.string),
@@ -375,12 +379,17 @@ export const servingDeployment: d.Decoder<T.ServingDeployment> = (
   return { ...common, multi_model: true, members, member_ids };
 };
 export const deploymentDraft = d.object<T.DeploymentDraft>({
+  identifier_mode: opt(d.oneOf('generated', 'custom')),
+  runtime_assignment: opt(d.oneOf('automatic', 'dedicated')),
   id: opt(d.string),
   name: d.string,
-  profile_id: opt(d.string),
-  configuration: opt(profileDraft),
+  artifact_id: d.string,
+  runtime_id: d.string,
+  config: jsonObject,
+  raw_args: stringArray,
+  catalog: modelCatalog,
   alias: d.string,
-  port: d.number,
+  port: d.nullable(d.number),
   residency: d.string,
   priority: d.number,
   idle_timeout: d.number,
@@ -394,6 +403,9 @@ export const deploymentSetDraft = d.object<T.DeploymentSetDraft>({
   id: opt(d.string),
   name: d.string,
   engine_pool: opt(d.boolean),
+  runtime_id: opt(d.nullable(d.string)),
+  gpu: opt(d.nullable(d.number)),
+  port: opt(d.nullable(d.number)),
   max_loaded: opt(d.number),
   residency: d.string,
   priority: d.number,
@@ -624,12 +636,12 @@ export const resourcePreview = d.object<T.ResourcePreview>({
 export const resourcePreviewDraft = d.object<T.ResourcePreviewDraft>({
   name: opt(d.string),
   gpu: opt(d.nullable(d.number)),
-  configuration: opt(profileDraft),
+  configuration: opt(resourceConfiguration),
 });
 export const resourceDraft = d.object<T.ResourceDraft>({
   name: d.string,
   gpu: d.nullable(d.number),
-  configuration: profileDraft,
+  configuration: resourceConfiguration,
 });
 export const resourcePreviewRequest = d.object<T.ResourcePreviewRequest>({
   members: d.array(resourceDraft),
@@ -697,6 +709,48 @@ export const catalogRevision = d.object<T.CatalogRevision>({
   name: d.string,
   kind: d.string,
 });
+
+const acquisitionStatus = d.oneOf(
+  'not_downloaded',
+  'downloading',
+  'downloaded',
+  'failed',
+  'missing',
+);
+const manifestFile = d.object<T.ManifestFile>({
+  name: d.string,
+  size: d.nullable(d.number),
+  sha256: maybeString,
+  status: acquisitionStatus,
+  local_path: opt(d.nullable(d.string)),
+  error: opt(d.nullable(d.string)),
+});
+const manifestGroup = d.object<T.ManifestGroup>({
+  id: d.string,
+  name: d.string,
+  kind: d.oneOf('gguf_split', 'safetensors', 'companion', 'standalone'),
+  required: stringArray,
+  complete: d.boolean,
+  local_status: d.record(acquisitionStatus),
+  downloaded_count: d.number,
+  failed_count: d.number,
+  downloading_count: d.number,
+});
+export const repositoryManifest = d.object<T.RepositoryManifest>({
+  repo: d.string,
+  revision: d.string,
+  files: d.array(manifestFile),
+  groups: d.array(manifestGroup),
+  selected: opt(stringArray),
+  required_files: opt(stringArray),
+  pending: opt(stringArray),
+  retry_targets: opt(stringArray),
+});
+export const repositoryReadme = d.object<T.RepositoryReadme>({
+  repo: d.string,
+  revision: d.string,
+  content: d.string,
+});
 export const historySession = d.object<T.HistorySession>({
   id: d.string,
   started_at: d.number,
@@ -704,7 +758,7 @@ export const historySession = d.object<T.HistorySession>({
     const input = d.recordValue(value, path);
     return {
       ...deployment(value, path),
-      profile_snapshot: profile(
+      profile_snapshot: profileSnapshot(
         input.profile_snapshot,
         `${path}.profile_snapshot`,
       ),
@@ -738,6 +792,10 @@ export const integration = d.object<{ endpoint: string }>({
   endpoint: d.string,
 });
 export const identity = d.object<{ id: string }>({ id: d.string });
+export const configurationSave = d.object<{
+  id: string;
+  changes_pending?: boolean;
+}>({ id: d.string, changes_pending: opt(d.boolean) });
 export const sourceBuildPlan = d.object<T.SourceBuildPlan>({
   warning: d.string,
   commands: d.array(stringArray),

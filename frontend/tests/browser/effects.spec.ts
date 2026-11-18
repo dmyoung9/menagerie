@@ -74,8 +74,20 @@ test('wizard preserves explicit edits on polling and schema refresh without seed
       },
     }),
   );
+  // The wizard previews the generated API identifier from the name. The request
+  // carries the name as a query string, so match by path. Serve a valid server
+  // contract shape so the suggestion request is fulfilled.
+  await page.route(/\/api\/deployments\/alias\/suggest/, (route) =>
+    route.fulfill({
+      json: {
+        alias: 'new-deployment',
+        base: 'new-deployment',
+        mode: 'generated',
+      },
+    }),
+  );
   await page.goto('/tests/effects.html?scenario=wizard');
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByText('Advanced', { exact: true }).click();
   await page.getByText('Runtime options (JSON)', { exact: true }).click();
   const input = page.getByRole('textbox', { name: 'Runtime options (JSON)' });

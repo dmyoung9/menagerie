@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   ArrowUpRight,
@@ -34,6 +34,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { ModelCatalog } from './ModelCatalog';
+import { RepositoryPage } from './RepositoryPage';
 import { readApi } from './ui';
 import * as contracts from './contracts';
 import { array } from './decode';
@@ -44,12 +45,16 @@ import { Downloads } from '@/components/downloads';
 import { ProcessResources } from '@/components/process-resources';
 import { TelemetrySeries } from '@/components/charts/telemetry-series';
 import { Editor } from './Editors';
+import { PoolWizard } from './PoolWizard';
+import { applyConfiguration } from './configuration-apply';
+import { useConfirmation } from '@/hooks/use-confirmation';
 import { editable } from './editor-state';
 import { Connect, LaunchReview, PolicyEditor, SourceBuild } from './Operations';
 import {
   DeploymentSetEditor,
   MultiDeploymentDetail,
   ServingTable,
+  PoolSection,
 } from './ServingDeployments';
 import {
   ActivityFeed,
@@ -59,17 +64,31 @@ import {
   SettingsPage,
 } from './Views';
 import { go, canNavigate } from './navigation';
-import { api, Dialog, Empty, Field, Json, message, number, Tabs } from './ui';
+import {
+  api,
+  Dialog,
+  Empty,
+  Field,
+  Json,
+  message,
+  number,
+  telemetryStale,
+  Tabs,
+} from './ui';
 import brandLogo from './assets/logo-mono.png';
 import type {
   AppStatus,
+  Artifact,
+  Deployment,
+  DeploymentSet,
   EditableSource,
   HostSnapshot,
+  Job,
   MetricSample,
   ModalState,
   OperationEvent,
-  Profile,
   Registry,
+  Runtime,
   ServingDeployment,
 } from './types';
 
@@ -131,7 +150,25 @@ function useRoute() {
     }
     return parts;
   };
+  // Query params live after `?` on the raw hash; `readRoute` drops them because
+  // it splits on `/`. Parse them separately so deep links can carry `revision`
+  // and `returnTo`.
+  const readHashQuery = (): Record<string, string> => {
+    const raw = window.location.hash.slice(2).split('?')[1] || '';
+    const out: Record<string, string> = {};
+    for (const pair of raw.split('&')) {
+      const idx = pair.indexOf('=');
+      if (idx === -1) continue;
+      const key = decodeURIComponent(pair.slice(0, idx));
+      const value = decodeURIComponent(pair.slice(idx + 1));
+      out[key] = value;
+    }
+    return out;
+  };
   const [route, setRoute] = useState(() => readRoute());
+  const [hashQuery, setHashQuery] = useState<Record<string, string>>(() =>
+    readHashQuery(),
+  );
   useEffect(() => {
     let previous = window.location.hash,
       pending = false;
@@ -140,6 +177,7 @@ function useRoute() {
       pending = true;
       if (await canNavigate()) {
         setRoute(readRoute());
+        setHashQuery(readHashQuery());
         previous = window.location.hash;
       } else window.history.replaceState(null, '', previous || '#/overview');
       pending = false;
@@ -147,71 +185,162 @@ function useRoute() {
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
-  return route;
+  return { route, hashQuery };
 }
+
+type SliceKey = 'status' | 'models' | 'runtimes' | 'deployments' | 'jobs';
+
+/** The five inventory endpoints, fetched independently. A slice that errors or
+ * is slow keeps its last-good value and only its own error/loading state. */
+const ENDPOINTS: Record<
+  SliceKey,
+  { path: string; decode: (value: unknown, path?: string) => unknown }
+> = {
+  status: { path: '/api/status', decode: contracts.status },
+  models: { path: '/api/registry/models', decode: array(contracts.artifact) },
+  runtimes: {
+    path: '/api/registry/runtimes',
+    decode: array(contracts.runtime),
+  },
+  deployments: {
+    path: '/api/registry/deployments',
+    decode: array(contracts.deployment),
+  },
+  jobs: { path: '/api/registry/jobs', decode: array(contracts.job) },
+};
+
+const SLICE_KEYS = Object.keys(ENDPOINTS) as SliceKey[];
+
+/** Slices a mutation to the named resource invalidates. Unmapped kinds fall
+ * back to a full refresh; the 5 s polling fallback keeps the registry
+ * consistent either way. */
+const affectedSlices = (kind?: string): SliceKey[] => {
+  if (!kind) return SLICE_KEYS;
+  switch (kind) {
+    case 'models':
+    case 'artifacts':
+    case 'local-model':
+      return ['models'];
+    case 'runtimes':
+      return ['runtimes'];
+    case 'deployments':
+    case 'serving-deployments':
+    case 'deployment_sets':
+    case 'deployment-set':
+    case 'pool-wizard':
+      return ['deployments', 'status'];
+    case 'settings':
+    case 'policy':
+      return ['status'];
+    default:
+      return SLICE_KEYS;
+  }
+};
+
+const BUSY_STATES: ReadonlyArray<string> = ['QUEUED', 'RUNNING'];
+
+const completedJobSlices = (job: Job): SliceKey[] => {
+  if (
+    job.operation === 'download' ||
+    job.repo !== undefined ||
+    job.filename !== undefined
+  ) {
+    return ['models'];
+  }
+  if (job.deployment_id !== undefined) return ['deployments', 'status'];
+  const name = job.name || '';
+  if (/^build runtime/i.test(name) || /^pull runtime/i.test(name)) {
+    return ['runtimes'];
+  }
+  if (job.model_id !== undefined) return ['models'];
+  return SLICE_KEYS;
+};
+
+/** Typed payload for each slice; the keyed state maps to it one-to-one. */
+type SliceData = {
+  status: AppStatus | null;
+  models: Artifact[];
+  runtimes: Runtime[];
+  deployments: Deployment[];
+  jobs: Job[];
+};
+type Slice<T> = {
+  data: T;
+  loading: boolean;
+  error: string | null;
+  updatedAt: number | null;
+};
+type Slices = { [K in keyof SliceData]: Slice<SliceData[K]> };
+/** The union of every slice's data shape; enough to type a decoupled fetch result. */
+type SliceDataValue =
+  AppStatus | null | Artifact[] | Runtime[] | Deployment[] | Job[];
+
+function initSlice<T>(data: T): Slice<T> {
+  return { data, loading: true, error: null, updatedAt: null };
+}
+
 export default function App() {
-  const route = useRoute(),
+  const { confirm: confirmApply, confirmation: applyConfirmation } =
+    useConfirmation();
+  const { route, hashQuery } = useRoute(),
     page = route[0] || 'overview';
-  const [status, setStatus] = useState<AppStatus | null>(null),
-    [data, setData] = useState<Registry>({
-      models: [],
-      runtimes: [],
-      profiles: [],
-      deployments: [],
-      jobs: [],
-      host: [],
+  const [slices, setSlices] = useState<Slices>({
+      status: initSlice<AppStatus | null>(null),
+      models: initSlice<Artifact[]>([]),
+      runtimes: initSlice<Runtime[]>([]),
+      deployments: initSlice<Deployment[]>([]),
+      jobs: initSlice<Job[]>([]),
     }),
     [samples, setSamples] = useState<MetricSample[]>([]),
     [events, setEvents] = useState<OperationEvent[]>([]);
-  const [connection, setConnection] = useState(false),
-    [loading, setLoading] = useState(true),
-    [fetchError, setFetchError] = useState('');
+  const [connection, setConnection] = useState(false);
   const [modal, setModal] = useState<ModalState | null>(null),
     [modalError, setModalError] = useState(''),
+    [revisionConflict, setRevisionConflict] = useState(false),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState('');
   const [query, setQuery] = useState(''),
     [endpoint, setEndpoint] = useState('');
-  const refresh = useCallback(async () => {
-    const [s, models, runtimes, profiles, deployments, jobs] =
-      await Promise.all([
-        readApi('/api/status', contracts.status),
-        readApi('/api/registry/models', array(contracts.artifact)),
-        readApi('/api/registry/runtimes', array(contracts.runtime)),
-        readApi('/api/registry/profiles', array(contracts.profile)),
-        readApi('/api/registry/deployments', array(contracts.deployment)),
-        readApi('/api/registry/jobs', array(contracts.job)),
-      ]);
-    setStatus(s);
-    setData({
-      models,
-      runtimes,
-      profiles,
-      deployments,
-      jobs,
-      host: s.host ? [s.host] : [],
-      ...(s.serving_deployments ? { serving: s.serving_deployments } : {}),
-    });
-    if (s.gateway_url) setEndpoint(s.gateway_url);
-    setFetchError('');
-    setLoading(false);
+  // Per-slice sequence counters guard against stale responses: a refresh that
+  // starts after one in-flight discards the older one's result.
+  const seq = useRef<Record<SliceKey, number>>({
+    status: 0,
+    models: 0,
+    runtimes: 0,
+    deployments: 0,
+    jobs: 0,
+  });
+  const fetchSlice = useCallback(async (key: SliceKey): Promise<void> => {
+    const spec = ENDPOINTS[key];
+    const mySeq = ++seq.current[key];
+    setSlices((s) => ({ ...s, [key]: { ...s[key], loading: true } }));
+    try {
+      const value = await readApi(spec.path, spec.decode);
+      if (mySeq !== seq.current[key]) return;
+      setSlices((s) => ({
+        ...s,
+        [key]: {
+          data: value as SliceDataValue,
+          loading: false,
+          error: null,
+          updatedAt: Date.now(),
+        },
+      }));
+    } catch (e) {
+      if (mySeq !== seq.current[key]) return;
+      setSlices((s) => ({
+        ...s,
+        [key]: { ...s[key], loading: false, error: message(e) },
+      }));
+    }
   }, []);
+  const refresh = useCallback(async (): Promise<void> => {
+    await Promise.all(SLICE_KEYS.map((key) => fetchSlice(key)));
+  }, [fetchSlice]);
   useEffect(() => {
-    let alive = true,
-      pending = false;
-    const poll = async () => {
-      if (pending) return;
-      pending = true;
-      try {
-        await refresh();
-      } catch {
-        if (alive) {
-          setFetchError('Connection lost. Displayed data may be out of date.');
-          setLoading(false);
-        }
-      } finally {
-        pending = false;
-      }
+    let alive = true;
+    const poll = () => {
+      void refresh();
     };
     void poll();
     const timer = setInterval(poll, 5000);
@@ -232,16 +361,22 @@ export default function App() {
       try {
         const value: unknown = JSON.parse((e as MessageEvent<string>).data);
         const host = contracts.host(value);
-        setStatus((s) => (s ? { ...s, host } : s));
+        // Refresh the host sample inside the status slice; the registry data
+        // (models, runtimes, ...) stays untouched by telemetry.
+        setSlices((s) => {
+          if (!s.status.data) return s;
+          return {
+            ...s,
+            status: { ...s.status, data: { ...s.status.data, host } },
+          };
+        });
         setSamples((s) =>
           [...s.filter((old) => old.ts !== host.ts), host]
             .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
             .slice(-500),
         );
       } catch {
-        setFetchError(
-          'Received invalid telemetry. Waiting for a valid update.',
-        );
+        // Malformed telemetry: the next sample recovers; never mask registry data.
       }
     });
     stream.addEventListener('operation', (e) => {
@@ -250,7 +385,6 @@ export default function App() {
         const value: unknown = JSON.parse((e as MessageEvent<string>).data);
         event = contracts.operationEvent(value);
       } catch {
-        setFetchError('Received an invalid event. Refresh to reconnect.');
         return;
       }
       setEvents((s) =>
@@ -277,67 +411,62 @@ export default function App() {
       setNotice('');
     }
   }, [notice]);
-  const revisionId = modal?.type === 'revisions' ? modal.row.id : undefined;
-  useEffect(() => {
-    if (!revisionId) return;
-    let alive = true;
-    readApi(`/api/profiles/${revisionId}/revisions`, array(contracts.profile))
-      .then((value) => {
-        if (alive)
-          setModal((current) =>
-            current?.type === 'revisions' ? { ...current, value } : current,
-          );
-      })
-      .catch((e) => {
-        if (alive) setModalError(message(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [revisionId]);
   const open = (value: ModalState | null) => {
     setModalError('');
+    setRevisionConflict(false);
     setModal(value);
   };
   const close = () => {
     if (!busy) open(null);
   };
-  const reload = () =>
-    refresh().catch(() =>
-      setFetchError('Could not refresh. Displayed data may be out of date.'),
-    );
-  const completed = (text = '') => {
+  // Refresh a subset of the registry slices. A missing set is a full refresh
+  // (used by the global "Retry"); the 5 s polling fallback covers the rest.
+  const refreshSlices = useCallback(
+    async (invalidates?: SliceKey[]): Promise<void> => {
+      await Promise.all((invalidates ?? SLICE_KEYS).map(fetchSlice));
+    },
+    [fetchSlice],
+  );
+  const reload = () => {
+    void refreshSlices();
+  };
+  const completed = (text = '', invalidates?: SliceKey[]) => {
     open(null);
     if (text) setNotice(text);
-    void reload();
+    void refreshSlices(invalidates);
   };
   async function perform<T>(
     action: () => Promise<T>,
     text = '',
     dismiss = true,
+    invalidates?: SliceKey[],
+    suppressError?: (detail: string) => boolean,
   ): Promise<T | null> {
     setBusy(true);
     setModalError('');
     try {
       const result = await action();
-      if (dismiss) completed(text);
+      if (dismiss) completed(text, invalidates);
       else {
         if (text) setNotice(text);
-        void reload();
+        void refreshSlices(invalidates);
       }
       return result;
     } catch (e) {
-      setModalError(message(e));
+      const detail = message(e);
+      if (suppressError && suppressError(detail)) return null;
+      setModalError(detail);
       return null;
     } finally {
       setBusy(false);
     }
   }
-  const deployments = data.deployments || [],
-    jobs = data.jobs || [],
+  const status = slices.status.data,
+    deployments = slices.deployments.data,
+    jobs = slices.jobs.data,
     host: HostSnapshot = status?.host || { gpus: [] };
   const serving: ServingDeployment[] =
-    data.serving ||
+    status?.serving_deployments ||
     deployments.map((d) => ({
       ...d,
       multi_model: false,
@@ -345,9 +474,57 @@ export default function App() {
       member_ids: [d.id],
       inflight: status?.deployments.find((m) => m.id === d.id)?.inflight || 0,
     }));
-  const enabled = serving.filter((d) => d.enabled),
-    inactive = serving.filter((d) => !d.enabled),
-    running = deployments.filter((d) => d.state === 'READY');
+  const configured = deployments.map((d) => ({
+    ...d,
+    multi_model: false as const,
+    members: [d],
+    member_ids: [d.id],
+  }));
+  const running = deployments.filter((d) => d.state === 'READY');
+  // Every model belongs to a pool, so the deployments destination is a list of
+  // pools with their member models rather than a flat model table.
+  const pools = serving.filter((d): d is DeploymentSet => d.multi_model),
+    enabledPools = pools.filter((d) => d.enabled),
+    inactivePools = pools.filter((d) => !d.enabled);
+  // A slice is only "pending" before its first successful answer; once a slice
+  // has responded, refreshes keep its last-good data and must not re-gate the
+  // destination.
+  const pageKeys: Record<string, SliceKey[]> = {
+    overview: ['status', 'deployments'],
+    models: ['models', 'jobs'],
+    deployments: ['deployments', 'status'],
+    activity: ['jobs'],
+    settings: ['status'],
+  };
+  const pageName = navigation.find((n) => n.id === page)?.label || 'Workspace',
+    pagePending = pageKeys[page]
+      ? pageKeys[page].some(
+          (k) => slices[k].loading && slices[k].updatedAt === null,
+        )
+      : false,
+    fetchError = SLICE_KEYS.some((k) => slices[k].error)
+      ? 'Connection lost. Displayed data may be out of date.'
+      : '',
+    connLabel = fetchError
+      ? 'Reconnecting'
+      : connection
+        ? telemetryStale(host)
+          ? 'Samples stale'
+          : 'Connected'
+        : 'Events offline',
+    connectionIconClass = fetchError
+      ? ''
+      : connection && !telemetryStale(host)
+        ? 'online'
+        : 'caution';
+  const data: Registry = {
+    models: slices.models.data,
+    runtimes: slices.runtimes.data,
+    deployments,
+    jobs,
+    host: status?.host ? [status.host] : [],
+    ...(status?.serving_deployments ? { serving } : {}),
+  };
   function edit<K extends keyof import('./types').EditableSourceMap>(
     kind: K,
     row?: import('./types').EditableSourceMap[K],
@@ -369,23 +546,7 @@ export default function App() {
       return;
     }
     let editor: import('./types').EditorState;
-    if (kind === 'profiles') {
-      const value = editable(
-        kind,
-        row ? contracts.profile(row) : undefined,
-        clone,
-      );
-      if (!row) {
-        value.artifact_id = data.models?.[0]?.id || '';
-        value.runtime_id = data.runtimes?.[0]?.id || '';
-        for (const [key, field] of Object.entries(
-          data.runtimes?.[0]?.capabilities?.schema || {},
-        )) {
-          if (field.default !== undefined) value.config[key] = field.default;
-        }
-      }
-      editor = { kind, value };
-    } else if (kind === 'runtimes') {
+    if (kind === 'runtimes') {
       editor = {
         kind,
         value: editable(kind, row ? contracts.runtime(row) : undefined, clone),
@@ -427,8 +588,6 @@ export default function App() {
   const actions = {
     edit,
     inspect,
-    revisions: (row: Profile) =>
-      open({ type: 'revisions', title: row.name + ' revisions', row }),
     load: (
       kind: import('./types').LaunchKind,
       row: import('./types').LaunchTarget,
@@ -436,11 +595,9 @@ export default function App() {
       open({
         type: 'launch',
         kind:
-          kind === 'deployments' && data.serving
-            ? 'serving-deployments'
-            : kind === 'serving-deployments' && !data.serving
-              ? 'deployments'
-              : kind,
+          kind === 'serving-deployments' && !data.serving
+            ? 'deployments'
+            : kind,
         row,
       }),
     stop: (
@@ -450,28 +607,29 @@ export default function App() {
       open({
         type: 'stop',
         kind:
-          kind === 'deployments' && data.serving
-            ? 'serving-deployments'
-            : kind === 'serving-deployments' && !data.serving
-              ? 'deployments'
-              : kind,
+          kind === 'serving-deployments' && !data.serving
+            ? 'deployments'
+            : kind,
         row,
       }),
     enable: (row: import('./types').LaunchTarget, enabled: boolean) =>
       open({ type: 'enable', row, enabled }),
   };
-  const newDeployment = (modelId?: string) => {
-    if (!data.models?.length) {
-      go('models');
-      return;
-    }
-    open({ type: 'deployment-set', modelId });
+  const [suspendedWizard, setSuspendedWizard] = useState<{
+    type: 'wizard';
+    modelId?: string;
+    poolId?: string;
+  } | null>(null);
+  const newDeployment = (modelId?: string, poolId?: string) => {
+    open({ type: 'wizard', modelId, poolId });
   };
+  const newPool = () => open({ type: 'pool-wizard' });
   const depView = route[1] === 'disabled' ? 'inactive' : route[1] || 'enabled',
     detail =
       page === 'deployments' && !['enabled', 'inactive'].includes(depView);
   const selected = detail
-    ? serving.find((d) => d.id === depView || d.member_ids?.includes(depView))
+    ? configured.find((d) => d.id === depView) ||
+      serving.find((d) => d.id === depView)
     : undefined;
   const modelTab =
     route[1] === 'discover'
@@ -479,6 +637,17 @@ export default function App() {
       : route[1] === 'downloads'
         ? 'Downloads'
         : 'Installed';
+  // Addressable repository page: /models/repo/<repo>[?revision=&returnTo=]
+  const repoRoute = page === 'models' && route[1] === 'repo',
+    repo = repoRoute ? route.slice(2).join('/') : '',
+    repoRevision = repoRoute ? hashQuery.revision || '' : '',
+    repoReturnTo = repoRoute ? hashQuery.returnTo || 'models' : 'models';
+  const onRepoJobFinished = useCallback(
+    (_repo: string) => {
+      void refreshSlices(['jobs']);
+    },
+    [refreshSlices],
+  );
   const activityTab = route[1] === 'requests' ? 'Requests' : 'Events';
   const settingsTab = ['engines', 'host', 'history', 'recovery'].includes(
     route[1],
@@ -494,8 +663,34 @@ export default function App() {
     if (page === 'deployments' && route[2] === 'policy')
       go(`deployments/${route[1]}/configuration`);
   }, [page, route]);
+
+  const finishedJobs = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const current: Record<string, string> = {};
+    const affected: SliceKey[] = [];
+    for (const job of jobs) {
+      current[job.id] = job.state;
+      const prev = finishedJobs.current[job.id];
+      if (
+        prev !== undefined &&
+        BUSY_STATES.includes(prev) &&
+        !BUSY_STATES.includes(job.state)
+      ) {
+        affected.push(...completedJobSlices(job));
+      }
+    }
+    for (const [id, state] of Object.entries(finishedJobs.current)) {
+      if (BUSY_STATES.includes(state) && !(id in current)) {
+        affected.push(...SLICE_KEYS);
+      }
+    }
+    const unique = [...new Set(affected)];
+    if (unique.length) void refreshSlices(unique);
+    finishedJobs.current = current;
+  }, [jobs, refreshSlices]);
   return (
     <SidebarProvider>
+      {applyConfirmation}
       <a
         className="skip-link"
         href="#main"
@@ -518,8 +713,8 @@ export default function App() {
         </SidebarContent>
         <SidebarFooter>
           <div className="connection" role="status">
-            <i className={connection && !fetchError ? 'online' : ''} />
-            {connection && !fetchError ? 'Connected' : 'Reconnecting'}
+            <i className={connectionIconClass || undefined} />
+            {connLabel}
           </div>
         </SidebarFooter>
       </Sidebar>
@@ -573,27 +768,44 @@ export default function App() {
                   </Button>
                 )}
                 {page === 'deployments' && (
+                  <>
+                    <Button
+                      variant="default"
+                      type="button"
+                      onClick={() => newPool()}
+                    >
+                      <Plus size={16} />
+                      New pool
+                    </Button>
+                    <Button
+                      variant="outline"
+                      type="button"
+                      onClick={() => newDeployment()}
+                    >
+                      New deployment
+                    </Button>
+                  </>
+                )}
+                {suspendedWizard && modal?.type !== 'wizard' && (
                   <Button
-                    variant="default"
-                    type="button"
-                    onClick={() => newDeployment()}
+                    variant="outline"
+                    onClick={() => open(suspendedWizard)}
                   >
-                    <Plus size={16} />
-                    New deployment
+                    Return to setup
                   </Button>
                 )}
               </div>
             </div>
           )}
-          {loading ? (
+          {pagePending ? (
             <div
               role="status"
-              aria-label="Loading workspace"
+              aria-label={`Loading ${pageName}`}
               className="flex flex-col gap-5"
             >
               <Skeleton className="h-28 w-full" />
               <Skeleton className="h-72 w-full" />
-              <span className="sr-only">Loading workspace…</span>
+              <span className="sr-only">Loading {pageName}…</span>
             </div>
           ) : (
             <>
@@ -614,18 +826,19 @@ export default function App() {
                   </div>
                   <Card className="mb-5 min-w-0 gap-0 p-0">
                     <CardContent className="p-0">
-                      {enabled.length ? (
+                      {enabledPools.length ? (
                         <ServingTable
-                          rows={enabled}
+                          rows={enabledPools}
                           host={host}
                           actions={actions}
                           compact
+                          runtimes={data.runtimes}
                         />
                       ) : (
                         <Empty
                           title={
                             data.models?.length
-                              ? 'No enabled deployments'
+                              ? 'No enabled pools'
                               : 'Add your first model'
                           }
                         >
@@ -756,7 +969,17 @@ export default function App() {
                   />
                 </>
               )}
-              {page === 'models' && (
+              {page === 'models' && route[1] === 'repo' && (
+                <RepositoryPage
+                  key={repo}
+                  repo={repo}
+                  revision={repoRevision}
+                  returnTo={repoReturnTo}
+                  jobs={jobs}
+                  onJobFinished={onRepoJobFinished}
+                />
+              )}
+              {page === 'models' && route[1] !== 'repo' && (
                 <>
                   <Tabs
                     items={['Installed', 'Discover', 'Downloads']}
@@ -784,8 +1007,7 @@ export default function App() {
                     <ModelCatalog
                       api={api}
                       queued={() => {
-                        setNotice('Download queued');
-                        void reload();
+                        void refreshSlices(['jobs']);
                       }}
                     />
                   )}
@@ -813,7 +1035,9 @@ export default function App() {
                         host={host}
                         actions={actions}
                         events={events}
-                        saved={() => void reload()}
+                        saved={() =>
+                          void refreshSlices(affectedSlices('deployment_set'))
+                        }
                       />
                     ) : (
                       <DeploymentDetail
@@ -834,7 +1058,9 @@ export default function App() {
                         inflight={selected.inflight || 0}
                         actions={actions}
                         events={events}
-                        saved={() => void reload()}
+                        saved={() =>
+                          void refreshSlices(affectedSlices('deployments'))
+                        }
                       />
                     )
                   ) : (
@@ -852,13 +1078,13 @@ export default function App() {
                   <>
                     <Tabs
                       items={[
-                        `Enabled (${enabled.length})`,
-                        `Disabled (${inactive.length})`,
+                        `Enabled (${enabledPools.length})`,
+                        `Disabled (${inactivePools.length})`,
                       ]}
                       value={
                         depView === 'inactive'
-                          ? `Disabled (${inactive.length})`
-                          : `Enabled (${enabled.length})`
+                          ? `Disabled (${inactivePools.length})`
+                          : `Enabled (${enabledPools.length})`
                       }
                       onChange={(t) =>
                         go('deployments/' + t.split(' ')[0].toLowerCase())
@@ -867,44 +1093,56 @@ export default function App() {
                     <Input
                       className="search"
                       type="search"
-                      aria-label="Search deployments"
-                      placeholder="Search deployments…"
+                      aria-label="Search pools"
+                      placeholder="Search pools and models…"
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                     />
-                    <Card className="mb-5 min-w-0 gap-0 p-0">
-                      <CardContent className="p-0">
-                        {(depView === 'inactive' ? inactive : enabled)
-                          .length ? (
-                          <ServingTable
-                            rows={(depView === 'inactive'
-                              ? inactive
-                              : enabled
-                            ).filter((d) =>
-                              (
-                                d.name +
-                                ' ' +
-                                (d.members || [d])
-                                  .map((m) => m.alias + ' ' + m.name)
-                                  .join(' ')
-                              )
-                                .toLowerCase()
-                                .includes(query.toLowerCase()),
-                            )}
+                    {(depView === 'inactive' ? inactivePools : enabledPools)
+                      .length ? (
+                      (depView === 'inactive' ? inactivePools : enabledPools)
+                        .filter((pool) =>
+                          (
+                            pool.name +
+                            ' ' +
+                            pool.members
+                              .map((m) => m.alias + ' ' + m.name)
+                              .join(' ')
+                          )
+                            .toLowerCase()
+                            .includes(query.toLowerCase()),
+                        )
+                        .map((pool) => (
+                          <PoolSection
+                            key={pool.id}
+                            d={pool}
+                            data={data}
                             host={host}
                             actions={actions}
-                          />
-                        ) : (
-                          <Empty
-                            title={
-                              depView === 'inactive'
-                                ? 'No inactive deployments'
-                                : 'No enabled deployments'
+                            changed={(text) =>
+                              completed(text, ['deployments', 'status'])
                             }
                           />
-                        )}
-                      </CardContent>
-                    </Card>
+                        ))
+                    ) : (
+                      <Empty
+                        title={
+                          pools.length
+                            ? depView === 'inactive'
+                              ? 'No disabled pools'
+                              : 'No enabled pools'
+                            : 'No pools yet'
+                        }
+                      >
+                        <Button
+                          variant="default"
+                          type="button"
+                          onClick={() => newPool()}
+                        >
+                          Create a pool
+                        </Button>
+                      </Empty>
+                    )}
                   </>
                 ))}
               {page === 'activity' && (
@@ -946,31 +1184,57 @@ export default function App() {
             </>
           )}
           {busyJobs.length > 0 && (
-            <a className="operation-indicator" href="#/activity/events">
-              <RefreshCw size={14} className="spin" />
-              {busyJobs.length === 1
-                ? busyJobs[0].name
-                : `${busyJobs.length} operations running`}
-              <ArrowUpRight size={14} />
-            </a>
+            <div
+              className="operation-notifications"
+              aria-label="Operations running"
+            >
+              {busyJobs.map((job) => (
+                <a
+                  key={job.id}
+                  className="operation-indicator"
+                  href="#/activity/events"
+                >
+                  <RefreshCw
+                    size={14}
+                    className={job.state === 'RUNNING' ? 'spin' : undefined}
+                  />
+                  {job.name}
+                  <ArrowUpRight size={14} />
+                </a>
+              ))}
+            </div>
           )}
         </div>
       </SidebarInset>
-      {modal?.type === 'wizard' && (
+      {(modal?.type === 'wizard' || suspendedWizard) && (
         <DeploymentWizard
           data={data}
-          modelId={modal.modelId}
-          close={close}
-          setupEngine={() => {
+          modelId={
+            modal?.type === 'wizard' ? modal.modelId : suspendedWizard?.modelId
+          }
+          poolId={
+            modal?.type === 'wizard' ? modal.poolId : suspendedWizard?.poolId
+          }
+          suspended={modal?.type !== 'wizard'}
+          close={() => {
+            setSuspendedWizard(null);
             close();
-            go('settings/engines');
           }}
-          created={(row, load) => {
-            void reload();
+          acquireModel={(local) => {
+            if (modal?.type === 'wizard') setSuspendedWizard(modal);
+            close();
+            go('models');
+            if (local) open({ type: 'local-model', path: '' });
+          }}
+          newPool={() => {
+            close();
+            open({ type: 'pool-wizard' });
+          }}
+          created={(row) => {
+            void refreshSlices(affectedSlices('deployments'));
             go('deployments/' + row.id);
-            open(load ? { type: 'launch', kind: 'deployments', row } : null);
-            if (!load) setNotice('Deployment created');
           }}
+          onConnect={() => open({ type: 'connect' })}
         />
       )}
       {modal?.type === 'launch' && (
@@ -979,100 +1243,91 @@ export default function App() {
           deployments={deployments}
           host={host}
           close={close}
-          done={() => completed('Launch queued')}
+          done={() => completed('', ['deployments', 'status', 'jobs'])}
         />
       )}
       {modal?.type === 'connect' && (
         <Connect endpoint={endpoint} deployments={deployments} close={close} />
       )}
       {modal?.type === 'source' && (
-        <SourceBuild close={close} done={() => completed('Build queued')} />
+        <SourceBuild
+          close={close}
+          done={() => completed('', ['runtimes', 'jobs'])}
+        />
       )}
       {modal?.type === 'deployment-set' && (
         <DeploymentSetEditor
           initial={modal.row}
-          modelId={modal.modelId}
           data={data}
           close={close}
           saved={(id) => {
-            completed('Deployment saved');
+            completed('Pool saved', affectedSlices('deployment_set'));
             go(id ? 'deployments/' + id : 'deployments');
           }}
         />
       )}
+      {modal?.type === 'pool-wizard' && (
+        <PoolWizard
+          data={data}
+          close={close}
+          saved={(id) => {
+            completed('Pool created', affectedSlices('deployment_set'));
+            go('deployments/' + id);
+          }}
+        />
+      )}
       {modal &&
-        !['wizard', 'launch', 'connect', 'source', 'deployment-set'].includes(
-          modal.type,
-        ) && (
+        ![
+          'wizard',
+          'launch',
+          'connect',
+          'source',
+          'deployment-set',
+          'pool-wizard',
+        ].includes(modal.type) && (
           <Dialog
             title={
-              modal.type === 'new-deployment'
-                ? 'New deployment'
-                : modal.type === 'edit'
-                  ? modal.memberOnly
-                    ? 'Edit model'
-                    : (modal.value.id
-                        ? 'Edit '
-                        : modal.pull
-                          ? 'Pull '
-                          : 'New ') +
-                      (
-                        {
-                          runtimes: 'engine',
-                          profiles: 'profile',
-                          deployments: 'deployment',
-                        } as Record<string, string>
-                      )[modal.kind]
-                  : modal.type === 'stop'
-                    ? 'Unload ' + modal.row.name + '?'
-                    : modal.type === 'enable'
-                      ? (modal.enabled ? 'Enable ' : 'Disable ') +
-                        modal.row.name +
-                        '?'
-                      : modal.type === 'delete'
-                        ? 'Remove ' + modal.value.name + '?'
-                        : modal.type === 'local-model'
-                          ? 'Add from File'
-                          : modal.type === 'policy'
-                            ? 'Host policy'
-                            : modal.type === 'purge'
-                              ? 'Purge telemetry'
-                              : modal.type === 'backup'
-                                ? 'Registry backup'
-                                : modal.type === 'restore'
-                                  ? 'Restore configuration?'
-                                  : ('title' in modal && modal.title) ||
-                                    'Details'
+              modal.type === 'edit'
+                ? modal.memberOnly
+                  ? 'Edit model'
+                  : (modal.value.id ? 'Edit ' : modal.pull ? 'Pull ' : 'New ') +
+                    (
+                      {
+                        runtimes: 'engine',
+                        deployments: 'deployment',
+                      } as Record<string, string>
+                    )[modal.kind]
+                : modal.type === 'stop'
+                  ? 'Unload ' + modal.row.name + '?'
+                  : modal.type === 'enable'
+                    ? (modal.enabled ? 'Enable ' : 'Disable ') +
+                      modal.row.name +
+                      '?'
+                    : modal.type === 'delete'
+                      ? 'Remove ' + modal.value.name + '?'
+                      : modal.type === 'local-model'
+                        ? 'Add from File'
+                        : modal.type === 'policy'
+                          ? 'Host policy'
+                          : modal.type === 'purge'
+                            ? 'Purge telemetry'
+                            : modal.type === 'backup'
+                              ? 'Registry backup'
+                              : modal.type === 'restore'
+                                ? 'Restore configuration?'
+                                : ('title' in modal && modal.title) || 'Details'
             }
             close={close}
             busy={busy}
             editor={modal.type === 'edit' || modal.type === 'policy'}
             wide={['inspect', 'model', 'edit'].includes(modal.type)}
           >
-            {modalError && (
+            {modalError && !(revisionConflict && modal?.type === 'edit') && (
               <Alert variant="destructive" className="mb-5" role="alert">
                 <AlertDescription className="flex flex-wrap items-center justify-between gap-3 whitespace-pre-line">
                   {modalError}
                 </AlertDescription>
               </Alert>
-            )}
-            {modal.type === 'new-deployment' && (
-              <div className="creation-options">
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() => open({ type: 'wizard' })}
-                >
-                  Single model
-                </Button>
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() => open({ type: 'deployment-set' })}
-                >
-                  Multiple models
-                </Button>
-              </div>
             )}
             {modal.type === 'edit' && (
               <Editor
@@ -1080,21 +1335,49 @@ export default function App() {
                 initial={modal}
                 data={data}
                 busy={busy}
+                applyActions={modal.kind === 'deployments'}
                 memberOnly={modal.memberOnly}
-                save={(editor) =>
+                revisionConflict={revisionConflict}
+                onReconciled={(fresh) =>
+                  setModal((current) =>
+                    current && current.type === 'edit'
+                      ? { ...current, expected: fresh.revision }
+                      : current,
+                  )
+                }
+                save={(editor, mode = 'apply') =>
                   void perform(
-                    () =>
-                      api(
+                    async () => {
+                      const result = await api(
                         modal.pull
                           ? '/api/runtimes/pull'
                           : '/api/' +
-                              editor.kind +
+                              (editor.kind === 'deployments'
+                                ? 'model-setups'
+                                : editor.kind) +
                               (modal.expected
                                 ? '?expected=' + modal.expected
                                 : ''),
                         editor.value,
-                      ),
+                      );
+                      if (editor.kind === 'deployments') {
+                        const row = contracts.deployment(result);
+                        if (row.changes_pending)
+                          await applyConfiguration(row.id, mode, confirmApply);
+                      }
+                      return result;
+                    },
                     modal.pull ? 'Image pull queued' : 'Saved',
+                    true,
+                    affectedSlices(modal.pull ? 'runtimes' : editor.kind),
+                    (detail) => {
+                      if (modal.pull) return false;
+                      if (detail.includes('Revision changed')) {
+                        setRevisionConflict(true);
+                        return true;
+                      }
+                      return false;
+                    },
                   )
                 }
                 remove={
@@ -1130,6 +1413,8 @@ export default function App() {
                             {},
                           ),
                         'Entry removed',
+                        true,
+                        affectedSlices(modal.kind),
                       )
                     }
                   >
@@ -1173,6 +1458,8 @@ export default function App() {
                             cancel_requests: true,
                           }),
                         'Cancelling requests and unloading',
+                        true,
+                        ['deployments', 'status'],
                       )
                     }
                   >
@@ -1187,6 +1474,8 @@ export default function App() {
                         () =>
                           api(`/api/${modal.kind}/${modal.row.id}/stop`, {}),
                         'Unload queued',
+                        true,
+                        ['deployments', 'status'],
                       )
                     }
                   >
@@ -1214,12 +1503,14 @@ export default function App() {
                       void perform(
                         () =>
                           api(
-                            `/api/${data.serving ? 'serving-deployments' : 'deployments'}/${modal.row.id}/enabled`,
+                            `/api/${'multi_model' in modal.row && modal.row.multi_model ? 'serving-deployments' : 'deployments'}/${modal.row.id}/enabled`,
                             { enabled: modal.enabled },
                           ),
                         modal.enabled
                           ? 'Deployment enabled'
                           : 'Deployment disabled',
+                        true,
+                        ['deployments', 'status'],
                       )
                     }
                   >
@@ -1234,7 +1525,9 @@ export default function App() {
                   e.preventDefault();
                   void perform(
                     () => api('/api/models/local', { path: modal.path }),
-                    'Model registration queued',
+                    '',
+                    true,
+                    ['models', 'jobs'],
                   );
                 }}
               >
@@ -1266,12 +1559,6 @@ export default function App() {
             {modal.type === 'inspect' && (
               <StructuredDetails value={modal.value} />
             )}
-            {modal.type === 'revisions' &&
-              (modal.value ? (
-                <StructuredDetails value={modal.value} />
-              ) : (
-                <p className="muted">Loading revisions…</p>
-              ))}
             {modal.type === 'model' && (
               <>
                 <dl className="properties">
@@ -1322,6 +1609,8 @@ export default function App() {
                   void perform(
                     () => api('/api/settings', value),
                     'Policy saved',
+                    true,
+                    ['status'],
                   )
                 }
                 purge={() => open({ type: 'purge', days: 7 })}
